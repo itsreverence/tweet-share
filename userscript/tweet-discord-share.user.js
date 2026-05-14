@@ -5,9 +5,11 @@
 // @description  Share X/Twitter posts to selected Discord channels through a local relay.
 // @match        https://x.com/*
 // @match        https://twitter.com/*
+// @run-at       document-start
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest
 // @connect      discord.com
+// @connect      cdn.syndication.twimg.com
 // ==/UserScript==
 
 (function () {
@@ -18,9 +20,13 @@
     // { id: "friends", label: "Friends server - tweets", webhookUrl: "https://discord.com/api/webhooks/..." },
     // { id: "personal", label: "Personal server - links", webhookUrl: "https://discord.com/api/webhooks/..." }
   ];
+  const DEBUG_MEDIA_EXTRACTION = false;
   const BUTTON_CLASS = "tds-share-button";
   const STATUS_CLASS = "tds-status";
   const DESTINATION_KEY = "tds-last-destination";
+  const VIDEO_VARIANT_CACHE = new Map();
+
+  installNetworkCapture();
 
   const style = document.createElement("style");
   style.textContent = `
@@ -51,14 +57,19 @@
       margin-left: 6px;
     }
   `;
-  document.documentElement.append(style);
+  appendWhenReady(style);
+
+  function appendWhenReady(node) {
+    if (document.documentElement) {
+      document.documentElement.append(node);
+      return;
+    }
+
+    document.addEventListener("DOMContentLoaded", () => document.documentElement.append(node), { once: true });
+  }
 
   const DISCORD_LIMITS = {
-    content: 2000,
-    title: 256,
-    description: 4096,
-    fieldValue: 1024,
-    embeds: 10
+    content: 2000
   };
 
   function request(method, url, body) {
@@ -105,63 +116,145 @@
     return [...new Set(values.filter(Boolean))];
   }
 
-  function buildTweetEmbed(tweet, label) {
+  function formatAuthor(tweet) {
     const author = tweet.author?.displayName || tweet.author?.username || "Unknown author";
     const username = tweet.author?.username ? `@${tweet.author.username}` : "";
-    const media = Array.isArray(tweet.media) ? tweet.media : [];
-    const firstImage = media.find((item) => item.type === "image" && item.url)?.url;
-    const videoUrls = media.filter((item) => item.type === "video" && item.url).map((item) => item.url);
-    const fields = [];
-
-    if (tweet.createdAt) {
-      fields.push({
-        name: "Posted",
-        value: truncate(tweet.createdAt, DISCORD_LIMITS.fieldValue),
-        inline: true
-      });
-    }
-
-    if (videoUrls.length > 0) {
-      fields.push({
-        name: "Video",
-        value: truncate(unique(videoUrls).join("\n"), DISCORD_LIMITS.fieldValue),
-        inline: false
-      });
-    }
-
-    const embed = {
-      title: truncate([author, username].filter(Boolean).join(" "), DISCORD_LIMITS.title),
-      url: tweet.url,
-      description: truncate(tweet.text || "(No text found)", DISCORD_LIMITS.description),
-      color: label === "Quote" ? 0x657786 : 0x1da1f2,
-      footer: { text: label },
-      fields
-    };
-
-    if (firstImage) embed.image = { url: firstImage };
-    if (tweet.author?.avatarUrl) embed.thumbnail = { url: tweet.author.avatarUrl };
-    return embed;
+    return [author, username].filter(Boolean).join(" ");
   }
 
-  function buildDiscordPayload(tweet) {
-    const embeds = [buildTweetEmbed(tweet, "Post")];
-    if (tweet.quote) embeds.push(buildTweetEmbed(tweet.quote, "Quote"));
+  function webhookUsername(tweet) {
+    return truncate(formatAuthor(tweet) || "Tweet Share", 80);
+  }
 
-    const mediaLinks = unique([
-      ...(tweet.media || []).filter((item) => item.url).map((item) => item.url),
-      ...((tweet.quote?.media || []).filter((item) => item.url).map((item) => item.url))
+  function webhookAvatarUrl(tweet) {
+    return tweet.author?.avatarUrl || undefined;
+  }
+
+  function imageMedia(tweet) {
+    return (tweet.media || []).filter((item) => item.type === "image" && item.url);
+  }
+
+  function videoMedia(tweet) {
+    return (tweet.media || []).filter((item) => item.type === "video" && (item.url || item.posterUrl));
+  }
+
+  function directPlayableVideoUrls(tweet) {
+    return unique(videoMedia(tweet).map((item) => normalizeTweetVideoUrl(item.url)).filter(isPlayableTweetVideoUrl));
+  }
+
+  function posterMediaId(url) {
+    return (url || "").match(/\/(?:amplify_video_thumb|ext_tw_video_thumb|tweet_video_thumb)\/(\d+)\//)?.[1] || "";
+  }
+
+  function cacheVideoVariants(mediaId, variants) {
+    if (!mediaId || !Array.isArray(variants)) return;
+    const mp4s = variants
+      .map((variant) => ({
+        url: normalizeTweetVideoUrl(variant.url || variant.src || ""),
+        bitrate: variant.bitrate || 0,
+        type: variant.content_type || variant.type || ""
+      }))
+      .filter((variant) => variant.type === "video/mp4" && isPlayableTweetVideoUrl(variant.url))
+      .sort((left, right) => (right.bitrate || videoQualityScore(right.url)) - (left.bitrate || videoQualityScore(left.url)));
+
+    if (mp4s.length > 0) {
+      VIDEO_VARIANT_CACHE.set(mediaId, mp4s);
+    }
+  }
+
+  function scanForVideoVariants(value) {
+    const seen = new WeakSet();
+
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (seen.has(node)) return;
+      seen.add(node);
+
+      const mediaId = node.id_str || node.media_key || node.id;
+      if (node.video_info?.variants) {
+        cacheVideoVariants(String(mediaId || ""), node.video_info.variants);
+      }
+      if (node.video?.variants && node.video?.poster) {
+        cacheVideoVariants(posterMediaId(node.video.poster) || String(mediaId || ""), node.video.variants);
+      }
+      if (node.media_url_https && node.video_info?.variants) {
+        cacheVideoVariants(posterMediaId(node.media_url_https) || String(mediaId || ""), node.video_info.variants);
+      }
+
+      if (Array.isArray(node)) {
+        node.forEach(visit);
+        return;
+      }
+
+      Object.values(node).forEach(visit);
+    }
+
+    visit(value);
+  }
+
+  function installNetworkCapture() {
+    const originalFetch = window.fetch;
+    if (typeof originalFetch === "function") {
+      window.fetch = async function (...args) {
+        const response = await originalFetch.apply(this, args);
+        const url = String(args[0]?.url || args[0] || "");
+        if (/\/graphql\/|\/i\/api\/graphql\/|TweetDetail|UserTweets|HomeTimeline|SearchTimeline/i.test(url)) {
+          response.clone().json().then(scanForVideoVariants).catch(() => {});
+        }
+        return response;
+      };
+    }
+
+    const originalOpen = XMLHttpRequest.prototype.open;
+    const originalSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+      this.__tdsUrl = String(url || "");
+      return originalOpen.call(this, method, url, ...rest);
+    };
+    XMLHttpRequest.prototype.send = function (...args) {
+      this.addEventListener("load", () => {
+        if (!/\/graphql\/|\/i\/api\/graphql\/|TweetDetail|UserTweets|HomeTimeline|SearchTimeline/i.test(this.__tdsUrl || "")) return;
+        try {
+          scanForVideoVariants(JSON.parse(this.responseText));
+        } catch {}
+      });
+      return originalSend.apply(this, args);
+    };
+  }
+
+  function mediaUrls(tweet) {
+    return unique([
+      ...directPlayableVideoUrls(tweet),
+      ...imageMedia(tweet).map((item) => item.url)
     ]);
+  }
 
-    const content = [tweet.url, mediaLinks.length > 1 ? mediaLinks.slice(1, 6).join("\n") : ""]
-      .filter(Boolean)
-      .join("\n");
+  function formatPlainTweet(tweet, label = "") {
+    const lines = [
+      label ? `**${label}**` : "",
+      tweet.text,
+      tweet.url,
+      ...mediaUrls(tweet)
+    ].filter(Boolean);
 
+    return lines.join("\n");
+  }
+
+  function buildDiscordPayload(tweet, label = "") {
     return {
-      username: "Tweet Share",
-      content: truncate(content, DISCORD_LIMITS.content),
-      embeds: embeds.slice(0, DISCORD_LIMITS.embeds),
+      username: webhookUsername(tweet),
+      avatar_url: webhookAvatarUrl(tweet),
+      content: truncate(formatPlainTweet(tweet, label), DISCORD_LIMITS.content),
       allowed_mentions: { parse: [] }
     };
+  }
+
+  function buildDiscordPayloads(tweet) {
+    const payloads = [buildDiscordPayload(tweet)];
+    if (tweet.quote) {
+      payloads.push(buildDiscordPayload(tweet.quote, "Quoted tweet"));
+    }
+    return payloads;
   }
 
   async function shareToDestination(destinationId, tweet) {
@@ -170,7 +263,9 @@
       throw new Error("That destination is missing a webhook URL.");
     }
 
-    return request("POST", destination.webhookUrl, buildDiscordPayload(tweet));
+    for (const payload of buildDiscordPayloads(tweet)) {
+      await request("POST", destination.webhookUrl, payload);
+    }
   }
 
   function text(node, selector) {
@@ -185,12 +280,192 @@
     }
   }
 
+  function isPlayableTweetVideoUrl(url) {
+    return /^https:\/\/video\.twimg\.com\/.+\.mp4(?:\?|$)/.test(url || "") && !/\/aud\//.test(url || "");
+  }
+
+  function normalizeTweetVideoUrl(url) {
+    if (!url) return "";
+    return url.replace(/\/vid\/([^/]+)\/0\/0\/(\d+x\d+)\//, "/vid/$1/$2/");
+  }
+
+  function isTweetVideoPosterUrl(url) {
+    return /^https:\/\/pbs\.twimg\.com\/.+\.(?:jpg|jpeg|png|webp)(?:\?|$)/.test(url || "");
+  }
+
+  function directVideoUrlsFromDocument() {
+    let entries = [];
+    try {
+      entries = performance.getEntriesByType("resource").map((entry) => entry.name);
+    } catch {
+      entries = [];
+    }
+
+    const sourceUrls = [...document.querySelectorAll("video source[src], video[src]")]
+      .map((node) => node.src || node.getAttribute("src") || "");
+
+    return unique([...entries, ...sourceUrls].map(normalizeTweetVideoUrl).filter(isPlayableTweetVideoUrl))
+      .sort(compareTweetVideoQuality);
+  }
+
+  function videoQualityScore(url) {
+    if (/\/amplify_video\/|\/ext_tw_video\//.test(url)) return 2_000_000_000;
+    if (/\/vid\//.test(url)) return 1_000_000_000;
+    if (/\/tweet_video\//.test(url)) return 500_000_000;
+
+    const resolution = url.match(/\/(\d+)x(\d+)\//);
+    if (resolution) {
+      return Number(resolution[1]) * Number(resolution[2]);
+    }
+
+    const bitrate = url.match(/[?&](?:bitrate|br)=(\d+)/i) || url.match(/_(\d+)\.mp4(?:\?|$)/i);
+    return bitrate ? Number(bitrate[1]) : 0;
+  }
+
+  function compareTweetVideoQuality(left, right) {
+    return videoQualityScore(right) - videoQualityScore(left);
+  }
+
+  function nearestPlayableVideoUrl(video) {
+    const candidates = [
+      video.currentSrc,
+      video.src,
+      ...[...video.querySelectorAll("source[src]")].map((source) => source.src || source.getAttribute("src") || "")
+    ].map(normalizeTweetVideoUrl).filter(isPlayableTweetVideoUrl).sort(compareTweetVideoQuality);
+    if (candidates.length > 0) return candidates[0];
+
+    const poster = video.poster || "";
+    const mediaId = posterMediaId(poster);
+    const cached = VIDEO_VARIANT_CACHE.get(mediaId);
+    if (cached?.length) return cached[0].url;
+
+    const loadedVideos = directVideoUrlsFromDocument();
+    const matchingMediaId = mediaId ? loadedVideos.filter((url) => url.includes(`/${mediaId}/`)) : [];
+    if (matchingMediaId.length > 0) return matchingMediaId[0];
+
+    const posterName = poster.split("/").pop()?.split("?")[0]?.replace(/\.(jpg|jpeg|png|webp)$/i, "") || "";
+    const matchingPoster = loadedVideos.find((url) => posterName && url.includes(posterName));
+    if (matchingPoster) return matchingPoster;
+
+    const primaryTweetVideo = loadedVideos.find((url) => /\/amplify_video\/|\/ext_tw_video\//.test(url));
+    return primaryTweetVideo || "";
+  }
+
   function normalizeTweetUrl(url) {
     const parsed = new URL(url, location.href);
     parsed.hostname = "x.com";
     parsed.search = "";
     parsed.hash = "";
     return parsed.toString();
+  }
+
+  function tweetIdFromUrl(url) {
+    return String(url || "").match(/\/status\/(\d+)/)?.[1] || "";
+  }
+
+  async function fetchSyndicationTweet(tweetId) {
+    if (!tweetId) return null;
+    try {
+      return await request("GET", `https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}&lang=en`);
+    } catch (error) {
+      console.debug("Tweet Discord Share syndication lookup failed", error);
+      return null;
+    }
+  }
+
+  function bestSyndicationVideoUrl(data) {
+    const candidates = [
+      ...(data?.video?.variants || []).map((variant) => ({
+        url: variant.src,
+        bitrate: variant.bitrate || 0,
+        type: variant.type
+      })),
+      ...(data?.mediaDetails || []).flatMap((media) => (media.video_info?.variants || []).map((variant) => ({
+        url: variant.url,
+        bitrate: variant.bitrate || 0,
+        type: variant.content_type
+      })))
+    ];
+
+    return candidates
+      .filter((variant) => variant.type === "video/mp4" && isPlayableTweetVideoUrl(variant.url))
+      .sort((left, right) => (right.bitrate || videoQualityScore(right.url)) - (left.bitrate || videoQualityScore(left.url)))[0]?.url || "";
+  }
+
+  function syndicationPosterUrl(data) {
+    return data?.video?.poster || data?.mediaDetails?.find((media) => media.media_url_https)?.media_url_https || "";
+  }
+
+  function tweetFromSyndication(data, fallback = {}) {
+    if (!data) return fallback;
+
+    const photos = (data.photos || []).map((photo) => ({
+      type: "image",
+      url: photo.url || photo.media_url_https || "",
+      alt: photo.alt_text || ""
+    }));
+    const mediaDetails = (data.mediaDetails || [])
+      .filter((media) => media.type === "photo" && media.media_url_https)
+      .map((media) => ({ type: "image", url: media.media_url_https, alt: media.ext_alt_text || "" }));
+    const videoUrl = normalizeTweetVideoUrl(bestSyndicationVideoUrl(data));
+    const posterUrl = syndicationPosterUrl(data);
+    const videos = videoUrl || posterUrl ? [{ type: "video", url: videoUrl, posterUrl, alt: "" }] : [];
+
+    return {
+      ...fallback,
+      url: fallback.url || (data.id_str ? `https://x.com/${data.user?.screen_name || "i"}/status/${data.id_str}` : ""),
+      author: {
+        displayName: data.user?.name || fallback.author?.displayName || "",
+        username: data.user?.screen_name || fallback.author?.username || "",
+        avatarUrl: data.user?.profile_image_url_https || fallback.author?.avatarUrl || ""
+      },
+      text: data.text || fallback.text || "",
+      createdAt: data.created_at || fallback.createdAt || "",
+      media: uniqueMedia([...photos, ...mediaDetails, ...videos, ...(fallback.media || [])]),
+      quote: fallback.quote
+    };
+  }
+
+  function uniqueMedia(items) {
+    return items.filter((item, index, all) => {
+      const key = item.url || item.posterUrl;
+      return key && all.findIndex((candidate) => (candidate.url || candidate.posterUrl) === key) === index;
+    });
+  }
+
+  async function enrichTweetMedia(tweet) {
+    const data = await fetchSyndicationTweet(tweetIdFromUrl(tweet.url));
+    tweet = tweetFromSyndication(data, tweet);
+    const videoUrl = normalizeTweetVideoUrl(bestSyndicationVideoUrl(data));
+    const posterUrl = syndicationPosterUrl(data);
+    const cachedVideoUrl = bestCachedVideoUrlForTweet(tweet);
+
+    if (cachedVideoUrl || videoUrl) {
+      const media = tweet.media || [];
+      const existingVideo = media.find((item) => item.type === "video");
+      if (existingVideo) {
+        existingVideo.url = cachedVideoUrl || videoUrl;
+        existingVideo.posterUrl = existingVideo.posterUrl || posterUrl;
+      } else {
+        media.push({ type: "video", url: cachedVideoUrl || videoUrl, posterUrl, alt: "" });
+      }
+      tweet.media = media;
+    }
+
+    if (tweet.quote) {
+      await enrichTweetMedia(tweet.quote);
+    }
+
+    return tweet;
+  }
+
+  function bestCachedVideoUrlForTweet(tweet) {
+    const mediaIds = videoMedia(tweet).map((item) => posterMediaId(item.posterUrl)).filter(Boolean);
+    for (const mediaId of mediaIds) {
+      const cached = VIDEO_VARIANT_CACHE.get(mediaId);
+      if (cached?.length) return cached[0].url;
+    }
+    return "";
   }
 
   function tweetUrlFromArticle(article) {
@@ -224,11 +499,14 @@
       .map((img) => ({ type: "image", url: img.src, alt: img.alt || "" }));
 
     const videos = [...article.querySelectorAll('video')]
-      .map((video) => ({ type: "video", url: video.currentSrc || video.src || video.poster || "", alt: "" }));
+      .map((video) => ({
+        type: "video",
+        url: nearestPlayableVideoUrl(video),
+        posterUrl: isTweetVideoPosterUrl(video.poster) ? video.poster : "",
+        alt: ""
+      }));
 
-    return [...images, ...videos].filter((item, index, all) => {
-      return item.url && all.findIndex((candidate) => candidate.url === item.url) === index;
-    });
+    return uniqueMedia([...images, ...videos]);
   }
 
   function extractTimestamp(article) {
@@ -317,7 +595,14 @@
         return;
       }
 
-      const tweet = extractTweet(article);
+      const tweet = await enrichTweetMedia(extractTweet(article));
+      if (DEBUG_MEDIA_EXTRACTION) {
+        console.group("Tweet Discord Share media debug");
+        console.log(tweet);
+        console.log("Detected direct video URLs", directVideoUrlsFromDocument());
+        console.log("Cached video variants", Object.fromEntries(VIDEO_VARIANT_CACHE));
+        console.groupEnd();
+      }
       await shareToDestination(destinationId, tweet);
       setStatus(actionBar, "Sent");
     } catch (error) {
