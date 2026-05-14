@@ -737,8 +737,9 @@
     };
   }
 
-  function extractText(article) {
+  function extractText(article, excludedNodes = []) {
     return [...article.querySelectorAll('[data-testid="tweetText"]')]
+      .filter((node) => !isInsideExcludedNode(node, excludedNodes))
       .map((node) => node.innerText.trim())
       .filter(Boolean)
       .join("\n\n");
@@ -842,7 +843,7 @@
     return {
       url: tweetUrlFromArticle(article),
       author: extractAuthor(article),
-      text: extractText(article),
+      text: extractText(article, excludedMediaNodes),
       media: extractMedia(article, excludedMediaNodes),
       createdAt: extractTimestamp(article),
       quote
