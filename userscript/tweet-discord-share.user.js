@@ -76,6 +76,7 @@
     content: 2000
   };
   const MESSAGE_CHUNK_LIMIT = 1900;
+  const WEBHOOK_SEND_DELAY_MS = 750;
 
   function request(method, url, body) {
     return new Promise((resolve, reject) => {
@@ -128,11 +129,15 @@
   }
 
   function webhookUsername(tweet) {
-    return truncate(formatAuthor(tweet) || "Tweet Share", 80);
+    return truncate(tweet.author?.displayName || tweet.author?.username || "Tweet Share", 80);
   }
 
   function webhookAvatarUrl(tweet) {
-    return tweet.author?.avatarUrl || undefined;
+    return highResolutionProfileImageUrl(tweet.author?.avatarUrl) || undefined;
+  }
+
+  function highResolutionProfileImageUrl(url) {
+    return (url || "").replace(/_normal(\.(?:jpg|jpeg|png|webp))(?:\?|$)/i, "$1");
   }
 
   function imageMedia(tweet) {
@@ -221,7 +226,7 @@
     const user = {
       displayName: legacy.name || "",
       username: legacy.screen_name || legacy.username || "",
-      avatarUrl: legacy.profile_image_url_https || legacy.profile_image_url || ""
+      avatarUrl: highResolutionProfileImageUrl(legacy.profile_image_url_https || legacy.profile_image_url || "")
     };
 
     if (id) USER_CACHE.set(id, user);
@@ -243,7 +248,7 @@
       author: {
         displayName: userLegacy.name || "",
         username,
-        avatarUrl: userLegacy.profile_image_url_https || userLegacy.profile_image_url || ""
+        avatarUrl: highResolutionProfileImageUrl(userLegacy.profile_image_url_https || userLegacy.profile_image_url || "")
       },
       text: legacy.full_text || legacy.text || node.text || "",
       media: mediaFromLegacyTweet(legacy),
@@ -378,7 +383,7 @@
   function buildDiscordPayloads(tweet) {
     const payloads = buildPayloadsForTweet(tweet, "Tweet");
     if (hasQuoteTweet(tweet)) {
-      payloads.push(...buildPayloadsForTweet(tweet.quote, "Quote tweet"));
+      payloads.push(...buildPayloadsForTweet(tweet.quote, "Quoted Tweet"));
     }
     return payloads;
   }
@@ -466,9 +471,18 @@
       throw new Error("That destination is missing a webhook URL.");
     }
 
-    for (const payload of buildDiscordPayloads(tweet)) {
+    const payloads = buildDiscordPayloads(tweet);
+    for (let index = 0; index < payloads.length; index += 1) {
+      const payload = payloads[index];
       await request("POST", destination.webhookUrl, payload);
+      if (index < payloads.length - 1) {
+        await delay(WEBHOOK_SEND_DELAY_MS);
+      }
     }
+  }
+
+  function delay(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
   }
 
   function text(node, selector) {
@@ -625,7 +639,7 @@
       author: {
         displayName: data.user?.name || fallback.author?.displayName || "",
         username: data.user?.screen_name || fallback.author?.username || "",
-        avatarUrl: data.user?.profile_image_url_https || fallback.author?.avatarUrl || ""
+        avatarUrl: highResolutionProfileImageUrl(data.user?.profile_image_url_https || fallback.author?.avatarUrl || "")
       },
       text: data.text || fallback.text || "",
       createdAt: data.created_at || fallback.createdAt || "",
@@ -733,7 +747,7 @@
     return {
       displayName,
       username,
-      avatarUrl: avatar?.src || ""
+      avatarUrl: highResolutionProfileImageUrl(avatar?.src || "")
     };
   }
 
