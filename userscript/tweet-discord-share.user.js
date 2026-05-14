@@ -20,11 +20,15 @@
     // { id: "friends", label: "Friends server - tweets", webhookUrl: "https://discord.com/api/webhooks/..." },
     // { id: "personal", label: "Personal server - links", webhookUrl: "https://discord.com/api/webhooks/..." }
   ];
+  const MEDIA_LINK_STYLE = "preview"; // "preview" keeps raw URLs playable; "masked" uses Markdown links.
   const DEBUG_MEDIA_EXTRACTION = false;
+  const DEBUG_QUOTE_EXTRACTION = false;
   const BUTTON_CLASS = "tds-share-button";
   const STATUS_CLASS = "tds-status";
   const DESTINATION_KEY = "tds-last-destination";
   const VIDEO_VARIANT_CACHE = new Map();
+  const TWEET_CACHE = new Map();
+  const USER_CACHE = new Map();
 
   installNetworkCapture();
 
@@ -71,6 +75,7 @@
   const DISCORD_LIMITS = {
     content: 2000
   };
+  const MESSAGE_CHUNK_LIMIT = 1900;
 
   function request(method, url, body) {
     return new Promise((resolve, reject) => {
@@ -131,7 +136,7 @@
   }
 
   function imageMedia(tweet) {
-    return (tweet.media || []).filter((item) => item.type === "image" && item.url);
+    return (tweet.media || []).filter((item) => item.type === "image" && item.url && !isTweetVideoThumbnailUrl(item.url));
   }
 
   function videoMedia(tweet) {
@@ -171,6 +176,12 @@
       seen.add(node);
 
       const mediaId = node.id_str || node.media_key || node.id;
+      if (looksLikeTweetResult(node)) {
+        cacheTweetResult(node);
+      }
+      if (looksLikeUserResult(node)) {
+        cacheUserResult(node);
+      }
       if (node.video_info?.variants) {
         cacheVideoVariants(String(mediaId || ""), node.video_info.variants);
       }
@@ -190,6 +201,83 @@
     }
 
     visit(value);
+  }
+
+  function looksLikeTweetResult(node) {
+    return Boolean(
+      (node.rest_id || node.id_str) &&
+      (node.legacy?.full_text || node.full_text || node.text) &&
+      (node.core?.user_results?.result || node.user || node.author)
+    );
+  }
+
+  function looksLikeUserResult(node) {
+    return Boolean((node.rest_id || node.id_str) && (node.legacy?.screen_name || node.screen_name || node.username));
+  }
+
+  function cacheUserResult(node) {
+    const legacy = node.legacy || node;
+    const id = String(node.rest_id || node.id_str || legacy.id_str || "");
+    const user = {
+      displayName: legacy.name || "",
+      username: legacy.screen_name || legacy.username || "",
+      avatarUrl: legacy.profile_image_url_https || legacy.profile_image_url || ""
+    };
+
+    if (id) USER_CACHE.set(id, user);
+    if (user.username) USER_CACHE.set(user.username, user);
+  }
+
+  function cacheTweetResult(node) {
+    const legacy = node.legacy || node;
+    const userResult = node.core?.user_results?.result;
+    const userId = legacy.user_id_str || legacy.user_id || node.user_id_str || "";
+    const cachedUser = userId ? USER_CACHE.get(String(userId)) : null;
+    const userLegacy = userResult?.legacy || node.user || node.author || cachedUser || {};
+    const username = userLegacy.screen_name || userLegacy.username || "";
+    const id = String(node.rest_id || node.id_str || legacy.id_str || "");
+    if (!id) return;
+
+    TWEET_CACHE.set(id, {
+      url: username ? `https://x.com/${username}/status/${id}` : `https://x.com/i/status/${id}`,
+      author: {
+        displayName: userLegacy.name || "",
+        username,
+        avatarUrl: userLegacy.profile_image_url_https || userLegacy.profile_image_url || ""
+      },
+      text: legacy.full_text || legacy.text || node.text || "",
+      media: mediaFromLegacyTweet(legacy),
+      createdAt: legacy.created_at || ""
+    });
+  }
+
+  function mediaFromLegacyTweet(legacy) {
+    const media = legacy.extended_entities?.media || legacy.entities?.media || [];
+    return uniqueMedia(media.flatMap((item) => {
+      if (item.type === "photo") {
+        return [{ type: "image", url: item.media_url_https || item.media_url || "", alt: item.ext_alt_text || "" }];
+      }
+
+      if (item.video_info?.variants) {
+        const bestVideo = item.video_info.variants
+          .map((variant) => ({
+            url: normalizeTweetVideoUrl(variant.url || ""),
+            bitrate: variant.bitrate || 0,
+            type: variant.content_type || ""
+          }))
+          .filter((variant) => variant.type === "video/mp4" && isPlayableTweetVideoUrl(variant.url))
+          .sort((left, right) => (right.bitrate || videoQualityScore(right.url)) - (left.bitrate || videoQualityScore(left.url)))[0];
+
+        return [{
+          type: "video",
+          url: bestVideo?.url || "",
+          posterUrl: item.media_url_https || item.media_url || "",
+          alt: item.ext_alt_text || ""
+        }];
+      }
+
+      return [];
+    }));
   }
 
   function installNetworkCapture() {
@@ -222,39 +310,154 @@
     };
   }
 
-  function mediaUrls(tweet) {
-    return unique([
-      ...directPlayableVideoUrls(tweet),
-      ...imageMedia(tweet).map((item) => item.url)
-    ]);
+  function mediaLinks(tweet) {
+    const videos = directPlayableVideoUrls(tweet).map((url, index) => ({
+      label: `Video ${index + 1}`,
+      url
+    }));
+    const images = imageMedia(tweet).map((item, index) => ({
+      label: `Image ${index + 1}`,
+      url: item.url
+    }));
+
+    return uniqueMediaLinks([...videos, ...images]);
   }
 
-  function formatPlainTweet(tweet, label = "") {
+  function uniqueMediaLinks(items) {
+    return items.filter((item, index, all) => item.url && all.findIndex((candidate) => candidate.url === item.url) === index);
+  }
+
+  function formatMediaLink(item) {
+    if (MEDIA_LINK_STYLE === "masked") {
+      return `[${item.label}](${item.url})`;
+    }
+
+    return `**${item.label}**\n${item.url}`;
+  }
+
+  function plainTweetParts(tweet, label = "Tweet") {
+    return {
+      heading: label ? `**${label}**` : "",
+      text: tweet.text || "",
+      media: mediaLinks(tweet).map(formatMediaLink)
+    };
+  }
+
+  function formatPlainTweet(tweet, label = "Tweet") {
+    const parts = plainTweetParts(tweet, label);
     const lines = [
-      label ? `**${label}**` : "",
-      tweet.text,
-      tweet.url,
-      ...mediaUrls(tweet)
+      parts.heading,
+      parts.text,
+      ...parts.media
     ].filter(Boolean);
 
     return lines.join("\n");
   }
 
-  function buildDiscordPayload(tweet, label = "") {
+  function hasQuoteTweet(tweet) {
+    if (!tweet?.quote) return false;
+    const quote = tweet.quote;
+    const distinctUrl = hasQuoteCandidate(tweet);
+    return Boolean(distinctUrl && (quote.text || mediaLinks(quote).length > 0));
+  }
+
+  function hasQuoteCandidate(tweet) {
+    if (!tweet?.quote?.url) return false;
+    return tweetIdFromUrl(tweet.quote.url) && tweetIdFromUrl(tweet.quote.url) !== tweetIdFromUrl(tweet.url);
+  }
+
+  function buildDiscordPayload(content, tweet) {
     return {
       username: webhookUsername(tweet),
       avatar_url: webhookAvatarUrl(tweet),
-      content: truncate(formatPlainTweet(tweet, label), DISCORD_LIMITS.content),
+      content: truncate(content, DISCORD_LIMITS.content),
       allowed_mentions: { parse: [] }
     };
   }
 
   function buildDiscordPayloads(tweet) {
-    const payloads = [buildDiscordPayload(tweet)];
-    if (tweet.quote) {
-      payloads.push(buildDiscordPayload(tweet.quote, "Quoted tweet"));
+    const payloads = buildPayloadsForTweet(tweet, "Tweet");
+    if (hasQuoteTweet(tweet)) {
+      payloads.push(...buildPayloadsForTweet(tweet.quote, "Quote tweet"));
     }
     return payloads;
+  }
+
+  function buildPayloadsForTweet(tweet, label) {
+    return splitTweetMessage(tweet, label).map((content) => buildDiscordPayload(content, tweet));
+  }
+
+  function splitTweetMessage(tweet, label) {
+    const parts = plainTweetParts(tweet, label);
+    const prefix = parts.heading ? `${parts.heading}\n` : "";
+    const mediaBlock = parts.media.join("\n");
+    const textLimit = Math.max(200, MESSAGE_CHUNK_LIMIT - prefix.length);
+    const textChunks = splitText(parts.text, textLimit);
+    const messages = [];
+
+    if (textChunks.length === 0) {
+      const content = [parts.heading, mediaBlock].filter(Boolean).join("\n");
+      return content ? [content] : [parts.heading || "(No text found)"];
+    }
+
+    textChunks.forEach((chunk, index) => {
+      const numberedHeading = textChunks.length > 1 ? `${parts.heading} (${index + 1}/${textChunks.length})` : parts.heading;
+      const lines = [numberedHeading, chunk].filter(Boolean);
+
+      if (index === textChunks.length - 1 && mediaBlock) {
+        lines.push(mediaBlock);
+      }
+
+      messages.push(lines.join("\n"));
+    });
+
+    if (mediaBlock && messages[messages.length - 1].length > MESSAGE_CHUNK_LIMIT) {
+      const lastText = messages.pop();
+      messages.push(lastText.replace(`\n${mediaBlock}`, ""));
+      messages.push(...splitMediaMessages(parts.media, parts.heading ? `${parts.heading} media` : "**Media**"));
+    }
+
+    return messages;
+  }
+
+  function splitMediaMessages(mediaLines, heading) {
+    const messages = [];
+    let current = heading;
+
+    for (const line of mediaLines) {
+      const next = [current, line].filter(Boolean).join("\n");
+      if (next.length > MESSAGE_CHUNK_LIMIT && current !== heading) {
+        messages.push(current);
+        current = [heading, line].filter(Boolean).join("\n");
+      } else {
+        current = next;
+      }
+    }
+
+    if (current) messages.push(current);
+    return messages;
+  }
+
+  function splitText(text, limit) {
+    const value = String(text || "").trim();
+    if (!value) return [];
+    const chunks = [];
+    let remaining = value;
+
+    while (remaining.length > limit) {
+      let splitAt = Math.max(
+        remaining.lastIndexOf("\n\n", limit),
+        remaining.lastIndexOf("\n", limit),
+        remaining.lastIndexOf(" ", limit)
+      );
+      if (splitAt < Math.floor(limit * 0.5)) splitAt = limit;
+
+      chunks.push(remaining.slice(0, splitAt).trim());
+      remaining = remaining.slice(splitAt).trim();
+    }
+
+    if (remaining) chunks.push(remaining);
+    return chunks;
   }
 
   async function shareToDestination(destinationId, tweet) {
@@ -291,6 +494,10 @@
 
   function isTweetVideoPosterUrl(url) {
     return /^https:\/\/pbs\.twimg\.com\/.+\.(?:jpg|jpeg|png|webp)(?:\?|$)/.test(url || "");
+  }
+
+  function isTweetVideoThumbnailUrl(url) {
+    return /^https:\/\/pbs\.twimg\.com\/(?:amplify_video_thumb|ext_tw_video_thumb|tweet_video_thumb)\//.test(url || "");
   }
 
   function directVideoUrlsFromDocument() {
@@ -356,6 +563,7 @@
     parsed.hostname = "x.com";
     parsed.search = "";
     parsed.hash = "";
+    parsed.pathname = parsed.pathname.replace(/(\/status\/\d+).*/, "$1");
     return parsed.toString();
   }
 
@@ -452,8 +660,12 @@
       tweet.media = media;
     }
 
-    if (tweet.quote) {
+    if (hasQuoteCandidate(tweet)) {
       await enrichTweetMedia(tweet.quote);
+    }
+
+    if (!hasQuoteTweet(tweet)) {
+      tweet.quote = null;
     }
 
     return tweet;
@@ -468,17 +680,55 @@
     return "";
   }
 
+  function bestCachedTweetForQuote(quote, mainTweetId = "") {
+    const quoteText = normalizeTextForMatch(quote.text);
+    const quoteUsername = quote.author?.username || "";
+    if (!quoteText && !quoteUsername) return null;
+
+    for (const [id, cachedTweet] of TWEET_CACHE) {
+      if (id === mainTweetId) continue;
+      const cachedText = normalizeTextForMatch(cachedTweet.text);
+      const textMatches = quoteText && (cachedText.includes(quoteText) || quoteText.includes(cachedText));
+      const authorMatches = quoteUsername && cachedTweet.author?.username === quoteUsername;
+
+      if ((textMatches && (!quoteUsername || authorMatches)) || (authorMatches && quoteText && cachedText)) {
+        return cachedTweet;
+      }
+    }
+
+    return null;
+  }
+
+  function normalizeTextForMatch(value) {
+    return String(value || "").replace(/\s+/g, " ").trim();
+  }
+
   function tweetUrlFromArticle(article) {
     const links = [...article.querySelectorAll('a[href*="/status/"]')];
     const statusLink = links.find((link) => /\/[^/]+\/status\/\d+/.test(link.getAttribute("href") || ""));
     return statusLink ? normalizeTweetUrl(statusLink.href) : normalizeTweetUrl(location.href);
   }
 
+  function statusLinksFromArticle(article) {
+    return [...article.querySelectorAll('a[href*="/status/"]')]
+      .map((link) => normalizeTweetUrl(link.href))
+      .filter((url, index, all) => /\/status\/\d+/.test(url) && all.indexOf(url) === index);
+  }
+
   function extractAuthor(article) {
     const userNameBlock = article.querySelector('[data-testid="User-Name"]');
     const avatar = article.querySelector('[data-testid^="UserAvatar-Container"] img, img[src*="profile_images"]');
-    const username = text(userNameBlock || article, 'a[href^="/"] span').match(/@[\w_]+/)?.[0]?.slice(1) || "";
-    const displayName = text(userNameBlock || article, 'a[href^="/"] div[dir="ltr"] span') || "";
+    const usernameText = [...(userNameBlock || article).querySelectorAll("span")]
+      .map((span) => span.textContent?.trim() || "")
+      .find((value) => /^@[\w_]+$/.test(value)) || "";
+    const profileLink = [...(userNameBlock || article).querySelectorAll('a[href^="/"]')]
+      .map((link) => link.getAttribute("href") || "")
+      .find((href) => /^\/[^/]+$/.test(href));
+    const username = usernameText.slice(1) || profileLink?.slice(1) || "";
+    const displayName = text(userNameBlock || article, 'a[href^="/"] div[dir="ltr"] span')
+      || [...(userNameBlock || article).querySelectorAll("span")]
+        .map((span) => span.textContent?.trim() || "")
+        .find((value) => value && value !== usernameText && !/^@/.test(value)) || "";
 
     return {
       displayName,
@@ -494,11 +744,18 @@
       .join("\n\n");
   }
 
-  function extractMedia(article) {
+  function isInsideExcludedNode(node, excludedNodes = []) {
+    return excludedNodes.some((excludedNode) => excludedNode && excludedNode !== node && excludedNode.contains(node));
+  }
+
+  function extractMedia(article, excludedNodes = []) {
     const images = [...article.querySelectorAll('[data-testid="tweetPhoto"] img')]
+      .filter((img) => !isInsideExcludedNode(img, excludedNodes))
+      .filter((img) => !isTweetVideoThumbnailUrl(img.src))
       .map((img) => ({ type: "image", url: img.src, alt: img.alt || "" }));
 
     const videos = [...article.querySelectorAll('video')]
+      .filter((video) => !isInsideExcludedNode(video, excludedNodes))
       .map((video) => ({
         type: "video",
         url: nearestPlayableVideoUrl(video),
@@ -514,33 +771,81 @@
   }
 
   function extractQuote(article) {
-    const quotedLink = [...article.querySelectorAll('a[href*="/status/"]')]
-      .map((link) => link.href)
-      .filter((href) => normalizeTweetUrl(href) !== tweetUrlFromArticle(article))
-      .at(-1);
+    const mainUrl = tweetUrlFromArticle(article);
+    const statusLinks = statusLinksFromArticle(article);
+    const quotedLink = statusLinks.find((href) => href !== mainUrl && tweetIdFromUrl(href) !== tweetIdFromUrl(mainUrl));
 
-    const quotedContainer = [...article.querySelectorAll('[role="link"]')]
-      .find((node) => node.querySelector('[data-testid="tweetText"]') && node.querySelector('a[href*="/status/"]'));
+    const quoteCandidates = [
+      ...article.querySelectorAll('[role="link"]'),
+      ...article.querySelectorAll('[data-testid="card.wrapper"]')
+    ];
+    const quotedContainer = quoteCandidates.find((node) => {
+      const links = statusLinksFromArticle(node);
+      const hasDistinctStatus = links.some((href) => href !== mainUrl && tweetIdFromUrl(href) !== tweetIdFromUrl(mainUrl));
+      return hasDistinctStatus || (node.querySelector('[data-testid="tweetText"]') && node !== article);
+    });
 
     if (!quotedContainer && !quotedLink) return null;
 
-    return {
+    const quote = {
       url: quotedLink ? normalizeTweetUrl(quotedLink) : "",
       author: extractAuthor(quotedContainer || article),
       text: quotedContainer ? extractText(quotedContainer) : "",
       media: quotedContainer ? extractMedia(quotedContainer) : [],
-      createdAt: extractTimestamp(quotedContainer || article)
+      createdAt: extractTimestamp(quotedContainer || article),
+      container: quotedContainer || null
+    };
+
+    const cachedQuote = quote.url ? TWEET_CACHE.get(tweetIdFromUrl(quote.url)) : bestCachedTweetForQuote(quote, tweetIdFromUrl(mainUrl));
+    if (cachedQuote) {
+      quote.url = cachedQuote.url || quote.url;
+      quote.author = mergeAuthor(cachedQuote.author, quote.author);
+      quote.text = cachedQuote.text || quote.text;
+      quote.media = cachedQuote.media?.length ? cachedQuote.media : quote.media;
+      quote.createdAt = cachedQuote.createdAt || quote.createdAt;
+    }
+
+    if (DEBUG_QUOTE_EXTRACTION) {
+      console.group("Tweet Discord Share quote debug");
+      console.log("mainUrl", mainUrl);
+      console.log("statusLinks", statusLinks);
+      console.log("quotedLink", quotedLink);
+        console.log("quotedContainer", quotedContainer);
+        console.log("cachedQuote", cachedQuote);
+        console.log("tweetCache", Object.fromEntries(TWEET_CACHE));
+        console.log("userCache", Object.fromEntries(USER_CACHE));
+        console.groupEnd();
+      }
+
+    if (!quote.url && !quote.text && quote.media.length === 0) return null;
+    if (quote.url && quote.url === mainUrl && !quote.text && quote.media.length === 0) return null;
+
+    return quote;
+  }
+
+  function mergeAuthor(primary = {}, fallback = {}) {
+    return {
+      displayName: primary.displayName || fallback.displayName || "",
+      username: primary.username || fallback.username || "",
+      avatarUrl: primary.avatarUrl || fallback.avatarUrl || ""
     };
   }
 
   function extractTweet(article) {
+    const quote = extractQuote(article);
+    const excludedMediaNodes = quote?.container ? [quote.container] : [];
+
+    if (quote) {
+      delete quote.container;
+    }
+
     return {
       url: tweetUrlFromArticle(article),
       author: extractAuthor(article),
       text: extractText(article),
-      media: extractMedia(article),
+      media: extractMedia(article, excludedMediaNodes),
       createdAt: extractTimestamp(article),
-      quote: extractQuote(article)
+      quote
     };
   }
 
