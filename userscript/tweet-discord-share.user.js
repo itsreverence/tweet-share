@@ -358,7 +358,7 @@
     if (!tweet?.quote) return false;
     const quote = tweet.quote;
     const distinctUrl = hasQuoteCandidate(tweet);
-    return Boolean(distinctUrl && (quote.text || mediaLinks(quote).length > 0));
+    return Boolean((distinctUrl || quote.text || mediaLinks(quote).length > 0) && (quote.text || mediaLinks(quote).length > 0));
   }
 
   function hasQuoteCandidate(tweet) {
