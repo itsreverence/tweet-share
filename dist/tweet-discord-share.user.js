@@ -1,13 +1,19 @@
 // ==UserScript==
 // @name         Tweet Discord Share
 // @namespace    https://github.com/tweet-discord-share
-// @version      0.2.0
+// @version      0.6.1
 // @description  Share X/Twitter posts to Discord channels via webhooks (no server required).
 // @match        https://x.com/*
 // @match        https://twitter.com/*
 // @run-at       document-start
-// @grant        GM_xmlhttpRequest
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_registerMenuCommand
 // @grant        GM.xmlHttpRequest
+// @grant        GM.getValue
+// @grant        GM.setValue
+// @grant        GM.registerMenuCommand
+// @grant        GM_xmlhttpRequest
 // @connect      discord.com
 // @connect      cdn.syndication.twimg.com
 // @license      MIT
@@ -28,9 +34,15 @@ const DIRECT_DESTINATIONS = [
 const MEDIA_LINK_STYLE = "preview"; // "preview" | "masked"
 const DEBUG_MEDIA_EXTRACTION = false;
 const DEBUG_QUOTE_EXTRACTION = false;
-const BUTTON_CLASS = "tds-share-button";
-const STATUS_CLASS = "tds-status";
+const SHARE_MENU_ITEM_CLASS = "tds-share-menu-item";
+const POPOVER_CLASS = "tds-popover";
+const TOAST_HOST_CLASS = "tds-toast-host";
+const TOAST_CLASS = "tds-toast";
+const SETTINGS_CLASS = "tds-settings";
 const DESTINATION_KEY = "tds-last-destination";
+const DESTINATIONS_STORAGE_KEY = "tds-destinations";
+const WEBHOOK_URL_PATTERN = /^https:\/\/discord\.com\/api\/webhooks\/\d+\/[\w-]+$/i;
+const TOAST_DURATION_MS = 4000;
 
 const DISCORD_LIMITS = { content: 2000 };
 const MESSAGE_CHUNK_LIMIT = 1900;
@@ -46,6 +58,124 @@ function trimCache(cache, maxEntries = CACHE_MAX_ENTRIES) {
     const oldestKey = cache.keys().next().value;
     cache.delete(oldestKey);
   }
+}
+
+// X.com exposes RGB tuples on :root (e.g. --color-text: 231 233 234).
+const TDS_FONT = 'TwitterChirp, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+const TDS_RGB_PATTERN = /^\d+\s+\d+\s+\d+$/;
+
+function readXRgb(variableName, fallback) {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(variableName).trim();
+  return TDS_RGB_PATTERN.test(value) ? value : fallback;
+}
+
+function subtleTextRgb(backgroundRgb) {
+  const secondary = getComputedStyle(document.documentElement).getPropertyValue("--color-text-secondary").trim();
+  if (TDS_RGB_PATTERN.test(secondary)) return secondary;
+
+  const [red, green, blue] = backgroundRgb.split(/\s+/).map(Number);
+  const luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255;
+  return luminance > 0.55 ? "83 100 113" : "113 118 123";
+}
+
+function applyXThemeVars(element) {
+  const surface = readXRgb("--color-background", "0 0 0");
+  const text = readXRgb("--color-text", "231 233 234");
+  const border = readXRgb("--color-border", "47 51 54");
+  const blue = readXRgb("--color-blue", "29 155 240");
+  const green = readXRgb("--color-green", "0 186 124");
+  const red = readXRgb("--color-red", "244 33 46");
+
+  element.style.setProperty("--tds-surface", surface);
+  element.style.setProperty("--tds-text", text);
+  element.style.setProperty("--tds-subtle", subtleTextRgb(surface));
+  element.style.setProperty("--tds-border", border);
+  element.style.setProperty("--tds-blue", blue);
+  element.style.setProperty("--tds-green", green);
+  element.style.setProperty("--tds-red", red);
+}
+
+function tdsSharedSurfaceCss() {
+  return `
+    .${POPOVER_CLASS},
+    .${TOAST_CLASS},
+    .${SETTINGS_CLASS}__dialog {
+      background: rgb(var(--tds-surface, 0 0 0));
+      border: 1px solid rgb(var(--tds-border, 47 51 54));
+      color: rgb(var(--tds-text, 231 233 234));
+      font-family: ${TDS_FONT};
+    }
+    .${POPOVER_CLASS} {
+      border-radius: var(--border-radius-large, 16px);
+      box-shadow: var(--box-shadow-elevated, rgb(101 119 134 / 20%) 0 0 15px);
+    }
+    .${POPOVER_CLASS}__title,
+    .${SETTINGS_CLASS}__hint,
+    .${SETTINGS_CLASS}__card-id,
+    .${SETTINGS_CLASS}__empty,
+    .${SETTINGS_CLASS}__field label {
+      color: rgb(var(--tds-subtle, 113 118 123));
+    }
+    .${POPOVER_CLASS}__item:hover,
+    .${POPOVER_CLASS}__item:focus-visible,
+    .${POPOVER_CLASS}__manage:hover,
+    .${POPOVER_CLASS}__manage:focus-visible,
+    .${SETTINGS_CLASS}__close:hover,
+    .${SETTINGS_CLASS}__btn--ghost:hover {
+      background: rgb(var(--tds-blue, 29 155 240) / 0.1);
+    }
+    .${POPOVER_CLASS}__item[data-last="true"]::after,
+    .${POPOVER_CLASS}__manage {
+      color: rgb(var(--tds-blue, 29 155 240));
+    }
+    .${POPOVER_CLASS}__footer,
+    .${SETTINGS_CLASS}__header,
+    .${SETTINGS_CLASS}__footer,
+    .${SETTINGS_CLASS}__card {
+      border-color: rgb(var(--tds-border, 47 51 54));
+    }
+    .${TOAST_CLASS} {
+      border-radius: var(--border-radius-large, 16px);
+      box-shadow: var(--box-shadow-elevated, rgb(101 119 134 / 20%) 0 0 15px);
+    }
+    .${TOAST_CLASS}[data-state="success"] {
+      border-left: 3px solid rgb(var(--tds-green, 0 186 124));
+    }
+    .${TOAST_CLASS}[data-state="error"] {
+      border-left: 3px solid rgb(var(--tds-red, 244 33 46));
+    }
+    .${TOAST_CLASS}[data-state="info"] {
+      border-left: 3px solid rgb(var(--tds-blue, 29 155 240));
+    }
+    .${SETTINGS_CLASS}__dialog {
+      box-shadow: var(--box-shadow-elevated, rgb(101 119 134 / 20%) 0 0 15px);
+    }
+    .${SETTINGS_CLASS}__field input {
+      background: rgb(var(--tds-surface, 0 0 0));
+      border: 1px solid rgb(var(--tds-border, 47 51 54));
+      color: rgb(var(--tds-text, 231 233 234));
+    }
+    .${SETTINGS_CLASS}__field input::placeholder {
+      color: rgb(var(--tds-subtle, 113 118 123));
+    }
+    .${SETTINGS_CLASS}__field input:focus {
+      border-color: rgb(var(--tds-blue, 29 155 240));
+      outline: none;
+    }
+    .${SETTINGS_CLASS}__remove {
+      color: rgb(var(--tds-red, 244 33 46));
+    }
+    .${SETTINGS_CLASS}__remove:hover {
+      background: rgb(var(--tds-red, 244 33 46) / 0.1);
+    }
+    .${SETTINGS_CLASS}__btn--primary {
+      background: rgb(var(--tds-blue, 29 155 240));
+      color: #fff;
+    }
+    .${SETTINGS_CLASS}__btn--primary:hover {
+      background: rgb(var(--tds-blue, 29 155 240) / 0.85);
+    }
+  `;
 }
 
   // --- 01-http.js ---
@@ -82,10 +212,6 @@ function request(method, url, body) {
 
 function delay(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
-async function getDestinations() {
-  return DIRECT_DESTINATIONS.map(({ id, label }) => ({ id, label }));
 }
 
   // --- 02-utils.js ---
@@ -835,7 +961,7 @@ function extractTweet(article) {
 
   // --- 08-deliver.js ---
 async function shareToDestination(destinationId, tweet) {
-  const destination = DIRECT_DESTINATIONS.find((item) => item.id === destinationId);
+  const destination = await getDestinationById(destinationId);
   if (!destination?.webhookUrl) {
     throw new Error("That destination is missing a webhook URL.");
   }
@@ -851,6 +977,16 @@ async function shareToDestination(destinationId, tweet) {
 }
 
   // --- 09-ui.js ---
+// Simple person outline (head + shoulders), readable at menu size.
+const PERSON_ICON_PATHS = [
+  "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2",
+  "M12 11a4 4 0 0 1 0-8 4 4 0 0 1 0 8z",
+];
+
+let activePopover = null;
+let activePopoverCleanup = null;
+let pendingShareArticle = null;
+
 function appendWhenReady(node) {
   if (document.documentElement) {
     document.documentElement.append(node);
@@ -863,94 +999,242 @@ function appendWhenReady(node) {
 function injectStyles() {
   const style = document.createElement("style");
   style.textContent = `
-    .${BUTTON_CLASS} {
+    ${tdsSharedSurfaceCss()}
+
+    .${SHARE_MENU_ITEM_CLASS} {
+      cursor: pointer;
+    }
+
+    .${POPOVER_CLASS} {
+      position: fixed;
+      z-index: 10000;
+      min-width: 220px;
+      max-width: min(320px, calc(100vw - 16px));
+      padding: 4px;
+      font-size: 15px;
+    }
+    .${POPOVER_CLASS}__title {
+      font-size: 13px;
+      font-weight: 700;
+      padding: 8px 12px 4px;
+    }
+    .${POPOVER_CLASS}__item {
       align-items: center;
       background: transparent;
       border: 0;
-      border-radius: 999px;
-      color: rgb(83, 100, 113);
+      border-radius: 8px;
+      color: inherit;
       cursor: pointer;
-      display: inline-flex;
+      display: flex;
       font: inherit;
-      gap: 6px;
-      min-height: 34px;
-      padding: 0 10px;
+      gap: 8px;
+      padding: 10px 12px;
+      text-align: left;
+      width: 100%;
     }
-    .${BUTTON_CLASS}:hover {
-      background: rgba(29, 155, 240, 0.1);
-      color: rgb(29, 155, 240);
+    .${POPOVER_CLASS}__item:hover,
+    .${POPOVER_CLASS}__item:focus-visible,
+    .${POPOVER_CLASS}__manage:hover,
+    .${POPOVER_CLASS}__manage:focus-visible {
+      outline: none;
     }
-    .${BUTTON_CLASS}[disabled] {
-      cursor: wait;
-      opacity: 0.7;
+    .${POPOVER_CLASS}__item[data-last="true"]::after {
+      content: "Last used";
+      font-size: 11px;
+      margin-left: auto;
     }
-    .${STATUS_CLASS} {
-      color: rgb(83, 100, 113);
-      font-size: 13px;
-      margin-left: 6px;
+    .${POPOVER_CLASS}__footer {
+      border-top-width: 1px;
+      border-top-style: solid;
+      margin-top: 4px;
+      padding-top: 4px;
     }
-    .${STATUS_CLASS}[data-state="success"] {
-      color: rgb(0, 186, 124);
+    .${POPOVER_CLASS}__manage {
+      background: transparent;
+      border: 0;
+      border-radius: 999px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 15px;
+      font-weight: 400;
+      padding: 12px;
+      text-align: left;
+      width: 100%;
     }
-    .${STATUS_CLASS}[data-state="error"] {
-      color: rgb(244, 33, 46);
+
+    .${TOAST_HOST_CLASS} {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      z-index: 10001;
+      display: flex;
+      flex-direction: column-reverse;
+      gap: 8px;
+      pointer-events: none;
+      max-width: min(360px, calc(100vw - 32px));
+    }
+    .${TOAST_CLASS} {
+      border-radius: var(--border-radius-large, 16px);
+      border-left-width: 3px;
+      border-left-style: solid;
+      font-size: 15px;
+      line-height: 1.35;
+      padding: 12px 14px;
+      pointer-events: auto;
+      animation: tds-toast-in 0.2s ease;
+    }
+    @keyframes tds-toast-in {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
     }
   `;
   appendWhenReady(style);
 }
 
-function setStatus(container, message, state = "info") {
-  let status = container.querySelector(`.${STATUS_CLASS}`);
-  if (!status) {
-    status = document.createElement("span");
-    status.className = STATUS_CLASS;
-    container.append(status);
+function getToastHost() {
+  let host = document.querySelector(`.${TOAST_HOST_CLASS}`);
+  if (!host) {
+    host = document.createElement("div");
+    host.className = TOAST_HOST_CLASS;
+    appendWhenReady(host);
   }
-  status.dataset.state = state;
-  status.textContent = message;
-  window.setTimeout(() => status.remove(), 3500);
+  return host;
 }
 
-async function chooseDestination() {
-  const destinations = await getDestinations();
-  if (destinations.length === 0) {
-    throw new Error("No destinations configured. Add webhooks in userscript/src/00-config.js and rebuild.");
+function showToast(message, state = "info") {
+  const host = getToastHost();
+  const toastEl = document.createElement("div");
+  toastEl.className = TOAST_CLASS;
+  applyXThemeVars(toastEl);
+  toastEl.dataset.state = state;
+  toastEl.setAttribute("role", state === "error" ? "alert" : "status");
+  toastEl.textContent = message;
+  host.append(toastEl);
+
+  window.setTimeout(() => {
+    toastEl.style.opacity = "0";
+    toastEl.style.transform = "translateY(4px)";
+    toastEl.style.transition = "opacity 0.2s ease, transform 0.2s ease";
+    window.setTimeout(() => toastEl.remove(), 220);
+  }, TOAST_DURATION_MS);
+}
+
+function closeXOverlay() {
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
+}
+
+function closeDestinationMenu() {
+  if (activePopoverCleanup) {
+    activePopoverCleanup();
+    activePopoverCleanup = null;
+  }
+  if (activePopover) {
+    activePopover.remove();
+    activePopover = null;
+  }
+}
+
+function positionPopover(menu, anchor) {
+  const rect = anchor.getBoundingClientRect();
+  const margin = 8;
+  menu.style.visibility = "hidden";
+  menu.style.left = "0";
+  menu.style.top = "0";
+  document.body.append(menu);
+
+  const menuRect = menu.getBoundingClientRect();
+  let top = rect.top - menuRect.height - margin;
+  if (top < margin) {
+    top = rect.bottom + margin;
   }
 
-  if (destinations.length === 1) {
-    return destinations[0].id;
-  }
+  let left = rect.left + rect.width / 2 - menuRect.width / 2;
+  left = Math.max(margin, Math.min(left, window.innerWidth - menuRect.width - margin));
+
+  menu.style.top = `${Math.round(top)}px`;
+  menu.style.left = `${Math.round(left)}px`;
+  menu.style.visibility = "visible";
+}
+
+function openDestinationMenu(anchor, article, destinations) {
+  closeDestinationMenu();
 
   const last = localStorage.getItem(DESTINATION_KEY);
-  const options = destinations
-    .map((destination, index) => `${index + 1}. ${destination.label}${destination.id === last ? " (last)" : ""}`)
-    .join("\n");
-  const answer = window.prompt(`Send this post to which Discord destination?\n\n${options}`, last || "1");
-  if (!answer) return "";
+  const menu = document.createElement("div");
+  menu.className = POPOVER_CLASS;
+  applyXThemeVars(menu);
+  menu.setAttribute("role", "menu");
+  menu.setAttribute("aria-label", "Choose Discord destination");
 
-  const byNumber = destinations[Number(answer) - 1];
-  const byId = destinations.find((destination) => destination.id === answer);
-  const destination = byNumber || byId;
-  if (!destination) {
-    throw new Error("That destination was not found.");
-  }
+  const titleEl = document.createElement("div");
+  titleEl.className = `${POPOVER_CLASS}__title`;
+  titleEl.textContent = "Share to Discord";
+  menu.append(titleEl);
 
-  localStorage.setItem(DESTINATION_KEY, destination.id);
-  return destination.id;
+  destinations.forEach((destination) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = `${POPOVER_CLASS}__item`;
+    item.setAttribute("role", "menuitem");
+    item.textContent = destination.label;
+    if (destination.id === last) {
+      item.dataset.last = "true";
+    }
+    item.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      closeDestinationMenu();
+      localStorage.setItem(DESTINATION_KEY, destination.id);
+      runShare(article, destination.id);
+    });
+    menu.append(item);
+  });
+
+  const footer = document.createElement("div");
+  footer.className = `${POPOVER_CLASS}__footer`;
+  const manageBtn = document.createElement("button");
+  manageBtn.type = "button";
+  manageBtn.className = `${POPOVER_CLASS}__manage`;
+  manageBtn.textContent = "Manage channels…";
+  manageBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    closeDestinationMenu();
+    openSettingsModal();
+  });
+  footer.append(manageBtn);
+  menu.append(footer);
+
+  positionPopover(menu, anchor);
+  activePopover = menu;
+
+  const onKeyDown = (event) => {
+    if (event.key === "Escape") {
+      closeDestinationMenu();
+    }
+  };
+
+  const onPointerDown = (event) => {
+    if (!menu.contains(event.target) && event.target !== anchor && !anchor.contains?.(event.target)) {
+      closeDestinationMenu();
+    }
+  };
+
+  window.setTimeout(() => {
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown, true);
+  }, 0);
+
+  activePopoverCleanup = () => {
+    document.removeEventListener("keydown", onKeyDown);
+    document.removeEventListener("pointerdown", onPointerDown, true);
+  };
 }
 
-async function shareTweet(article, button) {
-  const actionBar = button.parentElement;
-  button.disabled = true;
-  setStatus(actionBar, "Preparing...");
+async function runShare(article, destinationId) {
+  showToast("Preparing…", "info");
 
   try {
-    const destinationId = await chooseDestination();
-    if (!destinationId) {
-      setStatus(actionBar, "Canceled");
-      return;
-    }
-
     const tweet = await enrichTweetMedia(extractTweet(article));
     if (DEBUG_MEDIA_EXTRACTION) {
       console.group("Tweet Discord Share media debug");
@@ -960,50 +1244,702 @@ async function shareTweet(article, button) {
       console.groupEnd();
     }
     await shareToDestination(destinationId, tweet);
-    setStatus(actionBar, "Sent", "success");
+    showToast(`Sent to ${await destinationLabel(destinationId)}`, "success");
   } catch (error) {
     console.error(error);
-    setStatus(actionBar, error.message, "error");
-  } finally {
-    button.disabled = false;
+    showToast(error.message, "error");
   }
 }
 
-function makeButton(article) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = BUTTON_CLASS;
-  button.title = "Share to Discord";
-  button.setAttribute("aria-label", "Share to Discord");
-  button.innerHTML = `<span aria-hidden="true">Discord</span>`;
-  button.addEventListener("click", (event) => {
+async function startDiscordShare(article, anchor) {
+  const destinations = await getDestinations();
+  if (destinations.length === 0) {
+    closeXOverlay();
+    openSettingsModal();
+    return;
+  }
+
+  if (destinations.length === 1) {
+    closeXOverlay();
+    await runShare(article, destinations[0].id);
+    return;
+  }
+
+  closeXOverlay();
+  window.setTimeout(() => openDestinationMenu(anchor, article, destinations), 50);
+}
+
+function findShareButton(root) {
+  return root.querySelector('[data-testid="share"]')
+    || [...root.querySelectorAll("button")].find((button) => /share/i.test(button.getAttribute("aria-label") || ""));
+}
+
+function captureShareArticle(event) {
+  const shareButton = event.target.closest('[data-testid="share"], button[aria-label*="Share" i]');
+  if (!shareButton) return;
+  pendingShareArticle = shareButton.closest("article");
+}
+
+function isXShareMenu(node) {
+  if (!node || node.getAttribute("role") !== "menu") return false;
+  const text = [...node.querySelectorAll('[role="menuitem"]')]
+    .map((item) => item.textContent || "")
+    .join(" ")
+    .toLowerCase();
+  return text.includes("copy link")
+    || text.includes("share post")
+    || text.includes("embed post")
+    || text.includes("send via");
+}
+
+function getMenuItemLabelSpans(menuItem) {
+  return [...menuItem.querySelectorAll("span")].filter((node) => {
+    return !node.closest("svg") && node.textContent.trim().length > 0;
+  });
+}
+
+function findMenuItemLabelElement(item, referenceItem) {
+  const itemSpans = getMenuItemLabelSpans(item);
+  if (!referenceItem) {
+    return itemSpans.find((node) => node.children.length === 0) || itemSpans[0] || null;
+  }
+
+  const refSpans = getMenuItemLabelSpans(referenceItem);
+  const refLabel = refSpans.find((node) => node.children.length === 0) || refSpans[refSpans.length - 1];
+  if (!refLabel) {
+    return itemSpans[0] || null;
+  }
+
+  const refIndex = refSpans.indexOf(refLabel);
+  if (refIndex >= 0 && itemSpans[refIndex]) {
+    return itemSpans[refIndex];
+  }
+
+  return itemSpans.find((node) => node.children.length === 0) || itemSpans[0] || null;
+}
+
+function applyPersonIconToSvg(svg, referenceSvg) {
+  const refPath = referenceSvg?.querySelector("path");
+  if (!svg) return false;
+
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.replaceChildren();
+
+  for (const d of PERSON_ICON_PATHS) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", d);
+    if (refPath) {
+      for (const attr of ["fill", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin"]) {
+        const val = refPath.getAttribute(attr);
+        if (val != null) path.setAttribute(attr, val);
+      }
+    } else {
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", "currentColor");
+      path.setAttribute("stroke-width", "2");
+      path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("stroke-linejoin", "round");
+    }
+    svg.append(path);
+  }
+
+  if (referenceSvg) {
+    for (const attr of ["fill", "stroke", "stroke-width"]) {
+      const val = referenceSvg.getAttribute(attr);
+      if (val != null) svg.setAttribute(attr, val);
+    }
+  }
+
+  return true;
+}
+
+function replaceMenuItemIcon(item, referenceItem) {
+  return applyPersonIconToSvg(item.querySelector("svg"), referenceItem?.querySelector("svg"));
+}
+
+function replaceMenuItemText(item, text, referenceItem) {
+  const label = findMenuItemLabelElement(item, referenceItem);
+  if (label) {
+    label.textContent = text;
+    return true;
+  }
+
+  const walker = document.createTreeWalker(item, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (node.textContent.trim().length > 1 && !node.parentElement?.closest("svg")) {
+      node.textContent = text;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function findShareMenuTemplate(menu) {
+  const items = [...menu.querySelectorAll('[role="menuitem"]')].filter((item) => {
+    return !item.classList.contains(SHARE_MENU_ITEM_CLASS);
+  });
+
+  return items.find((item) => /share post/i.test(item.textContent || ""))
+    || items.find((item) => /copy link/i.test(item.textContent || ""))
+    || items[0]
+    || null;
+}
+
+function wireDiscordMenuItem(item) {
+  item.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    shareTweet(article, button);
+    const article = pendingShareArticle;
+    if (!article) {
+      showToast("Could not find the post. Try opening Share again.", "error");
+      return;
+    }
+    startDiscordShare(article, item);
   });
-  return button;
+
+  item.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      item.click();
+    }
+  });
 }
 
-function enhanceArticle(article) {
-  if (article.querySelector(`.${BUTTON_CLASS}`)) return;
+function createDiscordMenuItem(template) {
+  const item = template ? template.cloneNode(true) : document.createElement("div");
+  item.setAttribute("role", "menuitem");
+  item.tabIndex = 0;
+  item.classList.add(SHARE_MENU_ITEM_CLASS);
 
-  const actionBar = article.querySelector('[role="group"]');
-  if (!actionBar) return;
+  replaceMenuItemText(item, "Share to Discord", template);
+  replaceMenuItemIcon(item, template);
 
-  actionBar.append(makeButton(article));
+  wireDiscordMenuItem(item);
+  return item;
 }
 
-function enhanceTimeline() {
-  document.querySelectorAll("article").forEach(enhanceArticle);
+function injectDiscordShareMenuItem(menu) {
+  if (menu.querySelector(`.${SHARE_MENU_ITEM_CLASS}`)) return;
+
+  const template = findShareMenuTemplate(menu);
+  const item = createDiscordMenuItem(template);
+  const firstItem = menu.querySelector(`[role="menuitem"]:not(.${SHARE_MENU_ITEM_CLASS})`);
+
+  if (firstItem?.parentElement) {
+    firstItem.parentElement.insertBefore(item, firstItem);
+    return;
+  }
+
+  menu.append(item);
+}
+
+function scanShareMenus() {
+  document.querySelectorAll('[role="menu"]').forEach((menu) => {
+    if (isXShareMenu(menu)) {
+      injectDiscordShareMenuItem(menu);
+    }
+  });
+}
+
+function removeLegacyDiscordButtons() {
+  document.querySelectorAll(".tds-action-slot, .tds-share-button").forEach((node) => node.remove());
+}
+
+function installShareMenuIntegration() {
+  document.addEventListener("click", captureShareArticle, true);
+
+  const observer = new MutationObserver(() => scanShareMenus());
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+  scanShareMenus();
 }
 
 function startUi() {
   injectStyles();
   installNetworkCapture();
-  enhanceTimeline();
-  const observer = new MutationObserver(enhanceTimeline);
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  removeLegacyDiscordButtons();
+  installShareMenuIntegration();
 }
 
 startUi();
+
+  // --- 10-destinations.js ---
+function storageGet(key, defaultValue) {
+  return new Promise((resolve) => {
+    if (typeof GM !== "undefined" && typeof GM.getValue === "function") {
+      GM.getValue(key, defaultValue).then(resolve).catch(() => resolve(defaultValue));
+      return;
+    }
+    if (typeof GM_getValue === "function") {
+      try {
+        const value = GM_getValue(key, defaultValue);
+        if (value && typeof value.then === "function") {
+          value.then(resolve).catch(() => resolve(defaultValue));
+          return;
+        }
+        resolve(value ?? defaultValue);
+      } catch {
+        resolve(defaultValue);
+      }
+      return;
+    }
+    resolve(defaultValue);
+  });
+}
+
+function storageSet(key, value) {
+  return new Promise((resolve, reject) => {
+    if (typeof GM !== "undefined" && typeof GM.setValue === "function") {
+      GM.setValue(key, value).then(resolve).catch(reject);
+      return;
+    }
+    if (typeof GM_setValue === "function") {
+      try {
+        const result = GM_setValue(key, value);
+        if (result && typeof result.then === "function") {
+          result.then(resolve).catch(reject);
+          return;
+        }
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
+      return;
+    }
+    reject(new Error("Extension storage is unavailable."));
+  });
+}
+
+function slugifyId(value) {
+  const slug = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || `channel-${Date.now().toString(36)}`;
+}
+
+function sanitizeDestination(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  const id = String(entry.id || "").trim();
+  const label = String(entry.label || "").trim();
+  const webhookUrl = String(entry.webhookUrl || "").trim();
+  if (!id || !label || !webhookUrl) return null;
+  if (!WEBHOOK_URL_PATTERN.test(webhookUrl)) return null;
+  return { id, label, webhookUrl };
+}
+
+function sanitizeDestinations(entries) {
+  if (!Array.isArray(entries)) return [];
+  return entries.map(sanitizeDestination).filter(Boolean);
+}
+
+async function readStoredDestinations() {
+  const stored = await storageGet(DESTINATIONS_STORAGE_KEY, null);
+  return sanitizeDestinations(stored);
+}
+
+async function loadAllDestinations() {
+  const stored = await readStoredDestinations();
+  if (stored.length > 0) return stored;
+  return sanitizeDestinations(DIRECT_DESTINATIONS);
+}
+
+async function saveAllDestinations(destinations) {
+  const sanitized = sanitizeDestinations(destinations);
+  await storageSet(DESTINATIONS_STORAGE_KEY, sanitized);
+  return sanitized;
+}
+
+async function getDestinations() {
+  const destinations = await loadAllDestinations();
+  return destinations.map(({ id, label }) => ({ id, label }));
+}
+
+async function getDestinationById(destinationId) {
+  const destinations = await loadAllDestinations();
+  return destinations.find((item) => item.id === destinationId) || null;
+}
+
+async function destinationLabel(destinationId) {
+  const destination = await getDestinationById(destinationId);
+  return destination?.label || "Discord";
+}
+
+function isValidWebhookUrl(url) {
+  return WEBHOOK_URL_PATTERN.test(String(url || "").trim());
+}
+
+function createDestinationId(label, existingIds) {
+  const base = slugifyId(label);
+  if (!existingIds.has(base)) return base;
+  let index = 2;
+  while (existingIds.has(`${base}-${index}`)) index += 1;
+  return `${base}-${index}`;
+}
+
+  // --- 11-settings.js ---
+function injectSettingsStyles() {
+  if (document.getElementById("tds-settings-style")) return;
+
+  const style = document.createElement("style");
+  style.id = "tds-settings-style";
+  style.textContent = `
+    ${tdsSharedSurfaceCss()}
+
+    .${SETTINGS_CLASS}__backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 10002;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      /* Do not use X gray-* tokens for overlay — e.g. --color-gray-1100 is pink on X */
+      background-color: rgba(0, 0, 0, 0.65);
+    }
+    .${SETTINGS_CLASS}__dialog {
+      border-radius: var(--border-radius-x-large, 20px);
+      max-height: min(90vh, 720px);
+      max-width: 520px;
+      overflow: hidden;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+    .${SETTINGS_CLASS}__header {
+      align-items: center;
+      border-bottom-width: 1px;
+      border-bottom-style: solid;
+      display: flex;
+      gap: 12px;
+      justify-content: space-between;
+      padding: 16px 18px;
+    }
+    .${SETTINGS_CLASS}__header h2 {
+      font-size: 20px;
+      font-weight: 700;
+      margin: 0;
+    }
+    .${SETTINGS_CLASS}__close {
+      background: transparent;
+      border: 0;
+      border-radius: 999px;
+      color: inherit;
+      cursor: pointer;
+      font-size: 22px;
+      height: 36px;
+      line-height: 1;
+      width: 36px;
+    }
+    .${SETTINGS_CLASS}__body {
+      overflow: auto;
+      padding: 16px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .${SETTINGS_CLASS}__hint {
+      font-size: 15px;
+      line-height: 1.45;
+      margin: 0;
+    }
+    .${SETTINGS_CLASS}__list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .${SETTINGS_CLASS}__card {
+      border-width: 1px;
+      border-style: solid;
+      border-radius: var(--border-radius-large, 16px);
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .${SETTINGS_CLASS}__card-head {
+      align-items: flex-start;
+      display: flex;
+      gap: 8px;
+      justify-content: space-between;
+    }
+    .${SETTINGS_CLASS}__card-title {
+      font-size: 15px;
+      font-weight: 700;
+    }
+    .${SETTINGS_CLASS}__card-id {
+      font-size: 13px;
+    }
+    .${SETTINGS_CLASS}__field input {
+      border-radius: var(--border-radius-medium, 8px);
+      box-sizing: border-box;
+      font: inherit;
+      font-size: 15px;
+      padding: 12px;
+      width: 100%;
+    }
+    .${SETTINGS_CLASS}__remove {
+      background: transparent;
+      border: 0;
+      border-radius: 999px;
+      cursor: pointer;
+      flex-shrink: 0;
+      font: inherit;
+      font-size: 15px;
+      padding: 8px 12px;
+    }
+    .${SETTINGS_CLASS}__footer {
+      border-top-width: 1px;
+      border-top-style: solid;
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      padding: 14px 18px;
+    }
+    .${SETTINGS_CLASS}__btn {
+      border: 0;
+      border-radius: 999px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 15px;
+      font-weight: 700;
+      min-height: 36px;
+      padding: 0 16px;
+    }
+    .${SETTINGS_CLASS}__btn--ghost {
+      background: transparent;
+      color: inherit;
+    }
+    .${SETTINGS_CLASS}__empty {
+      font-size: 15px;
+      padding: 8px 0;
+    }
+  `;
+  appendWhenReady(style);
+}
+
+function closeSettingsModal() {
+  document.querySelector(`.${SETTINGS_CLASS}__backdrop`)?.remove();
+}
+
+function createSettingsField(labelText, input) {
+  const fieldEl = document.createElement("div");
+  fieldEl.className = `${SETTINGS_CLASS}__field`;
+  const label = document.createElement("label");
+  label.textContent = labelText;
+  fieldEl.append(label, input);
+  return fieldEl;
+}
+
+async function openSettingsModal() {
+  closeDestinationMenu();
+  injectSettingsStyles();
+
+  let destinations = [...(await loadAllDestinations())];
+  const backdrop = document.createElement("div");
+  backdrop.className = `${SETTINGS_CLASS}__backdrop`;
+
+  const dialog = document.createElement("div");
+  dialog.className = `${SETTINGS_CLASS}__dialog`;
+  applyXThemeVars(dialog);
+  dialog.setAttribute("role", "dialog");
+  dialog.setAttribute("aria-modal", "true");
+  dialog.setAttribute("aria-label", "Discord channel settings");
+
+  const header = document.createElement("div");
+  header.className = `${SETTINGS_CLASS}__header`;
+  const heading = document.createElement("h2");
+  heading.textContent = "Discord channels";
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = `${SETTINGS_CLASS}__close`;
+  closeBtn.setAttribute("aria-label", "Close");
+  closeBtn.textContent = "×";
+  closeBtn.addEventListener("click", closeSettingsModal);
+  header.append(heading, closeBtn);
+
+  const body = document.createElement("div");
+  body.className = `${SETTINGS_CLASS}__body`;
+
+  const hint = document.createElement("p");
+  hint.className = `${SETTINGS_CLASS}__hint`;
+  hint.textContent = "Create webhooks in Discord: Channel settings → Integrations → Webhooks. Channels are stored in your userscript extension (Tampermonkey / Violentmonkey), not on X.";
+  body.append(hint);
+
+  const listEl = document.createElement("div");
+  listEl.className = `${SETTINGS_CLASS}__list`;
+  body.append(listEl);
+
+  function renderList() {
+    listEl.replaceChildren();
+    if (destinations.length === 0) {
+      const emptyEl = document.createElement("div");
+      emptyEl.className = `${SETTINGS_CLASS}__empty`;
+      emptyEl.textContent = "No channels yet. Add one below.";
+      listEl.append(emptyEl);
+      return;
+    }
+
+    destinations.forEach((destination, index) => {
+      const card = document.createElement("div");
+      card.className = `${SETTINGS_CLASS}__card`;
+
+      const head = document.createElement("div");
+      head.className = `${SETTINGS_CLASS}__card-head`;
+
+      const meta = document.createElement("div");
+      const titleEl = document.createElement("div");
+      titleEl.className = `${SETTINGS_CLASS}__card-title`;
+      titleEl.textContent = destination.label;
+      const idEl = document.createElement("div");
+      idEl.className = `${SETTINGS_CLASS}__card-id`;
+      idEl.textContent = destination.id;
+      meta.append(titleEl, idEl);
+
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = `${SETTINGS_CLASS}__remove`;
+      removeBtn.textContent = "Remove";
+      removeBtn.addEventListener("click", () => {
+        destinations = destinations.filter((_, itemIndex) => itemIndex !== index);
+        renderList();
+      });
+      head.append(meta, removeBtn);
+
+      const labelInput = document.createElement("input");
+      labelInput.type = "text";
+      labelInput.value = destination.label;
+      labelInput.addEventListener("input", () => {
+        destinations[index].label = labelInput.value;
+      });
+
+      const urlInput = document.createElement("input");
+      urlInput.type = "url";
+      urlInput.placeholder = "https://discord.com/api/webhooks/...";
+      urlInput.value = destination.webhookUrl;
+      urlInput.addEventListener("input", () => {
+        destinations[index].webhookUrl = urlInput.value.trim();
+      });
+
+      card.append(head, createSettingsField("Display name", labelInput), createSettingsField("Webhook URL", urlInput));
+      listEl.append(card);
+    });
+  }
+
+  const addSection = document.createElement("div");
+  addSection.className = `${SETTINGS_CLASS}__card`;
+  const addTitleEl = document.createElement("div");
+  addTitleEl.className = `${SETTINGS_CLASS}__card-title`;
+  addTitleEl.textContent = "Add channel";
+
+  const newLabelInput = document.createElement("input");
+  newLabelInput.type = "text";
+  newLabelInput.placeholder = "Friends server";
+
+  const newUrlInput = document.createElement("input");
+  newUrlInput.type = "url";
+  newUrlInput.placeholder = "https://discord.com/api/webhooks/...";
+
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = `${SETTINGS_CLASS}__btn ${SETTINGS_CLASS}__btn--ghost`;
+  addBtn.textContent = "Add to list";
+  addBtn.addEventListener("click", () => {
+    const label = newLabelInput.value.trim();
+    const webhookUrl = newUrlInput.value.trim();
+    if (!label) {
+      showToast("Enter a display name.", "error");
+      return;
+    }
+    if (!isValidWebhookUrl(webhookUrl)) {
+      showToast("Enter a valid Discord webhook URL.", "error");
+      return;
+    }
+    const existingIds = new Set(destinations.map((item) => item.id));
+    destinations.push({
+      id: createDestinationId(label, existingIds),
+      label,
+      webhookUrl
+    });
+    newLabelInput.value = "";
+    newUrlInput.value = "";
+    renderList();
+  });
+
+  addSection.append(
+    addTitleEl,
+    createSettingsField("Display name", newLabelInput),
+    createSettingsField("Webhook URL", newUrlInput),
+    addBtn
+  );
+  body.append(addSection);
+
+  const footer = document.createElement("div");
+  footer.className = `${SETTINGS_CLASS}__footer`;
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.className = `${SETTINGS_CLASS}__btn ${SETTINGS_CLASS}__btn--ghost`;
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.addEventListener("click", closeSettingsModal);
+
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  saveBtn.className = `${SETTINGS_CLASS}__btn ${SETTINGS_CLASS}__btn--primary`;
+  saveBtn.textContent = "Save";
+  saveBtn.addEventListener("click", async () => {
+    const sanitized = sanitizeDestinations(destinations);
+    if (sanitized.length === 0 && destinations.length > 0) {
+      showToast("Fix invalid names or webhook URLs before saving.", "error");
+      return;
+    }
+    try {
+      await saveAllDestinations(sanitized);
+      showToast("Channels saved.", "success");
+      closeSettingsModal();
+      refreshShareButtons();
+    } catch (error) {
+      showToast(error.message, "error");
+    }
+  });
+
+  footer.append(cancelBtn, saveBtn);
+  dialog.append(header, body, footer);
+  backdrop.append(dialog);
+  backdrop.addEventListener("click", (event) => {
+    if (event.target === backdrop) closeSettingsModal();
+  });
+
+  const onEscape = (event) => {
+    if (event.key === "Escape") {
+      closeSettingsModal();
+      document.removeEventListener("keydown", onEscape);
+    }
+  };
+  document.addEventListener("keydown", onEscape);
+
+  document.body.append(backdrop);
+  renderList();
+  newLabelInput.focus();
+}
+
+function refreshShareButtons() {
+  removeLegacyDiscordButtons();
+}
+
+function registerSettingsMenuCommand() {
+  const register = typeof GM !== "undefined" && typeof GM.registerMenuCommand === "function"
+    ? GM.registerMenuCommand.bind(GM)
+    : typeof GM_registerMenuCommand === "function"
+      ? GM_registerMenuCommand
+      : null;
+
+  if (!register) return;
+  register("Discord channels…", () => openSettingsModal());
+}
+
+registerSettingsMenuCommand();
 })();

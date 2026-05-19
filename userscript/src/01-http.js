@@ -32,7 +32,3 @@ function request(method, url, body) {
 function delay(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
-
-async function getDestinations() {
-  return DIRECT_DESTINATIONS.map(({ id, label }) => ({ id, label }));
-}

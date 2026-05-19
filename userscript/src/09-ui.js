@@ -1,3 +1,13 @@
+// Simple person outline (head + shoulders), readable at menu size.
+const PERSON_ICON_PATHS = [
+  "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2",
+  "M12 11a4 4 0 0 1 0-8 4 4 0 0 1 0 8z",
+];
+
+let activePopover = null;
+let activePopoverCleanup = null;
+let pendingShareArticle = null;
+
 function appendWhenReady(node) {
   if (document.documentElement) {
     document.documentElement.append(node);
@@ -10,94 +20,242 @@ function appendWhenReady(node) {
 function injectStyles() {
   const style = document.createElement("style");
   style.textContent = `
-    .${BUTTON_CLASS} {
+    ${tdsSharedSurfaceCss()}
+
+    .${SHARE_MENU_ITEM_CLASS} {
+      cursor: pointer;
+    }
+
+    .${POPOVER_CLASS} {
+      position: fixed;
+      z-index: 10000;
+      min-width: 220px;
+      max-width: min(320px, calc(100vw - 16px));
+      padding: 4px;
+      font-size: 15px;
+    }
+    .${POPOVER_CLASS}__title {
+      font-size: 13px;
+      font-weight: 700;
+      padding: 8px 12px 4px;
+    }
+    .${POPOVER_CLASS}__item {
       align-items: center;
       background: transparent;
       border: 0;
-      border-radius: 999px;
-      color: rgb(83, 100, 113);
+      border-radius: 8px;
+      color: inherit;
       cursor: pointer;
-      display: inline-flex;
+      display: flex;
       font: inherit;
-      gap: 6px;
-      min-height: 34px;
-      padding: 0 10px;
+      gap: 8px;
+      padding: 10px 12px;
+      text-align: left;
+      width: 100%;
     }
-    .${BUTTON_CLASS}:hover {
-      background: rgba(29, 155, 240, 0.1);
-      color: rgb(29, 155, 240);
+    .${POPOVER_CLASS}__item:hover,
+    .${POPOVER_CLASS}__item:focus-visible,
+    .${POPOVER_CLASS}__manage:hover,
+    .${POPOVER_CLASS}__manage:focus-visible {
+      outline: none;
     }
-    .${BUTTON_CLASS}[disabled] {
-      cursor: wait;
-      opacity: 0.7;
+    .${POPOVER_CLASS}__item[data-last="true"]::after {
+      content: "Last used";
+      font-size: 11px;
+      margin-left: auto;
     }
-    .${STATUS_CLASS} {
-      color: rgb(83, 100, 113);
-      font-size: 13px;
-      margin-left: 6px;
+    .${POPOVER_CLASS}__footer {
+      border-top-width: 1px;
+      border-top-style: solid;
+      margin-top: 4px;
+      padding-top: 4px;
     }
-    .${STATUS_CLASS}[data-state="success"] {
-      color: rgb(0, 186, 124);
+    .${POPOVER_CLASS}__manage {
+      background: transparent;
+      border: 0;
+      border-radius: 999px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 15px;
+      font-weight: 400;
+      padding: 12px;
+      text-align: left;
+      width: 100%;
     }
-    .${STATUS_CLASS}[data-state="error"] {
-      color: rgb(244, 33, 46);
+
+    .${TOAST_HOST_CLASS} {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      z-index: 10001;
+      display: flex;
+      flex-direction: column-reverse;
+      gap: 8px;
+      pointer-events: none;
+      max-width: min(360px, calc(100vw - 32px));
+    }
+    .${TOAST_CLASS} {
+      border-radius: var(--border-radius-large, 16px);
+      border-left-width: 3px;
+      border-left-style: solid;
+      font-size: 15px;
+      line-height: 1.35;
+      padding: 12px 14px;
+      pointer-events: auto;
+      animation: tds-toast-in 0.2s ease;
+    }
+    @keyframes tds-toast-in {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
     }
   `;
   appendWhenReady(style);
 }
 
-function setStatus(container, message, state = "info") {
-  let status = container.querySelector(`.${STATUS_CLASS}`);
-  if (!status) {
-    status = document.createElement("span");
-    status.className = STATUS_CLASS;
-    container.append(status);
+function getToastHost() {
+  let host = document.querySelector(`.${TOAST_HOST_CLASS}`);
+  if (!host) {
+    host = document.createElement("div");
+    host.className = TOAST_HOST_CLASS;
+    appendWhenReady(host);
   }
-  status.dataset.state = state;
-  status.textContent = message;
-  window.setTimeout(() => status.remove(), 3500);
+  return host;
 }
 
-async function chooseDestination() {
-  const destinations = await getDestinations();
-  if (destinations.length === 0) {
-    throw new Error("No destinations configured. Add webhooks in userscript/src/00-config.js and rebuild.");
+function showToast(message, state = "info") {
+  const host = getToastHost();
+  const toastEl = document.createElement("div");
+  toastEl.className = TOAST_CLASS;
+  applyXThemeVars(toastEl);
+  toastEl.dataset.state = state;
+  toastEl.setAttribute("role", state === "error" ? "alert" : "status");
+  toastEl.textContent = message;
+  host.append(toastEl);
+
+  window.setTimeout(() => {
+    toastEl.style.opacity = "0";
+    toastEl.style.transform = "translateY(4px)";
+    toastEl.style.transition = "opacity 0.2s ease, transform 0.2s ease";
+    window.setTimeout(() => toastEl.remove(), 220);
+  }, TOAST_DURATION_MS);
+}
+
+function closeXOverlay() {
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
+}
+
+function closeDestinationMenu() {
+  if (activePopoverCleanup) {
+    activePopoverCleanup();
+    activePopoverCleanup = null;
+  }
+  if (activePopover) {
+    activePopover.remove();
+    activePopover = null;
+  }
+}
+
+function positionPopover(menu, anchor) {
+  const rect = anchor.getBoundingClientRect();
+  const margin = 8;
+  menu.style.visibility = "hidden";
+  menu.style.left = "0";
+  menu.style.top = "0";
+  document.body.append(menu);
+
+  const menuRect = menu.getBoundingClientRect();
+  let top = rect.top - menuRect.height - margin;
+  if (top < margin) {
+    top = rect.bottom + margin;
   }
 
-  if (destinations.length === 1) {
-    return destinations[0].id;
-  }
+  let left = rect.left + rect.width / 2 - menuRect.width / 2;
+  left = Math.max(margin, Math.min(left, window.innerWidth - menuRect.width - margin));
+
+  menu.style.top = `${Math.round(top)}px`;
+  menu.style.left = `${Math.round(left)}px`;
+  menu.style.visibility = "visible";
+}
+
+function openDestinationMenu(anchor, article, destinations) {
+  closeDestinationMenu();
 
   const last = localStorage.getItem(DESTINATION_KEY);
-  const options = destinations
-    .map((destination, index) => `${index + 1}. ${destination.label}${destination.id === last ? " (last)" : ""}`)
-    .join("\n");
-  const answer = window.prompt(`Send this post to which Discord destination?\n\n${options}`, last || "1");
-  if (!answer) return "";
+  const menu = document.createElement("div");
+  menu.className = POPOVER_CLASS;
+  applyXThemeVars(menu);
+  menu.setAttribute("role", "menu");
+  menu.setAttribute("aria-label", "Choose Discord destination");
 
-  const byNumber = destinations[Number(answer) - 1];
-  const byId = destinations.find((destination) => destination.id === answer);
-  const destination = byNumber || byId;
-  if (!destination) {
-    throw new Error("That destination was not found.");
-  }
+  const titleEl = document.createElement("div");
+  titleEl.className = `${POPOVER_CLASS}__title`;
+  titleEl.textContent = "Share to Discord";
+  menu.append(titleEl);
 
-  localStorage.setItem(DESTINATION_KEY, destination.id);
-  return destination.id;
+  destinations.forEach((destination) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = `${POPOVER_CLASS}__item`;
+    item.setAttribute("role", "menuitem");
+    item.textContent = destination.label;
+    if (destination.id === last) {
+      item.dataset.last = "true";
+    }
+    item.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      closeDestinationMenu();
+      localStorage.setItem(DESTINATION_KEY, destination.id);
+      runShare(article, destination.id);
+    });
+    menu.append(item);
+  });
+
+  const footer = document.createElement("div");
+  footer.className = `${POPOVER_CLASS}__footer`;
+  const manageBtn = document.createElement("button");
+  manageBtn.type = "button";
+  manageBtn.className = `${POPOVER_CLASS}__manage`;
+  manageBtn.textContent = "Manage channels…";
+  manageBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    closeDestinationMenu();
+    openSettingsModal();
+  });
+  footer.append(manageBtn);
+  menu.append(footer);
+
+  positionPopover(menu, anchor);
+  activePopover = menu;
+
+  const onKeyDown = (event) => {
+    if (event.key === "Escape") {
+      closeDestinationMenu();
+    }
+  };
+
+  const onPointerDown = (event) => {
+    if (!menu.contains(event.target) && event.target !== anchor && !anchor.contains?.(event.target)) {
+      closeDestinationMenu();
+    }
+  };
+
+  window.setTimeout(() => {
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown, true);
+  }, 0);
+
+  activePopoverCleanup = () => {
+    document.removeEventListener("keydown", onKeyDown);
+    document.removeEventListener("pointerdown", onPointerDown, true);
+  };
 }
 
-async function shareTweet(article, button) {
-  const actionBar = button.parentElement;
-  button.disabled = true;
-  setStatus(actionBar, "Preparing...");
+async function runShare(article, destinationId) {
+  showToast("Preparing…", "info");
 
   try {
-    const destinationId = await chooseDestination();
-    if (!destinationId) {
-      setStatus(actionBar, "Canceled");
-      return;
-    }
-
     const tweet = await enrichTweetMedia(extractTweet(article));
     if (DEBUG_MEDIA_EXTRACTION) {
       console.group("Tweet Discord Share media debug");
@@ -107,49 +265,223 @@ async function shareTweet(article, button) {
       console.groupEnd();
     }
     await shareToDestination(destinationId, tweet);
-    setStatus(actionBar, "Sent", "success");
+    showToast(`Sent to ${await destinationLabel(destinationId)}`, "success");
   } catch (error) {
     console.error(error);
-    setStatus(actionBar, error.message, "error");
-  } finally {
-    button.disabled = false;
+    showToast(error.message, "error");
   }
 }
 
-function makeButton(article) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = BUTTON_CLASS;
-  button.title = "Share to Discord";
-  button.setAttribute("aria-label", "Share to Discord");
-  button.innerHTML = `<span aria-hidden="true">Discord</span>`;
-  button.addEventListener("click", (event) => {
+async function startDiscordShare(article, anchor) {
+  const destinations = await getDestinations();
+  if (destinations.length === 0) {
+    closeXOverlay();
+    openSettingsModal();
+    return;
+  }
+
+  if (destinations.length === 1) {
+    closeXOverlay();
+    await runShare(article, destinations[0].id);
+    return;
+  }
+
+  closeXOverlay();
+  window.setTimeout(() => openDestinationMenu(anchor, article, destinations), 50);
+}
+
+function findShareButton(root) {
+  return root.querySelector('[data-testid="share"]')
+    || [...root.querySelectorAll("button")].find((button) => /share/i.test(button.getAttribute("aria-label") || ""));
+}
+
+function captureShareArticle(event) {
+  const shareButton = event.target.closest('[data-testid="share"], button[aria-label*="Share" i]');
+  if (!shareButton) return;
+  pendingShareArticle = shareButton.closest("article");
+}
+
+function isXShareMenu(node) {
+  if (!node || node.getAttribute("role") !== "menu") return false;
+  const text = [...node.querySelectorAll('[role="menuitem"]')]
+    .map((item) => item.textContent || "")
+    .join(" ")
+    .toLowerCase();
+  return text.includes("copy link")
+    || text.includes("share post")
+    || text.includes("embed post")
+    || text.includes("send via");
+}
+
+function getMenuItemLabelSpans(menuItem) {
+  return [...menuItem.querySelectorAll("span")].filter((node) => {
+    return !node.closest("svg") && node.textContent.trim().length > 0;
+  });
+}
+
+function findMenuItemLabelElement(item, referenceItem) {
+  const itemSpans = getMenuItemLabelSpans(item);
+  if (!referenceItem) {
+    return itemSpans.find((node) => node.children.length === 0) || itemSpans[0] || null;
+  }
+
+  const refSpans = getMenuItemLabelSpans(referenceItem);
+  const refLabel = refSpans.find((node) => node.children.length === 0) || refSpans[refSpans.length - 1];
+  if (!refLabel) {
+    return itemSpans[0] || null;
+  }
+
+  const refIndex = refSpans.indexOf(refLabel);
+  if (refIndex >= 0 && itemSpans[refIndex]) {
+    return itemSpans[refIndex];
+  }
+
+  return itemSpans.find((node) => node.children.length === 0) || itemSpans[0] || null;
+}
+
+function applyPersonIconToSvg(svg, referenceSvg) {
+  const refPath = referenceSvg?.querySelector("path");
+  if (!svg) return false;
+
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.replaceChildren();
+
+  for (const d of PERSON_ICON_PATHS) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", d);
+    if (refPath) {
+      for (const attr of ["fill", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin"]) {
+        const val = refPath.getAttribute(attr);
+        if (val != null) path.setAttribute(attr, val);
+      }
+    } else {
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", "currentColor");
+      path.setAttribute("stroke-width", "2");
+      path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("stroke-linejoin", "round");
+    }
+    svg.append(path);
+  }
+
+  if (referenceSvg) {
+    for (const attr of ["fill", "stroke", "stroke-width"]) {
+      const val = referenceSvg.getAttribute(attr);
+      if (val != null) svg.setAttribute(attr, val);
+    }
+  }
+
+  return true;
+}
+
+function replaceMenuItemIcon(item, referenceItem) {
+  return applyPersonIconToSvg(item.querySelector("svg"), referenceItem?.querySelector("svg"));
+}
+
+function replaceMenuItemText(item, text, referenceItem) {
+  const label = findMenuItemLabelElement(item, referenceItem);
+  if (label) {
+    label.textContent = text;
+    return true;
+  }
+
+  const walker = document.createTreeWalker(item, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (node.textContent.trim().length > 1 && !node.parentElement?.closest("svg")) {
+      node.textContent = text;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function findShareMenuTemplate(menu) {
+  const items = [...menu.querySelectorAll('[role="menuitem"]')].filter((item) => {
+    return !item.classList.contains(SHARE_MENU_ITEM_CLASS);
+  });
+
+  return items.find((item) => /share post/i.test(item.textContent || ""))
+    || items.find((item) => /copy link/i.test(item.textContent || ""))
+    || items[0]
+    || null;
+}
+
+function wireDiscordMenuItem(item) {
+  item.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    shareTweet(article, button);
+    const article = pendingShareArticle;
+    if (!article) {
+      showToast("Could not find the post. Try opening Share again.", "error");
+      return;
+    }
+    startDiscordShare(article, item);
   });
-  return button;
+
+  item.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      item.click();
+    }
+  });
 }
 
-function enhanceArticle(article) {
-  if (article.querySelector(`.${BUTTON_CLASS}`)) return;
+function createDiscordMenuItem(template) {
+  const item = template ? template.cloneNode(true) : document.createElement("div");
+  item.setAttribute("role", "menuitem");
+  item.tabIndex = 0;
+  item.classList.add(SHARE_MENU_ITEM_CLASS);
 
-  const actionBar = article.querySelector('[role="group"]');
-  if (!actionBar) return;
+  replaceMenuItemText(item, "Share to Discord", template);
+  replaceMenuItemIcon(item, template);
 
-  actionBar.append(makeButton(article));
+  wireDiscordMenuItem(item);
+  return item;
 }
 
-function enhanceTimeline() {
-  document.querySelectorAll("article").forEach(enhanceArticle);
+function injectDiscordShareMenuItem(menu) {
+  if (menu.querySelector(`.${SHARE_MENU_ITEM_CLASS}`)) return;
+
+  const template = findShareMenuTemplate(menu);
+  const item = createDiscordMenuItem(template);
+  const firstItem = menu.querySelector(`[role="menuitem"]:not(.${SHARE_MENU_ITEM_CLASS})`);
+
+  if (firstItem?.parentElement) {
+    firstItem.parentElement.insertBefore(item, firstItem);
+    return;
+  }
+
+  menu.append(item);
+}
+
+function scanShareMenus() {
+  document.querySelectorAll('[role="menu"]').forEach((menu) => {
+    if (isXShareMenu(menu)) {
+      injectDiscordShareMenuItem(menu);
+    }
+  });
+}
+
+function removeLegacyDiscordButtons() {
+  document.querySelectorAll(".tds-action-slot, .tds-share-button").forEach((node) => node.remove());
+}
+
+function installShareMenuIntegration() {
+  document.addEventListener("click", captureShareArticle, true);
+
+  const observer = new MutationObserver(() => scanShareMenus());
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+  scanShareMenus();
 }
 
 function startUi() {
   injectStyles();
   installNetworkCapture();
-  enhanceTimeline();
-  const observer = new MutationObserver(enhanceTimeline);
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  removeLegacyDiscordButtons();
+  installShareMenuIntegration();
 }
 
 startUi();

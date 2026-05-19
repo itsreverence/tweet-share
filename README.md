@@ -9,31 +9,30 @@ Share X/Twitter posts into Discord with the visible post text, media, and quote-
    - **Releases** (recommended): open [GitHub Releases](https://github.com/itsreverence/tweet-share/releases), download `tweet-discord-share.user.js` from the latest tag.
    - **From clone**: run `npm run build` and use `dist/tweet-discord-share.user.js`.
 3. Copy the entire file into a new userscript and save.
-4. Edit `DIRECT_DESTINATIONS` near the top of that file (search for `DIRECT_DESTINATIONS`) and add your Discord webhooks.
-5. Open X/Twitter and use the **Discord** button on a post.
+4. On X, use the userscript menu **Discord channels…** and add your webhook URLs (or open **Share** on a post with no channels configured).
+5. On any post, click **Share** → **Share to Discord**.
 
 You only need **one** `.user.js` file in the extension. Source lives in `userscript/src/`; `npm run build` merges it into `dist/`. Tagged pushes (`v*`) publish that file to Releases automatically.
 
 ## Configure destinations
 
-Add channels in `userscript/src/00-config.js`, then run `npm run build` and reinstall from `dist/`. Or edit `DIRECT_DESTINATIONS` directly in the installed script / `dist` file.
+**In the browser (recommended):**
 
-```js
-const DIRECT_DESTINATIONS = [
-  {
-    id: "friends",
-    label: "Friends server - tweets",
-    webhookUrl: "https://discord.com/api/webhooks/WEBHOOK_ID/WEBHOOK_TOKEN"
-  }
-];
-```
+1. Open X/Twitter.
+2. Tampermonkey/Violentmonkey dashboard → **Tweet Discord Share** → **Discord channels…**,  
+   **or** Share on a post → **Manage channels…** in the destination picker
+3. Add a display name and webhook URL, then **Save**.
+
+Channels are stored in extension storage on your machine, not in the repo.
+
+**Optional — in source:** add defaults in `userscript/src/00-config.js` (`DIRECT_DESTINATIONS`) when storage is empty, then `npm run build`.
 
 Create webhooks in Discord: **Edit Channel** → **Integrations** → **Webhooks** → **New Webhook** → **Copy Webhook URL**.
 
 ## How it works
 
 - Runs on `x.com` and `twitter.com`.
-- Adds a **Discord** button to each visible post’s action bar.
+- Adds **Share to Discord** to X’s native **Share** menu on each post.
 - Scrapes visible post content from the page and enriches media via syndication + intercepted X API responses.
 - Sends formatted messages to your chosen Discord webhook.
 

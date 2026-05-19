@@ -1,5 +1,5 @@
 async function shareToDestination(destinationId, tweet) {
-  const destination = DIRECT_DESTINATIONS.find((item) => item.id === destinationId);
+  const destination = await getDestinationById(destinationId);
   if (!destination?.webhookUrl) {
     throw new Error("That destination is missing a webhook URL.");
   }
