@@ -6,13 +6,15 @@ Share X/Twitter posts into Discord with the visible post text, media, and quote-
 
 1. Install Tampermonkey or Violentmonkey.
 2. Get the built userscript:
-   - **Releases** (recommended): open [GitHub Releases](https://github.com/itsreverence/tweet-share/releases), download `tweet-discord-share.user.js` from the latest tag.
+   - **Releases** (recommended): open [GitHub Releases](https://github.com/itsreverence/tweet-share/releases).
+     - **`latest-main`** — auto-built on every merge to `master` (bleeding edge).
+     - **`v*`** tags — stable milestones with checksums.
    - **From clone**: run `npm run build` and use `dist/tweet-discord-share.user.js`.
 3. Copy the entire file into a new userscript and save.
 4. On X, use the userscript menu **Discord channels…** and add your webhook URLs (or open **Share** on a post with no channels configured).
 5. On any post, click **Share** → **Share to Discord**.
 
-You only need **one** `.user.js` file in the extension. Source lives in `userscript/src/`; `npm run build` merges it into `dist/`. Tagged pushes (`v*`) publish that file to Releases automatically.
+You only need **one** `.user.js` file in the extension. Source lives in `userscript/src/`; `npm run build` merges it into `dist/`. Pushes to `master` refresh the **`latest-main`** prerelease; tagged pushes (`v*`) publish stable releases automatically.
 
 ## Configure destinations
 
