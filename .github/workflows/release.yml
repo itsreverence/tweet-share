@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build userscript
+        run: npm run build
+
+      - name: Syntax-check built file
+        run: node --check dist/tweet-discord-share.user.js
+
+      - name: Package release asset
+        run: |
+          cp dist/tweet-discord-share.user.js tweet-discord-share.user.js
+          sha256sum tweet-discord-share.user.js > checksums.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            tweet-discord-share.user.js
+            checksums.txt
+          generate_release_notes: true
+          draft: false

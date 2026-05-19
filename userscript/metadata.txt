@@ -1,0 +1,14 @@
+// ==UserScript==
+// @name         Tweet Discord Share
+// @namespace    https://github.com/tweet-discord-share
+// @version      0.2.0
+// @description  Share X/Twitter posts to Discord channels via webhooks (no server required).
+// @match        https://x.com/*
+// @match        https://twitter.com/*
+// @run-at       document-start
+// @grant        GM_xmlhttpRequest
+// @grant        GM.xmlHttpRequest
+// @connect      discord.com
+// @connect      cdn.syndication.twimg.com
+// @license      MIT
+// ==/UserScript==
