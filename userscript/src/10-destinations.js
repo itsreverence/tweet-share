@@ -74,9 +74,7 @@ async function readStoredDestinations() {
 }
 
 async function loadAllDestinations() {
-  const stored = await readStoredDestinations();
-  if (stored.length > 0) return stored;
-  return sanitizeDestinations(DIRECT_DESTINATIONS);
+  return readStoredDestinations();
 }
 
 async function saveAllDestinations(destinations) {

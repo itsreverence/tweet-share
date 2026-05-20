@@ -1,9 +1,3 @@
-const DIRECT_DESTINATIONS = [
-  // Add your Discord webhooks here:
-  // { id: "friends", label: "Friends server - tweets", webhookUrl: "https://discord.com/api/webhooks/..." },
-  // { id: "personal", label: "Personal server - links", webhookUrl: "https://discord.com/api/webhooks/..." }
-];
-
 const MEDIA_LINK_STYLE = "preview"; // "preview" | "masked"
 const DEBUG_MEDIA_EXTRACTION = false;
 const DEBUG_QUOTE_EXTRACTION = false;

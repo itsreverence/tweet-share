@@ -183,7 +183,7 @@ async function openSettingsModal() {
 
   const hint = document.createElement("p");
   hint.className = `${SETTINGS_CLASS}__hint`;
-  hint.textContent = "Create webhooks in Discord: Channel settings → Integrations → Webhooks. Channels are stored in your userscript extension (Tampermonkey / Violentmonkey), not on X.";
+  hint.textContent = "Create webhooks in Discord: Channel settings → Integrations → Webhooks. Channels are saved in Violentmonkey (or Tampermonkey) and persist across script updates — do not put webhook URLs in the script source.";
   body.append(hint);
 
   const listEl = document.createElement("div");

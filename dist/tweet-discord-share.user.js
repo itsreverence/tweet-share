@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweet Discord Share
 // @namespace    https://github.com/tweet-discord-share
-// @version      0.6.3
+// @version      0.6.4
 // @description  Share X/Twitter posts to Discord channels via webhooks (no server required).
 // @match        https://x.com/*
 // @match        https://twitter.com/*
@@ -25,12 +25,6 @@
   "use strict";
 
   // --- 00-config.js ---
-const DIRECT_DESTINATIONS = [
-  // Add your Discord webhooks here:
-  // { id: "friends", label: "Friends server - tweets", webhookUrl: "https://discord.com/api/webhooks/..." },
-  // { id: "personal", label: "Personal server - links", webhookUrl: "https://discord.com/api/webhooks/..." }
-];
-
 const MEDIA_LINK_STYLE = "preview"; // "preview" | "masked"
 const DEBUG_MEDIA_EXTRACTION = false;
 const DEBUG_QUOTE_EXTRACTION = false;
@@ -1732,9 +1726,7 @@ async function readStoredDestinations() {
 }
 
 async function loadAllDestinations() {
-  const stored = await readStoredDestinations();
-  if (stored.length > 0) return stored;
-  return sanitizeDestinations(DIRECT_DESTINATIONS);
+  return readStoredDestinations();
 }
 
 async function saveAllDestinations(destinations) {
@@ -1956,7 +1948,7 @@ async function openSettingsModal() {
 
   const hint = document.createElement("p");
   hint.className = `${SETTINGS_CLASS}__hint`;
-  hint.textContent = "Create webhooks in Discord: Channel settings → Integrations → Webhooks. Channels are stored in your userscript extension (Tampermonkey / Violentmonkey), not on X.";
+  hint.textContent = "Create webhooks in Discord: Channel settings → Integrations → Webhooks. Channels are saved in Violentmonkey (or Tampermonkey) and persist across script updates — do not put webhook URLs in the script source.";
   body.append(hint);
 
   const listEl = document.createElement("div");
