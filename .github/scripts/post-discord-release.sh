@@ -27,7 +27,7 @@ payload=$(jq -cn \
     embeds: [{
       title: $title,
       url: $url,
-      description: "Install the attached .user.js in Tampermonkey.",
+      description: "Install the attached file in Violentmonkey.",
       color: (if $repo == "tweet-share" then 1942002
               elif $repo == "case-clicker" then 15844367
               else 5814783 end)
