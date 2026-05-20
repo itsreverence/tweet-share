@@ -60,7 +60,6 @@ jobs:
             --arg release "$RELEASE_URL" \
             --arg published "$PUBLISHED_AT" \
             --arg prerelease "$IS_PRERELEASE" \
-            --arg asset "$ASSET_NAME" \
             '
               ($repo | split("/")) as $parts |
               ($parts[0]) as $owner |
@@ -78,19 +77,9 @@ jobs:
                   color: $color,
                   fields: [
                     {
-                      name: "Repository",
-                      value: ("[" + $repo + "](https://github.com/" + $repo + ")"),
-                      inline: true
-                    },
-                    {
                       name: "Channel",
                       value: $channel,
                       inline: true
-                    },
-                    {
-                      name: "Attachment",
-                      value: ("`" + $asset + "`"),
-                      inline: false
                     }
                   ],
                   footer: { text: ("GitHub · " + $owner) },
