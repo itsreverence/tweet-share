@@ -1,5 +1,9 @@
 name: Tag release version
 
+# On master/main: when package.json version has no GitHub Release yet, build and
+# publish v{version} as Latest. Releases created with GITHUB_TOKEN do not fire
+# release:published for other workflows, so Discord is posted in this job too.
+
 on:
   push:
     branches:
@@ -21,6 +25,7 @@ jobs:
           node-version: "22"
 
       - name: Publish release for new package version
+        id: release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -31,21 +36,38 @@ jobs:
           fi
 
           TAG="v${VERSION}"
+          ASSET="tweet-discord-share.user.js"
+
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists — skipping"
+            echo "created=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           npm run build
           node --check dist/tweet-discord-share.user.js
-          cp dist/tweet-discord-share.user.js tweet-discord-share.user.js
-          sha256sum tweet-discord-share.user.js > checksums.txt
+          cp dist/tweet-discord-share.user.js "$ASSET"
+          sha256sum "$ASSET" > checksums.txt
 
           gh release create "$TAG" \
             --title "$TAG" \
             --generate-notes \
             --latest \
-            tweet-discord-share.user.js \
+            "$ASSET" \
             checksums.txt
 
+          echo "created=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
           echo "Published $TAG as latest release"
+
+      - name: Post to Discord
+        if: steps.release.outputs.created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.release.outputs.tag }}
+          ASSET_PATH: ${{ steps.release.outputs.asset }}
+          ASSET_NAME: ${{ steps.release.outputs.asset }}
+        run: bash .github/scripts/post-discord-release.sh
