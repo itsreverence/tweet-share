@@ -1,10 +1,10 @@
-async function shareToDestination(destinationId, tweet) {
+async function shareToDestination(destinationId, tweet, options = {}) {
   const destination = await getDestinationById(destinationId);
   if (!destination?.webhookUrl) {
     throw new Error("That destination is missing a webhook URL.");
   }
 
-  const payloads = buildDiscordPayloads(tweet);
+  const payloads = buildDiscordPayloads(tweet, options);
   for (let index = 0; index < payloads.length; index += 1) {
     const payload = payloads[index];
     await request("POST", destination.webhookUrl, payload);

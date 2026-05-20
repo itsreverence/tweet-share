@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweet Discord Share
 // @namespace    https://github.com/tweet-discord-share
-// @version      0.6.1
+// @version      0.6.2
 // @description  Share X/Twitter posts to Discord channels via webhooks (no server required).
 // @match        https://x.com/*
 // @match        https://twitter.com/*
@@ -625,9 +625,10 @@ function buildDiscordPayload(content, tweet) {
   };
 }
 
-function buildDiscordPayloads(tweet) {
+function buildDiscordPayloads(tweet, options = {}) {
+  const { includeQuote = true } = options;
   const payloads = buildPayloadsForTweet(tweet, "Tweet");
-  if (hasQuoteTweet(tweet)) {
+  if (includeQuote && hasQuoteTweet(tweet)) {
     payloads.push(...buildPayloadsForTweet(tweet.quote, "Quoted Tweet"));
   }
   return payloads;
@@ -960,13 +961,13 @@ function extractTweet(article) {
 }
 
   // --- 08-deliver.js ---
-async function shareToDestination(destinationId, tweet) {
+async function shareToDestination(destinationId, tweet, options = {}) {
   const destination = await getDestinationById(destinationId);
   if (!destination?.webhookUrl) {
     throw new Error("That destination is missing a webhook URL.");
   }
 
-  const payloads = buildDiscordPayloads(tweet);
+  const payloads = buildDiscordPayloads(tweet, options);
   for (let index = 0; index < payloads.length; index += 1) {
     const payload = payloads[index];
     await request("POST", destination.webhookUrl, payload);
@@ -1042,6 +1043,23 @@ function injectStyles() {
       content: "Last used";
       font-size: 11px;
       margin-left: auto;
+    }
+    .${POPOVER_CLASS}__quote-option {
+      align-items: center;
+      cursor: pointer;
+      display: flex;
+      font-size: 14px;
+      gap: 8px;
+      margin: 2px 4px 6px;
+      padding: 8px 12px;
+      user-select: none;
+    }
+    .${POPOVER_CLASS}__quote-option input {
+      accent-color: var(--color-primary, #1d9bf0);
+      cursor: pointer;
+      flex-shrink: 0;
+      height: 16px;
+      width: 16px;
     }
     .${POPOVER_CLASS}__footer {
       border-top-width: 1px;
@@ -1156,7 +1174,16 @@ function positionPopover(menu, anchor) {
   menu.style.visibility = "visible";
 }
 
-function openDestinationMenu(anchor, article, destinations) {
+function articleHasQuotableTweet(article) {
+  try {
+    return hasQuoteTweet(extractTweet(article));
+  } catch {
+    return false;
+  }
+}
+
+function openDestinationMenu(anchor, article, destinations, options = {}) {
+  const { showQuoteOption = false } = options;
   closeDestinationMenu();
 
   const last = localStorage.getItem(DESTINATION_KEY);
@@ -1170,6 +1197,25 @@ function openDestinationMenu(anchor, article, destinations) {
   titleEl.className = `${POPOVER_CLASS}__title`;
   titleEl.textContent = "Share to Discord";
   menu.append(titleEl);
+
+  let includeQuote = true;
+  if (showQuoteOption) {
+    const quoteOption = document.createElement("label");
+    quoteOption.className = `${POPOVER_CLASS}__quote-option`;
+
+    const quoteCheckbox = document.createElement("input");
+    quoteCheckbox.type = "checkbox";
+    quoteCheckbox.checked = true;
+    quoteCheckbox.addEventListener("change", () => {
+      includeQuote = quoteCheckbox.checked;
+    });
+
+    const quoteLabel = document.createElement("span");
+    quoteLabel.textContent = "Include quoted tweet";
+
+    quoteOption.append(quoteCheckbox, quoteLabel);
+    menu.append(quoteOption);
+  }
 
   destinations.forEach((destination) => {
     const item = document.createElement("button");
@@ -1185,7 +1231,8 @@ function openDestinationMenu(anchor, article, destinations) {
       event.stopPropagation();
       closeDestinationMenu();
       localStorage.setItem(DESTINATION_KEY, destination.id);
-      runShare(article, destination.id);
+      const shareOptions = showQuoteOption ? { includeQuote } : {};
+      runShare(article, destination.id, shareOptions);
     });
     menu.append(item);
   });
@@ -1231,7 +1278,7 @@ function openDestinationMenu(anchor, article, destinations) {
   };
 }
 
-async function runShare(article, destinationId) {
+async function runShare(article, destinationId, options = {}) {
   showToast("Preparing…", "info");
 
   try {
@@ -1243,7 +1290,7 @@ async function runShare(article, destinationId) {
       console.log("Cached video variants", Object.fromEntries(VIDEO_VARIANT_CACHE));
       console.groupEnd();
     }
-    await shareToDestination(destinationId, tweet);
+    await shareToDestination(destinationId, tweet, options);
     showToast(`Sent to ${await destinationLabel(destinationId)}`, "success");
   } catch (error) {
     console.error(error);
@@ -1259,14 +1306,15 @@ async function startDiscordShare(article, anchor) {
     return;
   }
 
-  if (destinations.length === 1) {
+  const showQuoteOption = articleHasQuotableTweet(article);
+  if (destinations.length === 1 && !showQuoteOption) {
     closeXOverlay();
     await runShare(article, destinations[0].id);
     return;
   }
 
   closeXOverlay();
-  window.setTimeout(() => openDestinationMenu(anchor, article, destinations), 50);
+  window.setTimeout(() => openDestinationMenu(anchor, article, destinations, { showQuoteOption }), 50);
 }
 
 function findShareButton(root) {

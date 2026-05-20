@@ -72,9 +72,10 @@ function buildDiscordPayload(content, tweet) {
   };
 }
 
-function buildDiscordPayloads(tweet) {
+function buildDiscordPayloads(tweet, options = {}) {
+  const { includeQuote = true } = options;
   const payloads = buildPayloadsForTweet(tweet, "Tweet");
-  if (hasQuoteTweet(tweet)) {
+  if (includeQuote && hasQuoteTweet(tweet)) {
     payloads.push(...buildPayloadsForTweet(tweet.quote, "Quoted Tweet"));
   }
   return payloads;

@@ -24,7 +24,7 @@ Channels live in extension storage on your machine, not in this repo. **Treat we
 ## What it does
 
 - Adds **Share to Discord** to X’s native **Share** menu
-- Sends post text, media links, and quote context to the channel you pick
+- Sends post text and media links; when a post quotes another tweet, choose whether to include the quote each time you share
 - Scrapes what’s visible on the page (private posts only while you can see them)
 
 ## Development
