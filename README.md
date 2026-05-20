@@ -1,84 +1,40 @@
 # Tweet Discord Share
 
-Share X/Twitter posts into Discord with the visible post text, media, and quote-post context. This is a [Tampermonkey](https://www.tampermonkey.net/) / [Violentmonkey](https://violentmonkey.github.io/) userscript for personal use. It does not require the X API or a running server.
+[Tampermonkey](https://www.tampermonkey.net/) / [Violentmonkey](https://violentmonkey.github.io/) userscript that shares X/Twitter posts to Discord via webhooks. No X API or server required — runs in your browser on `x.com` / `twitter.com`.
 
-## Install (one file to paste)
+## Install
 
 1. Install Tampermonkey or Violentmonkey.
-2. Get the built userscript:
-   - **Releases** (recommended): open [GitHub Releases](https://github.com/itsreverence/tweet-share/releases).
-     - **`latest-main`** — auto-built on every merge to `master` (bleeding edge).
-     - **`v*`** tags — stable milestones with checksums.
-   - **From clone**: run `npm run build` and use `dist/tweet-discord-share.user.js`.
-3. Copy the entire file into a new userscript and save.
-4. On X, use the userscript menu **Discord channels…** and add your webhook URLs (or open **Share** on a post with no channels configured).
-5. On any post, click **Share** → **Share to Discord**.
+2. Download **`tweet-discord-share.user.js`** from [Releases](https://github.com/itsreverence/tweet-share/releases):
+   - **[latest-main](https://github.com/itsreverence/tweet-share/releases/tag/latest-main)** — newest build from `master`
+   - **`v*`** tags — stable snapshots (e.g. [v0.6.1](https://github.com/itsreverence/tweet-share/releases/tag/v0.6.1))
+3. Open the file in your browser (or paste into a new userscript) and save.
+4. On X, open **Share** on a post → **Share to Discord** (or set up channels first — below).
 
-You only need **one** `.user.js` file in the extension. Source lives in `userscript/src/`; `npm run build` merges it into `dist/`. Pushes to `master` refresh the **`latest-main`** prerelease; tagged pushes (`v*`) publish stable releases automatically.
+## Discord channels
 
-## Configure destinations
+1. Tampermonkey menu → **Tweet Discord Share** → **Discord channels…**,  
+   **or** **Share** → **Manage channels…** on a post.
+2. Add a name and webhook URL, then **Save**.
 
-**In the browser (recommended):**
+Create a webhook in Discord: **Edit Channel** → **Integrations** → **Webhooks** → **New Webhook** → copy the URL.
 
-1. Open X/Twitter.
-2. Tampermonkey/Violentmonkey dashboard → **Tweet Discord Share** → **Discord channels…**,  
-   **or** Share on a post → **Manage channels…** in the destination picker
-3. Add a display name and webhook URL, then **Save**.
+Channels live in extension storage on your machine, not in this repo. **Treat webhook URLs like passwords** — do not commit them to git.
 
-Channels are stored in extension storage on your machine, not in the repo.
+## What it does
 
-**Optional — in source:** add defaults in `userscript/src/00-config.js` (`DIRECT_DESTINATIONS`) when storage is empty, then `npm run build`.
-
-Create webhooks in Discord: **Edit Channel** → **Integrations** → **Webhooks** → **New Webhook** → **Copy Webhook URL**.
-
-## How it works
-
-- Runs on `x.com` and `twitter.com`.
-- Adds **Share to Discord** to X’s native **Share** menu on each post.
-- Scrapes visible post content from the page and enriches media via syndication + intercepted X API responses.
-- Sends formatted messages to your chosen Discord webhook.
-
-## Project layout
-
-```
-userscript/
-  metadata.txt          # Userscript header (name, grants, matches)
-  src/
-    00-config.js        # Destinations and options — edit this first
-    01-http.js          # Webhook / syndication HTTP
-    02-utils.js
-    03-network-capture.js
-    04-video.js
-    05-format-discord.js
-    06-syndication.js
-    07-extract-dom.js
-    08-deliver.js
-    09-ui.js
-dist/
-  tweet-discord-share.user.js   # Built file — paste into Violentmonkey
-scripts/
-  build.mjs
-```
+- Adds **Share to Discord** to X’s native **Share** menu
+- Sends post text, media links, and quote context to the channel you pick
+- Scrapes what’s visible on the page (private posts only while you can see them)
 
 ## Development
 
-```powershell
+```bash
 npm run build   # writes dist/tweet-discord-share.user.js
 npm run check   # build + syntax check
 ```
 
-## Security
-
-- **Webhook URLs are secrets.** Anyone with your script file or a synced extension backup can post to those channels. Do not commit real webhook URLs to a public repo.
-- Keep `DIRECT_DESTINATIONS` empty in git; configure locally after clone or in your private fork.
-- Discord webhooks can post as the webhook identity; treat them like passwords.
-
-## Limits
-
-- Scrapes the current X/Twitter page — UI changes can break extraction.
-- Private posts only work while visible in your logged-in browser.
-- Images share as links in message text; videos are best-effort MP4 URLs when X exposes them.
-- Quote posts depend on what X renders in the DOM.
+Edit `userscript/src/`; `npm run build` updates `dist/`.
 
 ## License
 
