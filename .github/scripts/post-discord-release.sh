@@ -17,42 +17,22 @@ if [ ! -f "$ASSET_PATH" ]; then
 fi
 
 RELEASE_URL="${RELEASE_URL:-$(gh release view "$TAG" --repo "$REPO" --json url -q .url)}"
-PUBLISHED_AT="${PUBLISHED_AT:-$(gh release view "$TAG" --repo "$REPO" --json publishedAt -q .publishedAt)}"
-IS_PRERELEASE="${IS_PRERELEASE:-$(gh release view "$TAG" --repo "$REPO" --json isPrerelease -q .isPrerelease)}"
+REPO_NAME="${REPO##*/}"
 
 payload=$(jq -cn \
-  --arg repo "$REPO" \
-  --arg tag "$TAG" \
-  --arg release "$RELEASE_URL" \
-  --arg published "$PUBLISHED_AT" \
-  --arg prerelease "$IS_PRERELEASE" \
-  '
-    ($repo | split("/")) as $parts |
-    ($parts[0]) as $owner |
-    ($parts[1]) as $name |
-    ($name + " · " + $tag) as $title |
-    (if $prerelease == "true" then "Prerelease" else "Stable release" end) as $channel |
-    (if $name == "tweet-share" then 1942002
-     elif $name == "case-clicker" then 15844367
-     else 5814783 end) as $color |
-    {
-      embeds: [{
-        title: $title,
-        url: $release,
-        description: "Install the attached **.user.js** in Tampermonkey or Violentmonkey.",
-        color: $color,
-        fields: [
-          {
-            name: "Channel",
-            value: $channel,
-            inline: true
-          }
-        ],
-        footer: { text: ("GitHub · " + $owner) },
-        timestamp: $published
-      }]
-    }
-  ')
+  --arg title "${REPO_NAME} · ${TAG}" \
+  --arg url "$RELEASE_URL" \
+  --arg repo "$REPO_NAME" \
+  '{
+    embeds: [{
+      title: $title,
+      url: $url,
+      description: "Install the attached .user.js in Tampermonkey.",
+      color: (if $repo == "tweet-share" then 1942002
+              elif $repo == "case-clicker" then 15844367
+              else 5814783 end)
+    }]
+  }')
 
 curl -sS -f \
   -F "payload_json=$payload" \

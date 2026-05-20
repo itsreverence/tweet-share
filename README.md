@@ -5,7 +5,7 @@
 ## Install
 
 1. Install Tampermonkey or Violentmonkey.
-2. Download **`tweet-discord-share.user.js`** from [Releases](https://github.com/itsreverence/tweet-share/releases) — pick the **Latest** release, or [latest-main](https://github.com/itsreverence/tweet-share/releases/tag/latest-main) for bleeding-edge builds.
+2. Download **`tweet-discord-share.user.js`** from the [latest release](https://github.com/itsreverence/tweet-share/releases/latest).
 3. Open the file in your browser (or paste into a new userscript) and save.
 4. On X, open **Share** on a post → **Share to Discord** (or set up channels first — below).
 
@@ -33,6 +33,8 @@ npm run check   # build + syntax check
 ```
 
 Edit `userscript/src/`; `npm run build` updates `dist/`.
+
+**Releases:** bump `package.json` `version`, push to `main` — CI builds; if `v{version}` is new, GitHub publishes it as Latest and posts to Discord.
 
 ## License
 

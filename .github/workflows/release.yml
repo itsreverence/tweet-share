@@ -1,9 +1,10 @@
 name: Release
 
+# Bump package.json version, push to main — publishes v{version} as Latest + Discord.
+
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main, master]
 
 permissions:
   contents: write
@@ -18,22 +19,38 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Build userscript
-        run: npm run build
-
-      - name: Syntax-check built file
-        run: node --check dist/tweet-discord-share.user.js
-
-      - name: Package release asset
+      - name: Publish when package.json version is new
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          cp dist/tweet-discord-share.user.js tweet-discord-share.user.js
-          sha256sum tweet-discord-share.user.js > checksums.txt
+          VERSION=$(jq -r .version package.json)
+          TAG="v${VERSION}"
+          ASSET="tweet-discord-share.user.js"
 
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            tweet-discord-share.user.js
-            checksums.txt
-          generate_release_notes: true
-          draft: false
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "created=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          npm run build
+          node --check dist/tweet-discord-share.user.js
+          cp dist/tweet-discord-share.user.js "$ASSET"
+          sha256sum "$ASSET" > checksums.txt
+
+          gh release create "$TAG" --title "$TAG" --generate-notes --latest "$ASSET" checksums.txt
+
+          echo "created=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
+
+      - name: Discord
+        if: steps.publish.outputs.created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.publish.outputs.tag }}
+          ASSET_PATH: ${{ steps.publish.outputs.asset }}
+          ASSET_NAME: ${{ steps.publish.outputs.asset }}
+        run: bash .github/scripts/post-discord-release.sh
