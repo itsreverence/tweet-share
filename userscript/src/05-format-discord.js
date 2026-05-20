@@ -29,26 +29,217 @@ function mediaLinks(tweet) {
   return uniqueMediaLinks([...videos, ...images]);
 }
 
-function formatMediaLink(item) {
+function isHttpsUrl(url) {
+  return /^https:\/\//i.test(String(url || ""));
+}
+
+function embedAuthorBlock(tweet) {
+  const name = truncate(formatAuthor(tweet), DISCORD_EMBED_LIMITS.authorName);
+  const block = { name };
+  const iconUrl = webhookAvatarUrl(tweet);
+  if (isHttpsUrl(iconUrl)) block.icon_url = iconUrl;
+  if (tweet.author?.username) block.url = `https://x.com/${tweet.author.username}`;
+  return block;
+}
+
+function embedFooterForUrl(url) {
+  if (!url) return undefined;
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    return { text: truncate(host, DISCORD_EMBED_LIMITS.footer) };
+  } catch {
+    return { text: truncate(url, DISCORD_EMBED_LIMITS.footer) };
+  }
+}
+
+function countEmbedChars(embed) {
+  let total = 0;
+  if (embed.title) total += embed.title.length;
+  if (embed.description) total += embed.description.length;
+  if (embed.footer?.text) total += embed.footer.text.length;
+  if (embed.author?.name) total += embed.author.name.length;
+  for (const field of embed.fields || []) {
+    total += (field.name || "").length + (field.value || "").length;
+  }
+  return total;
+}
+
+function pruneEmbed(embed) {
+  const next = { ...embed };
+  for (const key of Object.keys(next)) {
+    if (next[key] === undefined || next[key] === null || next[key] === "") delete next[key];
+  }
+  if (next.fields?.length === 0) delete next.fields;
+  return next;
+}
+
+function buildMediaFields(mediaItems) {
+  if (!mediaItems.length) return [];
+
+  const fields = mediaItems.slice(0, DISCORD_EMBED_LIMITS.fieldsPerEmbed).map((item) => {
+    const value =
+      MEDIA_LINK_STYLE === "masked"
+        ? `[${item.label}](${item.url})`
+        : item.url;
+    return {
+      name: truncate(item.label, DISCORD_EMBED_LIMITS.fieldName),
+      value: truncate(value, DISCORD_EMBED_LIMITS.fieldValue),
+      inline: false
+    };
+  });
+
+  if (mediaItems.length > DISCORD_EMBED_LIMITS.fieldsPerEmbed) {
+    fields.push({
+      name: "More media",
+      value: truncate(`${mediaItems.length - DISCORD_EMBED_LIMITS.fieldsPerEmbed} more attached on X`, DISCORD_EMBED_LIMITS.fieldValue),
+      inline: false
+    });
+  }
+
+  return fields;
+}
+
+function pickEmbedImageUrl(mediaItems) {
+  const image = mediaItems.find((item) => isHttpsUrl(item.url) && /\.(?:jpg|jpeg|png|webp|gif)(?:\?|$)/i.test(item.url));
+  return image?.url || mediaItems.find((item) => isHttpsUrl(item.url) && /pbs\.twimg\.com/i.test(item.url))?.url || "";
+}
+
+function buildMediaFieldsExcluding(mediaItems, excludeUrl) {
+  return buildMediaFields(mediaItems.filter((item) => item.url !== excludeUrl));
+}
+
+function buildTweetEmbedGroup(tweet, kind) {
+  const color = kind === "quote" ? EMBED_COLOR_QUOTE : EMBED_COLOR_MAIN;
+  const permalink = tweet.url || "";
+  const text = String(tweet.text || "").trim();
+  const media = mediaLinks(tweet);
+  const heroImageUrl = pickEmbedImageUrl(media);
+  const mediaFields = buildMediaFieldsExcluding(media, heroImageUrl);
+  const footer = embedFooterForUrl(permalink);
+  const descriptionChunks = splitText(text, DISCORD_EMBED_LIMITS.description);
+  const embeds = [];
+
+  if (descriptionChunks.length === 0) {
+    const embed = pruneEmbed({
+      color,
+      author: embedAuthorBlock(tweet),
+      description: media.length ? undefined : "(No text found)",
+      url: permalink || undefined,
+      image: heroImageUrl ? { url: heroImageUrl } : undefined,
+      fields: mediaFields.length ? mediaFields : undefined,
+      footer
+    });
+    embeds.push(embed);
+    return embeds;
+  }
+
+  descriptionChunks.forEach((chunk, index) => {
+    const isFirst = index === 0;
+    const isLast = index === descriptionChunks.length - 1;
+    const embed = pruneEmbed({
+      color,
+      author: isFirst ? embedAuthorBlock(tweet) : undefined,
+      title:
+        descriptionChunks.length > 1 && !isFirst
+          ? truncate(`Continued (${index + 1}/${descriptionChunks.length})`, DISCORD_EMBED_LIMITS.title)
+          : undefined,
+      description: chunk,
+      url: isFirst && permalink ? permalink : undefined,
+      image: isFirst && heroImageUrl ? { url: heroImageUrl } : undefined,
+      fields: isLast && mediaFields.length ? mediaFields : undefined,
+      footer: isLast ? footer : undefined
+    });
+    embeds.push(embed);
+  });
+
+  return embeds;
+}
+
+function packEmbedsIntoMessages(embeds) {
+  const messages = [];
+  let current = [];
+  let currentChars = 0;
+
+  for (const embed of embeds) {
+    const embedChars = countEmbedChars(embed);
+    const exceedsCount = current.length > 0 && currentChars + embedChars > DISCORD_EMBED_LIMITS.totalEmbedChars;
+    const exceedsSlots = current.length >= DISCORD_EMBED_LIMITS.embedsPerMessage;
+
+    if (exceedsCount || exceedsSlots) {
+      messages.push(current);
+      current = [];
+      currentChars = 0;
+    }
+
+    current.push(embed);
+    currentChars += embedChars;
+  }
+
+  if (current.length) messages.push(current);
+  return messages;
+}
+
+function buildWebhookPayload(embeds, tweet) {
+  return {
+    username: webhookUsername(tweet),
+    avatar_url: webhookAvatarUrl(tweet),
+    embeds,
+    allowed_mentions: { parse: [] }
+  };
+}
+
+function buildEmbedDiscordPayloads(tweet, options = {}) {
+  const { includeQuote = true } = options;
+  const embeds = [...buildTweetEmbedGroup(tweet, "main")];
+
+  if (includeQuote && hasQuoteTweet(tweet)) {
+    embeds.push(...buildTweetEmbedGroup(tweet.quote, "quote"));
+  }
+
+  const packed = packEmbedsIntoMessages(embeds);
+  if (!packed.length) return [];
+
+  return packed.map((group) => buildWebhookPayload(group, tweet));
+}
+
+function formatMediaLinkPlain(item) {
   if (MEDIA_LINK_STYLE === "masked") {
     return `[${item.label}](${item.url})`;
   }
 
-  return `**${item.label}**\n${item.url}`;
+  return `${item.label}: ${item.url}`;
 }
 
-function plainTweetParts(tweet, label = "Tweet") {
-  return {
-    heading: label ? `**${label}**` : "",
-    text: tweet.text || "",
-    media: mediaLinks(tweet).map(formatMediaLink)
-  };
+function buildCompactPlainBody(tweet, options = {}) {
+  const { includeQuote = true } = options;
+  const lines = [formatAuthor(tweet)];
+
+  if (tweet.text) lines.push(tweet.text);
+  for (const item of mediaLinks(tweet)) lines.push(formatMediaLinkPlain(item));
+  if (tweet.url) lines.push(tweet.url);
+
+  if (includeQuote && hasQuoteTweet(tweet)) {
+    lines.push("");
+    lines.push(`↳ ${formatAuthor(tweet.quote)}`);
+    if (tweet.quote.text) lines.push(tweet.quote.text);
+    for (const item of mediaLinks(tweet.quote)) lines.push(formatMediaLinkPlain(item));
+    if (tweet.quote.url) lines.push(tweet.quote.url);
+  }
+
+  return lines.filter((line, index, all) => line !== "" || (index > 0 && all[index - 1] !== "")).join("\n");
 }
 
-function formatPlainTweet(tweet, label = "Tweet") {
-  const parts = plainTweetParts(tweet, label);
-  const lines = [parts.heading, parts.text, ...parts.media].filter(Boolean);
-  return lines.join("\n");
+function buildPlainFallbackPayloads(tweet, options = {}) {
+  const body = buildCompactPlainBody(tweet, options);
+  const chunks = splitText(body, MESSAGE_CHUNK_LIMIT);
+  const parts = chunks.length ? chunks : [body || formatAuthor(tweet)];
+
+  return parts.map((content) => ({
+    username: webhookUsername(tweet),
+    avatar_url: webhookAvatarUrl(tweet),
+    content: truncate(content, DISCORD_LIMITS.content),
+    allowed_mentions: { parse: [] }
+  }));
 }
 
 function hasQuoteCandidate(tweet) {
@@ -63,77 +254,15 @@ function hasQuoteTweet(tweet) {
   return Boolean((distinctUrl || quote.text || mediaLinks(quote).length > 0) && (quote.text || mediaLinks(quote).length > 0));
 }
 
-function buildDiscordPayload(content, tweet) {
-  return {
-    username: webhookUsername(tweet),
-    avatar_url: webhookAvatarUrl(tweet),
-    content: truncate(content, DISCORD_LIMITS.content),
-    allowed_mentions: { parse: [] }
-  };
-}
-
 function buildDiscordPayloads(tweet, options = {}) {
-  const { includeQuote = true } = options;
-  const payloads = buildPayloadsForTweet(tweet, "Tweet");
-  if (includeQuote && hasQuoteTweet(tweet)) {
-    payloads.push(...buildPayloadsForTweet(tweet.quote, "Quoted Tweet"));
-  }
-  return payloads;
-}
-
-function buildPayloadsForTweet(tweet, label) {
-  return splitTweetMessage(tweet, label).map((content) => buildDiscordPayload(content, tweet));
-}
-
-function splitTweetMessage(tweet, label) {
-  const parts = plainTweetParts(tweet, label);
-  const prefix = parts.heading ? `${parts.heading}\n` : "";
-  const mediaBlock = parts.media.join("\n");
-  const textLimit = Math.max(200, MESSAGE_CHUNK_LIMIT - prefix.length);
-  const textChunks = splitText(parts.text, textLimit);
-  const messages = [];
-
-  if (textChunks.length === 0) {
-    const content = [parts.heading, mediaBlock].filter(Boolean).join("\n");
-    return content ? [content] : [parts.heading || "(No text found)"];
+  try {
+    const embedPayloads = buildEmbedDiscordPayloads(tweet, options);
+    if (embedPayloads.length) return embedPayloads;
+  } catch (error) {
+    console.warn("Tweet Discord Share: embed formatting failed, using plain text", error);
   }
 
-  textChunks.forEach((chunk, index) => {
-    const numberedHeading = textChunks.length > 1 ? `${parts.heading} (${index + 1}/${textChunks.length})` : parts.heading;
-    const lines = [numberedHeading, chunk].filter(Boolean);
-
-    if (index === textChunks.length - 1 && mediaBlock) {
-      lines.push(mediaBlock);
-    }
-
-    messages.push(lines.join("\n"));
-  });
-
-  if (mediaBlock && messages[messages.length - 1].length > MESSAGE_CHUNK_LIMIT) {
-    const lastText = messages.pop();
-    messages.push(lastText.replace(`\n${mediaBlock}`, ""));
-    messages.push(...splitMediaMessages(parts.media, parts.heading ? `${parts.heading} media` : "**Media**"));
-  }
-
-  return messages;
-}
-
-function splitMediaMessages(mediaLines, heading) {
-  const messages = [];
-  let current = heading;
-
-  for (const line of mediaLines) {
-    const next = [current, line].filter(Boolean).join("\n");
-    if (next.length > MESSAGE_CHUNK_LIMIT && current !== heading) {
-      messages.push(current);
-      current = [heading, line].filter(Boolean).join("\n");
-    } else {
-      current = next;
-    }
-  }
-
-  if (current) messages.push(current);
-  return messages;
+  return buildPlainFallbackPayloads(tweet, options);
 }
 
 function splitText(text, limit) {

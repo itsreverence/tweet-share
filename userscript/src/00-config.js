@@ -19,6 +19,19 @@ const TOAST_DURATION_MS = 4000;
 
 const DISCORD_LIMITS = { content: 2000 };
 const MESSAGE_CHUNK_LIMIT = 1900;
+const DISCORD_EMBED_LIMITS = {
+  embedsPerMessage: 10,
+  description: 4096,
+  fieldName: 256,
+  fieldValue: 1024,
+  fieldsPerEmbed: 25,
+  authorName: 256,
+  title: 256,
+  footer: 2048,
+  totalEmbedChars: 6000
+};
+const EMBED_COLOR_MAIN = 0x1da1f2;
+const EMBED_COLOR_QUOTE = 0x536471;
 const WEBHOOK_SEND_DELAY_MS = 750;
 const CACHE_MAX_ENTRIES = 300;
 

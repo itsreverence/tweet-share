@@ -16,5 +16,5 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Build and syntax-check userscript
-        run: npm run check
+      - name: Test, build, and syntax-check userscript
+        run: npm test && npm run check
