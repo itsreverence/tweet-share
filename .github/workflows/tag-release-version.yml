@@ -10,15 +10,17 @@ permissions:
   contents: write
 
 jobs:
-  tag-if-new:
+  release-if-new-version:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Create version tag when package.json version is new
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Publish release for new package version
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -29,14 +31,21 @@ jobs:
           fi
 
           TAG="v${VERSION}"
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists — skipping"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — skipping"
             exit 0
           fi
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          npm run build
+          node --check dist/tweet-discord-share.user.js
+          cp dist/tweet-discord-share.user.js tweet-discord-share.user.js
+          sha256sum tweet-discord-share.user.js > checksums.txt
 
-          git tag -a "$TAG" -m "Release $TAG"
-          git push origin "$TAG"
-          echo "Created and pushed $TAG"
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --generate-notes \
+            --latest \
+            tweet-discord-share.user.js \
+            checksums.txt
+
+          echo "Published $TAG as latest release"
