@@ -45,6 +45,8 @@ jobs:
           REPO: ${{ github.repository }}
           TAG: ${{ github.event.release.tag_name }}
           RELEASE_URL: ${{ github.event.release.html_url }}
+          PUBLISHED_AT: ${{ github.event.release.published_at }}
+          IS_PRERELEASE: ${{ github.event.release.prerelease }}
           ASSET_NAME: ${{ steps.asset.outputs.name }}
         run: |
           if [ -z "$WEBHOOK_URL" ]; then
@@ -56,14 +58,46 @@ jobs:
             --arg repo "$REPO" \
             --arg tag "$TAG" \
             --arg release "$RELEASE_URL" \
+            --arg published "$PUBLISHED_AT" \
+            --arg prerelease "$IS_PRERELEASE" \
             --arg asset "$ASSET_NAME" \
-            '{
-              content: (
-                "New " + $repo + " release: " + $tag + "\n" +
-                "Release: " + $release + "\n" +
-                "Attached: " + $asset
-              )
-            }')
+            '
+              ($repo | split("/")) as $parts |
+              ($parts[0]) as $owner |
+              ($parts[1]) as $name |
+              ($name + " · " + $tag) as $title |
+              (if $prerelease == "true" then "Prerelease" else "Stable release" end) as $channel |
+              (if $name == "tweet-share" then 1942002
+               elif $name == "case-clicker" then 15844367
+               else 5814783 end) as $color |
+              {
+                embeds: [{
+                  title: $title,
+                  url: $release,
+                  description: "Install the attached **.user.js** in Tampermonkey or Violentmonkey.",
+                  color: $color,
+                  fields: [
+                    {
+                      name: "Repository",
+                      value: ("[" + $repo + "](https://github.com/" + $repo + ")"),
+                      inline: true
+                    },
+                    {
+                      name: "Channel",
+                      value: $channel,
+                      inline: true
+                    },
+                    {
+                      name: "Attachment",
+                      value: ("`" + $asset + "`"),
+                      inline: false
+                    }
+                  ],
+                  footer: { text: ("GitHub · " + $owner) },
+                  timestamp: $published
+                }]
+              }
+            ')
 
           curl -sS -f \
             -F "payload_json=$payload" \
