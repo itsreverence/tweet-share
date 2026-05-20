@@ -5,9 +5,7 @@
 ## Install
 
 1. Install Tampermonkey or Violentmonkey.
-2. Download **`tweet-discord-share.user.js`** from [Releases](https://github.com/itsreverence/tweet-share/releases):
-   - **[latest-main](https://github.com/itsreverence/tweet-share/releases/tag/latest-main)** — newest build from `master`
-   - **`v*`** tags — stable snapshots (e.g. [v0.6.1](https://github.com/itsreverence/tweet-share/releases/tag/v0.6.1))
+2. Download **`tweet-discord-share.user.js`** from [Releases](https://github.com/itsreverence/tweet-share/releases) — pick the **Latest** release, or [latest-main](https://github.com/itsreverence/tweet-share/releases/tag/latest-main) for bleeding-edge builds.
 3. Open the file in your browser (or paste into a new userscript) and save.
 4. On X, open **Share** on a post → **Share to Discord** (or set up channels first — below).
 
