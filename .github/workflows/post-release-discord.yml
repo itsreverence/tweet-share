@@ -1,0 +1,71 @@
+name: Post release to Discord
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  post-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Find userscript asset
+        id: asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ASSET_NAME=$(gh release view "${{ github.event.release.tag_name }}" \
+            --repo "${{ github.repository }}" \
+            --json assets \
+            --jq '.assets[] | select(.name | endswith(".user.js")) | .name' \
+            | head -n 1)
+
+          if [ -z "$ASSET_NAME" ]; then
+            echo "No .user.js release asset found for tag ${{ github.event.release.tag_name }}"
+            exit 1
+          fi
+
+          echo "name=$ASSET_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Download userscript asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${{ github.event.release.tag_name }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "${{ steps.asset.outputs.name }}" \
+            --clobber
+
+      - name: Post to Discord
+        env:
+          WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          ASSET_NAME: ${{ steps.asset.outputs.name }}
+        run: |
+          if [ -z "$WEBHOOK_URL" ]; then
+            echo "DISCORD_RELEASE_WEBHOOK secret is not configured"
+            exit 1
+          fi
+
+          payload=$(jq -cn \
+            --arg repo "$REPO" \
+            --arg tag "$TAG" \
+            --arg release "$RELEASE_URL" \
+            --arg asset "$ASSET_NAME" \
+            '{
+              content: (
+                "New " + $repo + " release: " + $tag + "\n" +
+                "Release: " + $release + "\n" +
+                "Attached: " + $asset
+              )
+            }')
+
+          curl -sS -f \
+            -F "payload_json=$payload" \
+            -F "files[0]=@$ASSET_NAME;filename=$ASSET_NAME" \
+            "$WEBHOOK_URL"
