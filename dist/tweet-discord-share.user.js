@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweet Discord Share
 // @namespace    https://github.com/tweet-discord-share
-// @version      0.6.6
+// @version      0.6.7
 // @description  Share X/Twitter posts to Discord channels via webhooks (no server required).
 // @match        https://x.com/*
 // @match        https://twitter.com/*
@@ -54,7 +54,8 @@ const DISCORD_EMBED_LIMITS = {
 };
 const EMBED_COLOR_MAIN = 0x1da1f2;
 const EMBED_COLOR_QUOTE = 0x536471;
-const WEBHOOK_SENDER_NAME = "Tweet Discord Share";
+// Discord rejects webhook usernames containing "discord" (case-insensitive).
+const WEBHOOK_SENDER_NAME = "Tweet Share";
 const WEBHOOK_SENDER_AVATAR_URL =
   "https://upload.wikimedia.org/wikipedia/commons/thumb/5/53/X_logo_2023_original.svg/240px-X_logo_2023_original.svg.png";
 const WEBHOOK_SEND_DELAY_MS = 750;

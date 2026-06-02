@@ -47,7 +47,7 @@ test("buildDiscordPayloads returns a single embed message for a simple tweet", (
 
 test("webhook sender is branded while the embed shows the tweet author once", () => {
   const payloads = buildDiscordPayloads(sampleTweet, { includeQuote: false });
-  assert.equal(payloads[0].username, "Tweet Discord Share");
+  assert.equal(payloads[0].username, "Tweet Share");
   assert.match(payloads[0].avatar_url, /^https:\/\//);
   assert.equal(payloads[0].embeds[0].author.name, "Alice");
   assert.equal(payloads[0].embeds[0].author.url, "https://x.com/alice");
