@@ -123,14 +123,51 @@ function createPreviewEmbed(embed) {
   return card;
 }
 
+function previewMessageLabel(payload, index, total) {
+  if (payload._messageLabel) return payload._messageLabel;
+  if (total <= 1) return "";
+  if (payload.content && !payload.embeds?.length) return `Message ${index + 1} of ${total} · Videos`;
+  return `Message ${index + 1} of ${total} · Tweet`;
+}
+
+function appendPreviewContent(message, content) {
+  const blocks = String(content || "").split("\n\n").filter(Boolean);
+  for (const block of blocks) {
+    const blockEl = document.createElement("div");
+    blockEl.className = `${PREVIEW_CLASS}__content-block`;
+
+    const lines = block.split("\n");
+    const titleMatch = /^\*\*(.+)\*\*$/.exec(lines[0] || "");
+    if (titleMatch && lines[1] && /^https?:\/\//i.test(lines[1].trim())) {
+      const title = document.createElement("div");
+      title.className = `${PREVIEW_CLASS}__content-title`;
+      title.textContent = titleMatch[1];
+      blockEl.append(title);
+
+      const link = document.createElement("a");
+      link.className = `${PREVIEW_CLASS}__link`;
+      link.href = lines[1].trim();
+      link.textContent = lines[1].trim();
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      blockEl.append(link);
+    } else {
+      blockEl.textContent = block;
+    }
+
+    message.append(blockEl);
+  }
+}
+
 function createPreviewMessage(payload, index, total) {
   const message = document.createElement("div");
   message.className = `${PREVIEW_CLASS}__message`;
 
-  if (total > 1) {
+  const labelText = previewMessageLabel(payload, index, total);
+  if (labelText) {
     const label = document.createElement("div");
     label.className = `${PREVIEW_CLASS}__message-label`;
-    label.textContent = `Message ${index + 1} of ${total}`;
+    label.textContent = labelText;
     message.append(label);
   }
 
@@ -156,10 +193,7 @@ function createPreviewMessage(payload, index, total) {
   }
 
   if (payload.content) {
-    const content = document.createElement("div");
-    content.className = `${PREVIEW_CLASS}__content`;
-    content.textContent = payload.content;
-    message.append(content);
+    appendPreviewContent(message, payload.content);
   }
 
   for (const embed of payload.embeds || []) {
@@ -256,12 +290,17 @@ function previewStylesCss() {
       font-size: 13px;
       font-weight: 600;
     }
-    .${PREVIEW_CLASS}__content {
+    .${PREVIEW_CLASS}__content-block {
       color: rgb(var(--tds-text, 231 233 234));
+      display: flex;
+      flex-direction: column;
       font-size: 14px;
+      gap: 4px;
       line-height: 1.45;
-      white-space: pre-wrap;
       word-break: break-word;
+    }
+    .${PREVIEW_CLASS}__content-title {
+      font-weight: 700;
     }
     .${PREVIEW_CLASS}__embed {
       background: rgb(var(--tds-text, 231 233 234) / 0.06);

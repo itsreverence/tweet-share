@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweet Discord Share
 // @namespace    https://github.com/tweet-discord-share
-// @version      0.6.11
+// @version      0.6.12
 // @description  Share X/Twitter posts to Discord channels via webhooks (no server required).
 // @match        https://x.com/*
 // @match        https://twitter.com/*
@@ -720,6 +720,44 @@ function pickEmbedImageUrl(mediaItems) {
   return image?.url || mediaItems.find((item) => isHttpsUrl(item.url) && /pbs\.twimg\.com/i.test(item.url))?.url || "";
 }
 
+function pickEmbedHeroUrl(tweet, mediaItems) {
+  const imageHero = pickEmbedImageUrl(mediaItems);
+  if (imageHero) return imageHero;
+
+  const poster = videoMedia(tweet).map((item) => item.posterUrl).find((url) => isTweetVideoPosterUrl(url));
+  return poster || "";
+}
+
+function isImageSupplementEmbed(embed) {
+  return Boolean(embed.image?.url && embed.title && !embed.author);
+}
+
+function buildMediaHintField(imageSupplementCount, videosBelow) {
+  if (imageSupplementCount <= 0) return null;
+
+  const parts = [
+    imageSupplementCount === 1 ? "1 more image below" : `${imageSupplementCount} more images below`
+  ];
+  if (videosBelow) parts.push("then video in next message");
+
+  return {
+    name: "More images",
+    value: truncate(`${parts.join(", ")} ↓`, DISCORD_EMBED_LIMITS.fieldValue),
+    inline: false
+  };
+}
+
+function appendMediaHintToLastContentEmbed(embeds, imageSupplementCount, videosBelow) {
+  const hintField = buildMediaHintField(imageSupplementCount, videosBelow);
+  if (!hintField || !embeds.length) return embeds;
+
+  const lastContentEmbed = [...embeds].reverse().find((embed) => embed.author || embed.description);
+  if (!lastContentEmbed) return embeds;
+
+  lastContentEmbed.fields = [...(lastContentEmbed.fields || []), hintField];
+  return embeds;
+}
+
 function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind) {
   const color = kind === "quote" ? EMBED_COLOR_QUOTE : EMBED_COLOR_MAIN;
   const permalink = tweet.url || "";
@@ -731,10 +769,19 @@ function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind) {
         color,
         title: truncate(item.label, DISCORD_EMBED_LIMITS.title),
         url: permalink || undefined,
-        image: { url: item.url },
-        footer: embedFooterForUrl(permalink)
+        image: { url: item.url }
       })
     );
+}
+
+function assembleTweetEmbedGroup(tweet, kind, shareOptions, contentEmbeds, media, heroImageUrl) {
+  const supplements = buildImageSupplementEmbeds(tweet, media, heroImageUrl, kind);
+  const withHints = appendMediaHintToLastContentEmbed(
+    contentEmbeds,
+    supplements.length,
+    shareOptions.videosBelow === true
+  );
+  return [...withHints, ...supplements];
 }
 
 function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
@@ -742,49 +789,50 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
   const permalink = tweet.url || "";
   const text = String(tweet.text || "").trim();
   const media = mediaLinks(tweet, shareOptions);
-  const heroImageUrl = pickEmbedImageUrl(media);
-  const mediaFields = buildMediaFields(
-    media.filter((item) => item.kind === "video"),
-    { videosBelow: shareOptions.videosBelow === true }
-  );
+  const heroImageUrl = pickEmbedHeroUrl(tweet, media);
+  const mediaFields = buildMediaFields(media.filter((item) => item.kind === "video"), {
+    videosBelow: shareOptions.videosBelow === true
+  });
   const footer = embedFooterForUrl(permalink);
   const descriptionChunks = splitText(text, DISCORD_EMBED_LIMITS.description);
-  const embeds = [];
+  const contentEmbeds = [];
 
   if (descriptionChunks.length === 0) {
-    const embed = pruneEmbed({
-      color,
-      author: embedAuthorBlock(tweet),
-      description: media.length ? undefined : "(No text found)",
-      url: permalink || undefined,
-      image: heroImageUrl ? { url: heroImageUrl } : undefined,
-      fields: mediaFields.length ? mediaFields : undefined,
-      footer
-    });
-    embeds.push(embed);
-    return [...embeds, ...buildImageSupplementEmbeds(tweet, media, heroImageUrl, kind)];
+    contentEmbeds.push(
+      pruneEmbed({
+        color,
+        author: embedAuthorBlock(tweet),
+        description: media.length ? undefined : "(No text found)",
+        url: permalink || undefined,
+        image: heroImageUrl ? { url: heroImageUrl } : undefined,
+        fields: mediaFields.length ? mediaFields : undefined,
+        footer
+      })
+    );
+    return assembleTweetEmbedGroup(tweet, kind, shareOptions, contentEmbeds, media, heroImageUrl);
   }
 
   descriptionChunks.forEach((chunk, index) => {
     const isFirst = index === 0;
     const isLast = index === descriptionChunks.length - 1;
-    const embed = pruneEmbed({
-      color,
-      author: isFirst ? embedAuthorBlock(tweet) : undefined,
-      title:
-        descriptionChunks.length > 1 && !isFirst
-          ? truncate(`Continued (${index + 1}/${descriptionChunks.length})`, DISCORD_EMBED_LIMITS.title)
-          : undefined,
-      description: chunk,
-      url: isFirst && permalink ? permalink : undefined,
-      image: isFirst && heroImageUrl ? { url: heroImageUrl } : undefined,
-      fields: isLast && mediaFields.length ? mediaFields : undefined,
-      footer: isLast ? footer : undefined
-    });
-    embeds.push(embed);
+    contentEmbeds.push(
+      pruneEmbed({
+        color,
+        author: isFirst ? embedAuthorBlock(tweet) : undefined,
+        title:
+          descriptionChunks.length > 1 && !isFirst
+            ? truncate(`Continued (${index + 1}/${descriptionChunks.length})`, DISCORD_EMBED_LIMITS.title)
+            : undefined,
+        description: chunk,
+        url: isFirst && permalink ? permalink : undefined,
+        image: isFirst && heroImageUrl ? { url: heroImageUrl } : undefined,
+        fields: isLast && mediaFields.length ? mediaFields : undefined,
+        footer: isLast ? footer : undefined
+      })
+    );
   });
 
-  return [...embeds, ...buildImageSupplementEmbeds(tweet, media, heroImageUrl, kind)];
+  return assembleTweetEmbedGroup(tweet, kind, shareOptions, contentEmbeds, media, heroImageUrl);
 }
 
 function packEmbedsIntoMessages(embeds) {
@@ -842,13 +890,25 @@ function buildWebhookPayload(embeds, tweet, options = {}) {
   };
   if (embeds.length) payload.embeds = embeds;
   if (options.content) payload.content = options.content;
+  if (options.messageLabel) payload._messageLabel = options.messageLabel;
   return payload;
 }
 
-function buildVideoFollowUpContent(entries) {
+function buildVideoFollowUpContent(entries, context = {}) {
   if (!entries.length) return undefined;
 
-  const intro = entries.length === 1 ? "_Video for the post above:_" : "_Videos for the post above:_";
+  const { imageSupplementCount = 0 } = context;
+  let intro;
+  if (imageSupplementCount > 0 && entries.length === 1) {
+    intro = "_Video for the posts above (after the extra images):_";
+  } else if (imageSupplementCount > 0) {
+    intro = "_Videos for the posts above (after the extra images):_";
+  } else if (entries.length === 1) {
+    intro = "_Video for the post above:_";
+  } else {
+    intro = "_Videos for the post above:_";
+  }
+
   const blocks = entries.map((entry) => `**${entry.caption}**\n${entry.url}`);
   return truncate([intro, ...blocks].join("\n\n"), DISCORD_LIMITS.content);
 }
@@ -863,14 +923,25 @@ function buildEmbedDiscordPayloads(tweet, options = {}) {
     embeds.push(...buildTweetEmbedGroup(tweet.quote, "quote", shareOptions));
   }
 
+  const imageSupplementCount = embeds.filter(isImageSupplementEmbed).length;
   const packed = packEmbedsIntoMessages(embeds);
   if (!packed.length) return [];
 
-  const messages = packed.map((group) => buildWebhookPayload(group, tweet));
-  const videoContent = buildVideoFollowUpContent(videoEntries);
+  const messages = packed.map((group, index) =>
+    buildWebhookPayload(group, tweet, {
+      messageLabel: packed.length > 1 ? `Tweet embeds ${index + 1}/${packed.length}` : undefined
+    })
+  );
+
+  const videoContent = buildVideoFollowUpContent(videoEntries, { imageSupplementCount });
   if (videoContent) {
     // Discord unfurls MP4 links in content, but not when custom embeds are on the same message.
-    messages.push(buildWebhookPayload([], tweet, { content: videoContent }));
+    messages.push(
+      buildWebhookPayload([], tweet, {
+        content: videoContent,
+        messageLabel: "Videos"
+      })
+    );
   }
   return messages;
 }
@@ -1210,6 +1281,11 @@ function extractTweet(article) {
 }
 
   // --- 08-deliver.js ---
+function sanitizeWebhookPayload(payload) {
+  const { _messageLabel, ...discordPayload } = payload;
+  return discordPayload;
+}
+
 async function shareToDestination(destinationId, tweet, options = {}) {
   const destination = await getDestinationById(destinationId);
   if (!destination?.webhookUrl) {
@@ -1218,7 +1294,7 @@ async function shareToDestination(destinationId, tweet, options = {}) {
 
   const payloads = buildDiscordPayloads(tweet, options);
   for (let index = 0; index < payloads.length; index += 1) {
-    const payload = payloads[index];
+    const payload = sanitizeWebhookPayload(payloads[index]);
     await request("POST", destination.webhookUrl, payload);
     if (index < payloads.length - 1) {
       await delay(WEBHOOK_SEND_DELAY_MS);
@@ -2440,14 +2516,51 @@ function createPreviewEmbed(embed) {
   return card;
 }
 
+function previewMessageLabel(payload, index, total) {
+  if (payload._messageLabel) return payload._messageLabel;
+  if (total <= 1) return "";
+  if (payload.content && !payload.embeds?.length) return `Message ${index + 1} of ${total} · Videos`;
+  return `Message ${index + 1} of ${total} · Tweet`;
+}
+
+function appendPreviewContent(message, content) {
+  const blocks = String(content || "").split("\n\n").filter(Boolean);
+  for (const block of blocks) {
+    const blockEl = document.createElement("div");
+    blockEl.className = `${PREVIEW_CLASS}__content-block`;
+
+    const lines = block.split("\n");
+    const titleMatch = /^\*\*(.+)\*\*$/.exec(lines[0] || "");
+    if (titleMatch && lines[1] && /^https?:\/\//i.test(lines[1].trim())) {
+      const title = document.createElement("div");
+      title.className = `${PREVIEW_CLASS}__content-title`;
+      title.textContent = titleMatch[1];
+      blockEl.append(title);
+
+      const link = document.createElement("a");
+      link.className = `${PREVIEW_CLASS}__link`;
+      link.href = lines[1].trim();
+      link.textContent = lines[1].trim();
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      blockEl.append(link);
+    } else {
+      blockEl.textContent = block;
+    }
+
+    message.append(blockEl);
+  }
+}
+
 function createPreviewMessage(payload, index, total) {
   const message = document.createElement("div");
   message.className = `${PREVIEW_CLASS}__message`;
 
-  if (total > 1) {
+  const labelText = previewMessageLabel(payload, index, total);
+  if (labelText) {
     const label = document.createElement("div");
     label.className = `${PREVIEW_CLASS}__message-label`;
-    label.textContent = `Message ${index + 1} of ${total}`;
+    label.textContent = labelText;
     message.append(label);
   }
 
@@ -2473,10 +2586,7 @@ function createPreviewMessage(payload, index, total) {
   }
 
   if (payload.content) {
-    const content = document.createElement("div");
-    content.className = `${PREVIEW_CLASS}__content`;
-    content.textContent = payload.content;
-    message.append(content);
+    appendPreviewContent(message, payload.content);
   }
 
   for (const embed of payload.embeds || []) {
@@ -2573,12 +2683,17 @@ function previewStylesCss() {
       font-size: 13px;
       font-weight: 600;
     }
-    .${PREVIEW_CLASS}__content {
+    .${PREVIEW_CLASS}__content-block {
       color: rgb(var(--tds-text, 231 233 234));
+      display: flex;
+      flex-direction: column;
       font-size: 14px;
+      gap: 4px;
       line-height: 1.45;
-      white-space: pre-wrap;
       word-break: break-word;
+    }
+    .${PREVIEW_CLASS}__content-title {
+      font-weight: 700;
     }
     .${PREVIEW_CLASS}__embed {
       background: rgb(var(--tds-text, 231 233 234) / 0.06);

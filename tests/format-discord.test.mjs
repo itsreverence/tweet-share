@@ -149,7 +149,7 @@ test("extra images become supplemental embeds instead of link fields", () => {
   assert.equal(embeds[1].title, "Image 2");
   assert.equal(embeds[1].image.url, "https://pbs.twimg.com/media/two.jpg");
   assert.equal(embeds[2].title, "Image 3");
-  assert.equal(embeds[0].fields, undefined);
+  assert.ok(embeds[0].fields?.some((field) => field.name === "More images"));
   assert.equal(embeds[0].color, 0x1da1f2);
   assert.equal(embeds[1].color, 0x1da1f2);
 });
@@ -181,6 +181,39 @@ test("supplemental images use quote color and author prefixes when both posts ha
   assert.equal(embeds[2].color, 0x536471);
   assert.equal(embeds[3].title, "Bob · Image 2");
   assert.equal(embeds[3].color, 0x536471);
+});
+
+test("video, images, and quote media share labels and stay in order", () => {
+  const videoUrl = "https://video.twimg.com/ext_tw_video/1/pu/vid/abc/1280x720/main.mp4";
+  const tweet = {
+    ...sampleTweet,
+    text: "Main post",
+    media: [
+      { type: "image", url: "https://pbs.twimg.com/media/main1.jpg" },
+      { type: "image", url: "https://pbs.twimg.com/media/main2.jpg" },
+      { type: "video", url: videoUrl, posterUrl: "https://pbs.twimg.com/media/main-poster.jpg" }
+    ],
+    quote: {
+      url: "https://x.com/bob/status/2",
+      author: { displayName: "Bob", username: "bob" },
+      text: "Quoted",
+      media: [{ type: "image", url: "https://pbs.twimg.com/media/q1.jpg" }]
+    }
+  };
+
+  const payloads = buildDiscordPayloads(tweet);
+  assert.equal(payloads.length, 2);
+  assert.equal(payloads[0].embeds.length, 3);
+
+  const mainFields = payloads[0].embeds[0].fields || [];
+  assert.ok(mainFields.some((field) => field.name === "Video 1" && field.value === "Plays below ↓"));
+  assert.ok(mainFields.some((field) => field.name === "More images" && /1 more image below/.test(field.value)));
+
+  assert.equal(payloads[0].embeds[1].title, "Image 2");
+  assert.equal(payloads[0].embeds[2].color, 0x536471);
+  assert.equal(payloads[0].embeds[2].author.name, "Bob");
+  assert.match(payloads[1].content, /after the extra images/);
+  assert.match(payloads[1].content, /\*\*Alice · Video 1\*\*/);
 });
 
 test("long tweet text splits across continuation embeds without duplicate url", () => {
