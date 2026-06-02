@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweet Discord Share
 // @namespace    https://github.com/tweet-discord-share
-// @version      0.6.8
+// @version      0.6.9
 // @description  Share X/Twitter posts to Discord channels via webhooks (no server required).
 // @match        https://x.com/*
 // @match        https://twitter.com/*
@@ -16,7 +16,6 @@
 // @grant        GM_xmlhttpRequest
 // @connect      discord.com
 // @connect      cdn.syndication.twimg.com
-// @connect      video.twimg.com
 // @license      MIT
 // ==/UserScript==
 
@@ -221,53 +220,6 @@ function request(method, url, body) {
       url,
       headers: { "content-type": "application/json" },
       data: body ? JSON.stringify(body) : undefined,
-      onload(response) {
-        try {
-          resolve(parseDiscordResponse(response));
-        } catch (error) {
-          reject(error);
-        }
-      },
-      onerror() {
-        reject(new Error("Could not reach Discord. Check your network and webhook URL."));
-      }
-    });
-  });
-}
-
-function fetchBinary(url) {
-  return new Promise((resolve, reject) => {
-    xhrClient()({
-      method: "GET",
-      url,
-      responseType: "arraybuffer",
-      onload(response) {
-        if (response.status >= 200 && response.status < 300) {
-          resolve(response.response);
-          return;
-        }
-        reject(new Error(`Could not download media (${response.status}).`));
-      },
-      onerror() {
-        reject(new Error("Could not download media. Check your network."));
-      }
-    });
-  });
-}
-
-function requestWebhookMultipart(webhookUrl, payload, files) {
-  return new Promise((resolve, reject) => {
-    const form = new FormData();
-    form.append("payload_json", JSON.stringify(payload));
-    files.forEach((file, index) => {
-      const blob = new Blob([file.data], { type: file.type || "video/mp4" });
-      form.append(`files[${index}]`, blob, file.filename);
-    });
-
-    xhrClient()({
-      method: "POST",
-      url: webhookUrl,
-      data: form,
       onload(response) {
         try {
           resolve(parseDiscordResponse(response));
@@ -836,19 +788,9 @@ function buildWebhookPayload(embeds, tweet, options = {}) {
   return payload;
 }
 
-function buildVideoAttachmentPayload(tweet, options = {}) {
-  const urls = collectShareVideoUrls(tweet, options);
-  if (!urls.length) return null;
-
-  return {
-    username: webhookSenderName(),
-    avatar_url: webhookSenderAvatarUrl(),
-    allowed_mentions: { parse: [] },
-    _videoAttachments: urls.map((url, index) => ({
-      url,
-      filename: `video-${index + 1}.mp4`
-    }))
-  };
+function buildVideoLinkContent(videoUrls) {
+  if (!videoUrls.length) return undefined;
+  return truncate(videoUrls.join("\n"), DISCORD_LIMITS.content);
 }
 
 function buildEmbedDiscordPayloads(tweet, options = {}) {
@@ -863,8 +805,11 @@ function buildEmbedDiscordPayloads(tweet, options = {}) {
   if (!packed.length) return [];
 
   const messages = packed.map((group) => buildWebhookPayload(group, tweet));
-  const videoPayload = buildVideoAttachmentPayload(tweet, options);
-  if (videoPayload) messages.push(videoPayload);
+  const videoContent = buildVideoLinkContent(collectShareVideoUrls(tweet, options));
+  if (videoContent) {
+    // Discord unfurls MP4 links in content, but not when custom embeds are on the same message.
+    messages.push(buildWebhookPayload([], tweet, { content: videoContent }));
+  }
   return messages;
 }
 
@@ -1203,38 +1148,6 @@ function extractTweet(article) {
 }
 
   // --- 08-deliver.js ---
-function isVideoAttachmentPayload(payload) {
-  return Array.isArray(payload?._videoAttachments) && payload._videoAttachments.length > 0;
-}
-
-async function sendVideoAttachmentPayload(webhookUrl, payload) {
-  const discordPayload = {
-    username: payload.username,
-    avatar_url: payload.avatar_url,
-    allowed_mentions: payload.allowed_mentions
-  };
-
-  const files = await Promise.all(
-    payload._videoAttachments.map(async (item) => ({
-      filename: item.filename,
-      type: "video/mp4",
-      data: await fetchBinary(item.url)
-    }))
-  );
-
-  await requestWebhookMultipart(webhookUrl, discordPayload, files);
-}
-
-async function sendVideoUrlFallback(webhookUrl, payload) {
-  const urls = payload._videoAttachments.map((item) => item.url).join("\n");
-  await request("POST", webhookUrl, {
-    username: payload.username,
-    avatar_url: payload.avatar_url,
-    content: truncate(urls, DISCORD_LIMITS.content),
-    allowed_mentions: { parse: [] }
-  });
-}
-
 async function shareToDestination(destinationId, tweet, options = {}) {
   const destination = await getDestinationById(destinationId);
   if (!destination?.webhookUrl) {
@@ -1244,16 +1157,7 @@ async function shareToDestination(destinationId, tweet, options = {}) {
   const payloads = buildDiscordPayloads(tweet, options);
   for (let index = 0; index < payloads.length; index += 1) {
     const payload = payloads[index];
-    if (isVideoAttachmentPayload(payload)) {
-      try {
-        await sendVideoAttachmentPayload(destination.webhookUrl, payload);
-      } catch (error) {
-        console.warn("Tweet Share: video upload failed, sending URLs only", error);
-        await sendVideoUrlFallback(destination.webhookUrl, payload);
-      }
-    } else {
-      await request("POST", destination.webhookUrl, payload);
-    }
+    await request("POST", destination.webhookUrl, payload);
     if (index < payloads.length - 1) {
       await delay(WEBHOOK_SEND_DELAY_MS);
     }
@@ -2483,16 +2387,6 @@ function createPreviewMessage(payload, index, total) {
     label.className = `${PREVIEW_CLASS}__message-label`;
     label.textContent = `Message ${index + 1} of ${total}`;
     message.append(label);
-  }
-
-  if (payload._videoAttachments?.length) {
-    const note = document.createElement("div");
-    note.className = `${PREVIEW_CLASS}__content`;
-    note.textContent =
-      payload._videoAttachments.length === 1
-        ? "A video file will be uploaded in a separate message."
-        : `${payload._videoAttachments.length} video files will be uploaded in a separate message.`;
-    message.append(note);
   }
 
   if (payload.username || payload.avatar_url) {

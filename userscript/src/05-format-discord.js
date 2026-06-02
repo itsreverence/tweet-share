@@ -211,19 +211,9 @@ function buildWebhookPayload(embeds, tweet, options = {}) {
   return payload;
 }
 
-function buildVideoAttachmentPayload(tweet, options = {}) {
-  const urls = collectShareVideoUrls(tweet, options);
-  if (!urls.length) return null;
-
-  return {
-    username: webhookSenderName(),
-    avatar_url: webhookSenderAvatarUrl(),
-    allowed_mentions: { parse: [] },
-    _videoAttachments: urls.map((url, index) => ({
-      url,
-      filename: `video-${index + 1}.mp4`
-    }))
-  };
+function buildVideoLinkContent(videoUrls) {
+  if (!videoUrls.length) return undefined;
+  return truncate(videoUrls.join("\n"), DISCORD_LIMITS.content);
 }
 
 function buildEmbedDiscordPayloads(tweet, options = {}) {
@@ -238,8 +228,11 @@ function buildEmbedDiscordPayloads(tweet, options = {}) {
   if (!packed.length) return [];
 
   const messages = packed.map((group) => buildWebhookPayload(group, tweet));
-  const videoPayload = buildVideoAttachmentPayload(tweet, options);
-  if (videoPayload) messages.push(videoPayload);
+  const videoContent = buildVideoLinkContent(collectShareVideoUrls(tweet, options));
+  if (videoContent) {
+    // Discord unfurls MP4 links in content, but not when custom embeds are on the same message.
+    messages.push(buildWebhookPayload([], tweet, { content: videoContent }));
+  }
   return messages;
 }
 

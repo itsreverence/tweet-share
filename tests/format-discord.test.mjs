@@ -88,7 +88,7 @@ test("packEmbedsIntoMessages respects the 6000 character budget", () => {
   }
 });
 
-test("videos use a separate attachment message while the embed keeps a Video field", () => {
+test("videos are sent in a separate link-only message so Discord can unfurl them", () => {
   const videoUrl = "https://video.twimg.com/ext_tw_video/1/pu/vid/abc/1280x720/clip.mp4";
   const tweet = {
     ...sampleTweet,
@@ -99,8 +99,8 @@ test("videos use a separate attachment message while the embed keeps a Video fie
   const payloads = buildDiscordPayloads(tweet, { includeQuote: false });
   assert.equal(payloads.length, 2);
   assert.equal(payloads[0].content, undefined);
-  assert.equal(payloads[1]._videoAttachments?.length, 1);
-  assert.equal(payloads[1]._videoAttachments[0].url, videoUrl);
+  assert.equal(payloads[1].content, videoUrl);
+  assert.equal(payloads[1].embeds, undefined);
 
   const fields = payloads[0].embeds.at(-1)?.fields || [];
   assert.ok(fields.some((field) => field.name === "Video 1" && field.value.includes("video.twimg.com")));
