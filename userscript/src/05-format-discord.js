@@ -200,23 +200,30 @@ function collectShareVideoUrls(tweet, options = {}) {
   return unique(urls);
 }
 
-// Discord only unfurls direct media URLs from message content, not from embed fields.
-function buildVideoPlaybackContent(videoUrls) {
-  if (!videoUrls.length) return undefined;
-  return truncate(videoUrls.join("\n"), DISCORD_LIMITS.content);
-}
-
 function buildWebhookPayload(embeds, tweet, options = {}) {
   const payload = {
     username: webhookSenderName(),
     avatar_url: webhookSenderAvatarUrl(),
-    embeds,
     allowed_mentions: { parse: [] }
   };
-  if (options.content) {
-    payload.content = options.content;
-  }
+  if (embeds.length) payload.embeds = embeds;
+  if (options.content) payload.content = options.content;
   return payload;
+}
+
+function buildVideoAttachmentPayload(tweet, options = {}) {
+  const urls = collectShareVideoUrls(tweet, options);
+  if (!urls.length) return null;
+
+  return {
+    username: webhookSenderName(),
+    avatar_url: webhookSenderAvatarUrl(),
+    allowed_mentions: { parse: [] },
+    _videoAttachments: urls.map((url, index) => ({
+      url,
+      filename: `video-${index + 1}.mp4`
+    }))
+  };
 }
 
 function buildEmbedDiscordPayloads(tweet, options = {}) {
@@ -230,10 +237,10 @@ function buildEmbedDiscordPayloads(tweet, options = {}) {
   const packed = packEmbedsIntoMessages(embeds);
   if (!packed.length) return [];
 
-  const videoContent = buildVideoPlaybackContent(collectShareVideoUrls(tweet, options));
-  return packed.map((group, index) => buildWebhookPayload(group, tweet, {
-    content: index === 0 ? videoContent : undefined
-  }));
+  const messages = packed.map((group) => buildWebhookPayload(group, tweet));
+  const videoPayload = buildVideoAttachmentPayload(tweet, options);
+  if (videoPayload) messages.push(videoPayload);
+  return messages;
 }
 
 function formatMediaLinkPlain(item) {

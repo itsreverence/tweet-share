@@ -134,6 +134,16 @@ function createPreviewMessage(payload, index, total) {
     message.append(label);
   }
 
+  if (payload._videoAttachments?.length) {
+    const note = document.createElement("div");
+    note.className = `${PREVIEW_CLASS}__content`;
+    note.textContent =
+      payload._videoAttachments.length === 1
+        ? "A video file will be uploaded in a separate message."
+        : `${payload._videoAttachments.length} video files will be uploaded in a separate message.`;
+    message.append(note);
+  }
+
   if (payload.username || payload.avatar_url) {
     const header = document.createElement("div");
     header.className = `${PREVIEW_CLASS}__webhook`;

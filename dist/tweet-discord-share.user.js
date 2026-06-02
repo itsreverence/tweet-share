@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweet Discord Share
 // @namespace    https://github.com/tweet-discord-share
-// @version      0.6.7
+// @version      0.6.8
 // @description  Share X/Twitter posts to Discord channels via webhooks (no server required).
 // @match        https://x.com/*
 // @match        https://twitter.com/*
@@ -16,6 +16,7 @@
 // @grant        GM_xmlhttpRequest
 // @connect      discord.com
 // @connect      cdn.syndication.twimg.com
+// @connect      video.twimg.com
 // @license      MIT
 // ==/UserScript==
 
@@ -56,8 +57,9 @@ const EMBED_COLOR_MAIN = 0x1da1f2;
 const EMBED_COLOR_QUOTE = 0x536471;
 // Discord rejects webhook usernames containing "discord" (case-insensitive).
 const WEBHOOK_SENDER_NAME = "Tweet Share";
+// Self-hosted in repo so Discord's servers can fetch it reliably (Wikimedia often fails).
 const WEBHOOK_SENDER_AVATAR_URL =
-  "https://upload.wikimedia.org/wikipedia/commons/thumb/5/53/X_logo_2023_original.svg/240px-X_logo_2023_original.svg.png";
+  "https://raw.githubusercontent.com/itsreverence/tweet-share/master/assets/webhook-avatar.png";
 const WEBHOOK_SEND_DELAY_MS = 750;
 const CACHE_MAX_ENTRIES = 300;
 
@@ -191,28 +193,86 @@ function tdsSharedSurfaceCss() {
 }
 
   // --- 01-http.js ---
+function xhrClient() {
+  return typeof GM !== "undefined" && GM.xmlHttpRequest ? GM.xmlHttpRequest : GM_xmlhttpRequest;
+}
+
+function parseDiscordResponse(response) {
+  const text = response.responseText || "{}";
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    json = { raw: text };
+  }
+
+  if (response.status >= 200 && response.status < 300) {
+    return json;
+  }
+
+  const detail = json.message || json.error || text.slice(0, 200);
+  throw new Error(detail || `Discord webhook returned ${response.status}`);
+}
+
 function request(method, url, body) {
   return new Promise((resolve, reject) => {
-    const xhr = typeof GM !== "undefined" && GM.xmlHttpRequest ? GM.xmlHttpRequest : GM_xmlhttpRequest;
-    xhr({
+    xhrClient()({
       method,
       url,
       headers: { "content-type": "application/json" },
       data: body ? JSON.stringify(body) : undefined,
       onload(response) {
-        const text = response.responseText || "{}";
-        let json;
         try {
-          json = JSON.parse(text);
-        } catch {
-          json = { raw: text };
+          resolve(parseDiscordResponse(response));
+        } catch (error) {
+          reject(error);
         }
+      },
+      onerror() {
+        reject(new Error("Could not reach Discord. Check your network and webhook URL."));
+      }
+    });
+  });
+}
 
+function fetchBinary(url) {
+  return new Promise((resolve, reject) => {
+    xhrClient()({
+      method: "GET",
+      url,
+      responseType: "arraybuffer",
+      onload(response) {
         if (response.status >= 200 && response.status < 300) {
-          resolve(json);
-        } else {
-          const detail = json.message || json.error || text.slice(0, 200);
-          reject(new Error(detail || `Discord webhook returned ${response.status}`));
+          resolve(response.response);
+          return;
+        }
+        reject(new Error(`Could not download media (${response.status}).`));
+      },
+      onerror() {
+        reject(new Error("Could not download media. Check your network."));
+      }
+    });
+  });
+}
+
+function requestWebhookMultipart(webhookUrl, payload, files) {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append("payload_json", JSON.stringify(payload));
+    files.forEach((file, index) => {
+      const blob = new Blob([file.data], { type: file.type || "video/mp4" });
+      form.append(`files[${index}]`, blob, file.filename);
+    });
+
+    xhrClient()({
+      method: "POST",
+      url: webhookUrl,
+      data: form,
+      onload(response) {
+        try {
+          resolve(parseDiscordResponse(response));
+        } catch (error) {
+          reject(error);
         }
       },
       onerror() {
@@ -765,23 +825,30 @@ function collectShareVideoUrls(tweet, options = {}) {
   return unique(urls);
 }
 
-// Discord only unfurls direct media URLs from message content, not from embed fields.
-function buildVideoPlaybackContent(videoUrls) {
-  if (!videoUrls.length) return undefined;
-  return truncate(videoUrls.join("\n"), DISCORD_LIMITS.content);
-}
-
 function buildWebhookPayload(embeds, tweet, options = {}) {
   const payload = {
     username: webhookSenderName(),
     avatar_url: webhookSenderAvatarUrl(),
-    embeds,
     allowed_mentions: { parse: [] }
   };
-  if (options.content) {
-    payload.content = options.content;
-  }
+  if (embeds.length) payload.embeds = embeds;
+  if (options.content) payload.content = options.content;
   return payload;
+}
+
+function buildVideoAttachmentPayload(tweet, options = {}) {
+  const urls = collectShareVideoUrls(tweet, options);
+  if (!urls.length) return null;
+
+  return {
+    username: webhookSenderName(),
+    avatar_url: webhookSenderAvatarUrl(),
+    allowed_mentions: { parse: [] },
+    _videoAttachments: urls.map((url, index) => ({
+      url,
+      filename: `video-${index + 1}.mp4`
+    }))
+  };
 }
 
 function buildEmbedDiscordPayloads(tweet, options = {}) {
@@ -795,10 +862,10 @@ function buildEmbedDiscordPayloads(tweet, options = {}) {
   const packed = packEmbedsIntoMessages(embeds);
   if (!packed.length) return [];
 
-  const videoContent = buildVideoPlaybackContent(collectShareVideoUrls(tweet, options));
-  return packed.map((group, index) => buildWebhookPayload(group, tweet, {
-    content: index === 0 ? videoContent : undefined
-  }));
+  const messages = packed.map((group) => buildWebhookPayload(group, tweet));
+  const videoPayload = buildVideoAttachmentPayload(tweet, options);
+  if (videoPayload) messages.push(videoPayload);
+  return messages;
 }
 
 function formatMediaLinkPlain(item) {
@@ -1136,6 +1203,38 @@ function extractTweet(article) {
 }
 
   // --- 08-deliver.js ---
+function isVideoAttachmentPayload(payload) {
+  return Array.isArray(payload?._videoAttachments) && payload._videoAttachments.length > 0;
+}
+
+async function sendVideoAttachmentPayload(webhookUrl, payload) {
+  const discordPayload = {
+    username: payload.username,
+    avatar_url: payload.avatar_url,
+    allowed_mentions: payload.allowed_mentions
+  };
+
+  const files = await Promise.all(
+    payload._videoAttachments.map(async (item) => ({
+      filename: item.filename,
+      type: "video/mp4",
+      data: await fetchBinary(item.url)
+    }))
+  );
+
+  await requestWebhookMultipart(webhookUrl, discordPayload, files);
+}
+
+async function sendVideoUrlFallback(webhookUrl, payload) {
+  const urls = payload._videoAttachments.map((item) => item.url).join("\n");
+  await request("POST", webhookUrl, {
+    username: payload.username,
+    avatar_url: payload.avatar_url,
+    content: truncate(urls, DISCORD_LIMITS.content),
+    allowed_mentions: { parse: [] }
+  });
+}
+
 async function shareToDestination(destinationId, tweet, options = {}) {
   const destination = await getDestinationById(destinationId);
   if (!destination?.webhookUrl) {
@@ -1145,7 +1244,16 @@ async function shareToDestination(destinationId, tweet, options = {}) {
   const payloads = buildDiscordPayloads(tweet, options);
   for (let index = 0; index < payloads.length; index += 1) {
     const payload = payloads[index];
-    await request("POST", destination.webhookUrl, payload);
+    if (isVideoAttachmentPayload(payload)) {
+      try {
+        await sendVideoAttachmentPayload(destination.webhookUrl, payload);
+      } catch (error) {
+        console.warn("Tweet Share: video upload failed, sending URLs only", error);
+        await sendVideoUrlFallback(destination.webhookUrl, payload);
+      }
+    } else {
+      await request("POST", destination.webhookUrl, payload);
+    }
     if (index < payloads.length - 1) {
       await delay(WEBHOOK_SEND_DELAY_MS);
     }
@@ -2375,6 +2483,16 @@ function createPreviewMessage(payload, index, total) {
     label.className = `${PREVIEW_CLASS}__message-label`;
     label.textContent = `Message ${index + 1} of ${total}`;
     message.append(label);
+  }
+
+  if (payload._videoAttachments?.length) {
+    const note = document.createElement("div");
+    note.className = `${PREVIEW_CLASS}__content`;
+    note.textContent =
+      payload._videoAttachments.length === 1
+        ? "A video file will be uploaded in a separate message."
+        : `${payload._videoAttachments.length} video files will be uploaded in a separate message.`;
+    message.append(note);
   }
 
   if (payload.username || payload.avatar_url) {

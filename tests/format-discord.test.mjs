@@ -88,7 +88,7 @@ test("packEmbedsIntoMessages respects the 6000 character budget", () => {
   }
 });
 
-test("video URLs appear in message content for Discord playback while staying in embed fields", () => {
+test("videos use a separate attachment message while the embed keeps a Video field", () => {
   const videoUrl = "https://video.twimg.com/ext_tw_video/1/pu/vid/abc/1280x720/clip.mp4";
   const tweet = {
     ...sampleTweet,
@@ -97,8 +97,10 @@ test("video URLs appear in message content for Discord playback while staying in
   };
 
   const payloads = buildDiscordPayloads(tweet, { includeQuote: false });
-  assert.equal(payloads.length, 1);
-  assert.equal(payloads[0].content, videoUrl);
+  assert.equal(payloads.length, 2);
+  assert.equal(payloads[0].content, undefined);
+  assert.equal(payloads[1]._videoAttachments?.length, 1);
+  assert.equal(payloads[1]._videoAttachments[0].url, videoUrl);
 
   const fields = payloads[0].embeds.at(-1)?.fields || [];
   assert.ok(fields.some((field) => field.name === "Video 1" && field.value.includes("video.twimg.com")));
