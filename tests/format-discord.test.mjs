@@ -45,6 +45,16 @@ test("buildDiscordPayloads returns a single embed message for a simple tweet", (
   assert.equal(payloads[0].content, undefined);
 });
 
+test("webhook sender is branded while the embed shows the tweet author once", () => {
+  const payloads = buildDiscordPayloads(sampleTweet, { includeQuote: false });
+  assert.equal(payloads[0].username, "Tweet Discord Share");
+  assert.match(payloads[0].avatar_url, /^https:\/\//);
+  assert.equal(payloads[0].embeds[0].author.name, "Alice");
+  assert.equal(payloads[0].embeds[0].author.url, "https://x.com/alice");
+  assert.match(payloads[0].embeds[0].author.icon_url, /profile_images/);
+  assert.doesNotMatch(payloads[0].embeds[0].author.name, /@alice/);
+});
+
 test("quote tweet adds a second embed in the same message", () => {
   const tweet = {
     ...sampleTweet,
@@ -76,6 +86,22 @@ test("packEmbedsIntoMessages respects the 6000 character budget", () => {
     assert.ok(total <= 6000);
     assert.ok(group.length <= 10);
   }
+});
+
+test("video URLs appear in message content for Discord playback while staying in embed fields", () => {
+  const videoUrl = "https://video.twimg.com/ext_tw_video/1/pu/vid/abc/1280x720/clip.mp4";
+  const tweet = {
+    ...sampleTweet,
+    text: "Clip",
+    media: [{ type: "video", url: videoUrl }]
+  };
+
+  const payloads = buildDiscordPayloads(tweet, { includeQuote: false });
+  assert.equal(payloads.length, 1);
+  assert.equal(payloads[0].content, videoUrl);
+
+  const fields = payloads[0].embeds.at(-1)?.fields || [];
+  assert.ok(fields.some((field) => field.name === "Video 1" && field.value.includes("video.twimg.com")));
 });
 
 test("long tweet text splits across continuation embeds without duplicate url", () => {

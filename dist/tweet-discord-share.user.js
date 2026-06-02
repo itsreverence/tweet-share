@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweet Discord Share
 // @namespace    https://github.com/tweet-discord-share
-// @version      0.6.5
+// @version      0.6.6
 // @description  Share X/Twitter posts to Discord channels via webhooks (no server required).
 // @match        https://x.com/*
 // @match        https://twitter.com/*
@@ -54,6 +54,9 @@ const DISCORD_EMBED_LIMITS = {
 };
 const EMBED_COLOR_MAIN = 0x1da1f2;
 const EMBED_COLOR_QUOTE = 0x536471;
+const WEBHOOK_SENDER_NAME = "Tweet Discord Share";
+const WEBHOOK_SENDER_AVATAR_URL =
+  "https://upload.wikimedia.org/wikipedia/commons/thumb/5/53/X_logo_2023_original.svg/240px-X_logo_2023_original.svg.png";
 const WEBHOOK_SEND_DELAY_MS = 750;
 const CACHE_MAX_ENTRIES = 300;
 
@@ -565,12 +568,25 @@ function formatAuthor(tweet) {
   return [author, username].filter(Boolean).join(" ");
 }
 
-function webhookUsername(tweet) {
-  return truncate(tweet.author?.displayName || tweet.author?.username || "Tweet Share", 80);
+function tweetAuthorAvatarUrl(tweet) {
+  const url = highResolutionProfileImageUrl(tweet.author?.avatarUrl);
+  return isHttpsUrl(url) ? url : undefined;
 }
 
-function webhookAvatarUrl(tweet) {
-  return highResolutionProfileImageUrl(tweet.author?.avatarUrl) || undefined;
+function webhookSenderName() {
+  return WEBHOOK_SENDER_NAME;
+}
+
+function embedAuthorDisplayName(tweet) {
+  const displayName = String(tweet.author?.displayName || "").trim();
+  const username = String(tweet.author?.username || "").trim();
+  if (displayName) return truncate(displayName, DISCORD_EMBED_LIMITS.authorName);
+  if (username) return truncate(`@${username}`, DISCORD_EMBED_LIMITS.authorName);
+  return "Unknown author";
+}
+
+function webhookSenderAvatarUrl() {
+  return WEBHOOK_SENDER_AVATAR_URL;
 }
 
 function uniqueMediaLinks(items) {
@@ -595,9 +611,8 @@ function isHttpsUrl(url) {
 }
 
 function embedAuthorBlock(tweet) {
-  const name = truncate(formatAuthor(tweet), DISCORD_EMBED_LIMITS.authorName);
-  const block = { name };
-  const iconUrl = webhookAvatarUrl(tweet);
+  const block = { name: embedAuthorDisplayName(tweet) };
+  const iconUrl = tweetAuthorAvatarUrl(tweet);
   if (isHttpsUrl(iconUrl)) block.icon_url = iconUrl;
   if (tweet.author?.username) block.url = `https://x.com/${tweet.author.username}`;
   return block;
@@ -740,13 +755,32 @@ function packEmbedsIntoMessages(embeds) {
   return messages;
 }
 
-function buildWebhookPayload(embeds, tweet) {
-  return {
-    username: webhookUsername(tweet),
-    avatar_url: webhookAvatarUrl(tweet),
+function collectShareVideoUrls(tweet, options = {}) {
+  const { includeQuote = true } = options;
+  const urls = [...directPlayableVideoUrls(tweet)];
+  if (includeQuote && hasQuoteTweet(tweet)) {
+    urls.push(...directPlayableVideoUrls(tweet.quote));
+  }
+  return unique(urls);
+}
+
+// Discord only unfurls direct media URLs from message content, not from embed fields.
+function buildVideoPlaybackContent(videoUrls) {
+  if (!videoUrls.length) return undefined;
+  return truncate(videoUrls.join("\n"), DISCORD_LIMITS.content);
+}
+
+function buildWebhookPayload(embeds, tweet, options = {}) {
+  const payload = {
+    username: webhookSenderName(),
+    avatar_url: webhookSenderAvatarUrl(),
     embeds,
     allowed_mentions: { parse: [] }
   };
+  if (options.content) {
+    payload.content = options.content;
+  }
+  return payload;
 }
 
 function buildEmbedDiscordPayloads(tweet, options = {}) {
@@ -760,7 +794,10 @@ function buildEmbedDiscordPayloads(tweet, options = {}) {
   const packed = packEmbedsIntoMessages(embeds);
   if (!packed.length) return [];
 
-  return packed.map((group) => buildWebhookPayload(group, tweet));
+  const videoContent = buildVideoPlaybackContent(collectShareVideoUrls(tweet, options));
+  return packed.map((group, index) => buildWebhookPayload(group, tweet, {
+    content: index === 0 ? videoContent : undefined
+  }));
 }
 
 function formatMediaLinkPlain(item) {
@@ -796,8 +833,8 @@ function buildPlainFallbackPayloads(tweet, options = {}) {
   const parts = chunks.length ? chunks : [body || formatAuthor(tweet)];
 
   return parts.map((content) => ({
-    username: webhookUsername(tweet),
-    avatar_url: webhookAvatarUrl(tweet),
+    username: webhookSenderName(),
+    avatar_url: webhookSenderAvatarUrl(),
     content: truncate(content, DISCORD_LIMITS.content),
     allowed_mentions: { parse: [] }
   }));
@@ -2355,7 +2392,7 @@ function createPreviewMessage(payload, index, total) {
 
     const name = document.createElement("span");
     name.className = `${PREVIEW_CLASS}__webhook-name`;
-    name.textContent = payload.username || "Tweet Share";
+    name.textContent = payload.username || WEBHOOK_SENDER_NAME;
     header.append(name);
     message.append(header);
   }

@@ -27,6 +27,9 @@ const DISCORD_EMBED_LIMITS = {
 };
 const EMBED_COLOR_MAIN = 0x1da1f2;
 const EMBED_COLOR_QUOTE = 0x536471;
+const WEBHOOK_SENDER_NAME = "Tweet Discord Share";
+const WEBHOOK_SENDER_AVATAR_URL =
+  "https://upload.wikimedia.org/wikipedia/commons/thumb/5/53/X_logo_2023_original.svg/240px-X_logo_2023_original.svg.png";
 const WEBHOOK_SEND_DELAY_MS = 750;
 const CACHE_MAX_ENTRIES = 300;
 

@@ -150,7 +150,7 @@ function createPreviewMessage(payload, index, total) {
 
     const name = document.createElement("span");
     name.className = `${PREVIEW_CLASS}__webhook-name`;
-    name.textContent = payload.username || "Tweet Share";
+    name.textContent = payload.username || WEBHOOK_SENDER_NAME;
     header.append(name);
     message.append(header);
   }
