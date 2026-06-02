@@ -88,7 +88,7 @@ test("packEmbedsIntoMessages respects the 6000 character budget", () => {
   }
 });
 
-test("videos are sent in a separate link-only message so Discord can unfurl them", () => {
+test("videos are sent in a separate labeled message that matches the embed field", () => {
   const videoUrl = "https://video.twimg.com/ext_tw_video/1/pu/vid/abc/1280x720/clip.mp4";
   const tweet = {
     ...sampleTweet,
@@ -99,11 +99,37 @@ test("videos are sent in a separate link-only message so Discord can unfurl them
   const payloads = buildDiscordPayloads(tweet, { includeQuote: false });
   assert.equal(payloads.length, 2);
   assert.equal(payloads[0].content, undefined);
-  assert.equal(payloads[1].content, videoUrl);
-  assert.equal(payloads[1].embeds, undefined);
+  assert.match(payloads[1].content, /Video for the post above/);
+  assert.match(payloads[1].content, /\*\*Video 1\*\*/);
+  assert.match(payloads[1].content, new RegExp(videoUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
   const fields = payloads[0].embeds.at(-1)?.fields || [];
-  assert.ok(fields.some((field) => field.name === "Video 1" && field.value.includes("video.twimg.com")));
+  assert.ok(fields.some((field) => field.name === "Video 1" && field.value === "Plays below ↓"));
+});
+
+test("videos label each post when both the main and quoted tweets have video", () => {
+  const mainVideo = "https://video.twimg.com/ext_tw_video/1/pu/vid/abc/1280x720/main.mp4";
+  const quoteVideo = "https://video.twimg.com/ext_tw_video/2/pu/vid/abc/1280x720/quote.mp4";
+  const tweet = {
+    ...sampleTweet,
+    media: [{ type: "video", url: mainVideo }],
+    quote: {
+      url: "https://x.com/bob/status/2",
+      author: { displayName: "Bob", username: "bob" },
+      text: "Quoted clip",
+      media: [{ type: "video", url: quoteVideo }]
+    }
+  };
+
+  const payloads = buildDiscordPayloads(tweet);
+  assert.equal(payloads.length, 2);
+  assert.match(payloads[1].content, /\*\*Alice · Video 1\*\*/);
+  assert.match(payloads[1].content, /\*\*Bob · Video 1\*\*/);
+
+  const mainFields = payloads[0].embeds[0]?.fields || [];
+  const quoteFields = payloads[0].embeds[1]?.fields || [];
+  assert.ok(mainFields.some((field) => field.name === "Alice · Video 1"));
+  assert.ok(quoteFields.some((field) => field.name === "Bob · Video 1"));
 });
 
 test("long tweet text splits across continuation embeds without duplicate url", () => {
