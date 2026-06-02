@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweet Discord Share
 // @namespace    https://github.com/tweet-discord-share
-// @version      0.6.4
+// @version      0.6.5
 // @description  Share X/Twitter posts to Discord channels via webhooks (no server required).
 // @match        https://x.com/*
 // @match        https://twitter.com/*
@@ -33,6 +33,7 @@ const POPOVER_CLASS = "tds-popover";
 const TOAST_HOST_CLASS = "tds-toast-host";
 const TOAST_CLASS = "tds-toast";
 const SETTINGS_CLASS = "tds-settings";
+const PREVIEW_CLASS = "tds-preview";
 const DESTINATION_KEY = "tds-last-destination";
 const DESTINATIONS_STORAGE_KEY = "tds-destinations";
 const WEBHOOK_URL_PATTERN = /^https:\/\/discord\.com\/api\/webhooks\/\d+\/[\w-]+$/i;
@@ -1137,6 +1138,7 @@ function injectStyles() {
   const style = document.createElement("style");
   style.textContent = `
     ${tdsSharedSurfaceCss()}
+    ${previewStylesCss()}
 
     .${SHARE_MENU_ITEM_CLASS} {
       cursor: pointer;
@@ -1294,7 +1296,9 @@ function positionPopover(menu, anchor) {
   menu.style.visibility = "hidden";
   menu.style.left = "0";
   menu.style.top = "0";
-  document.body.append(menu);
+  if (!menu.isConnected) {
+    document.body.append(menu);
+  }
 
   const menuRect = menu.getBoundingClientRect();
   let top = rect.top - menuRect.height - margin;
@@ -1318,23 +1322,99 @@ function articleHasQuotableTweet(article) {
   }
 }
 
+async function prepareShareTweet(article) {
+  const tweet = await enrichTweetMedia(extractTweet(article));
+  if (DEBUG_MEDIA_EXTRACTION) {
+    console.group("Tweet Discord Share media debug");
+    console.log(tweet);
+    console.log("Detected direct video URLs", directVideoUrlsFromDocument());
+    console.log("Cached video variants", Object.fromEntries(VIDEO_VARIANT_CACHE));
+    console.groupEnd();
+  }
+  return tweet;
+}
+
+function setDestinationItemsDisabled(items, disabled) {
+  for (const item of items) {
+    item.disabled = disabled;
+    item.setAttribute("aria-disabled", disabled ? "true" : "false");
+    if (disabled) {
+      item.style.opacity = "0.55";
+      item.style.pointerEvents = "none";
+    } else {
+      item.style.opacity = "";
+      item.style.pointerEvents = "";
+    }
+  }
+}
+
 function openDestinationMenu(anchor, article, destinations, options = {}) {
   const { showQuoteOption = false } = options;
   closeDestinationMenu();
 
   const last = localStorage.getItem(DESTINATION_KEY);
   const menu = document.createElement("div");
-  menu.className = POPOVER_CLASS;
+  menu.className = `${POPOVER_CLASS} ${POPOVER_CLASS}--with-preview`;
   applyXThemeVars(menu);
   menu.setAttribute("role", "menu");
-  menu.setAttribute("aria-label", "Choose Discord destination");
+  menu.setAttribute("aria-label", "Share to Discord");
 
   const titleEl = document.createElement("div");
   titleEl.className = `${POPOVER_CLASS}__title`;
   titleEl.textContent = "Share to Discord";
   menu.append(titleEl);
 
+  const destinationsHost = document.createElement("div");
+
+  const previewWrap = document.createElement("div");
+  previewWrap.className = `${POPOVER_CLASS}__preview-wrap`;
+  const previewLabel = document.createElement("p");
+  previewLabel.className = `${POPOVER_CLASS}__preview-label`;
+  previewLabel.textContent = "Preview";
+  const previewBody = document.createElement("div");
+  const previewStatus = document.createElement("p");
+  previewStatus.className = `${POPOVER_CLASS}__preview-status`;
+  previewStatus.textContent = "Loading preview…";
+  previewBody.append(previewStatus);
+  previewWrap.append(previewLabel, previewBody);
+
   let includeQuote = true;
+  let preparedTweet = null;
+  let loadGeneration = 0;
+  const destinationItems = [];
+
+  function shareOptions() {
+    return showQuoteOption ? { includeQuote } : {};
+  }
+
+  function refreshPreview() {
+    if (!preparedTweet) return;
+    previewBody.replaceChildren(renderDiscordPreview(buildDiscordPayloads(preparedTweet, shareOptions())));
+    positionPopover(menu, anchor);
+  }
+
+  async function loadPreview() {
+    const generation = ++loadGeneration;
+    setDestinationItemsDisabled(destinationItems, true);
+    previewBody.replaceChildren();
+    previewStatus.textContent = "Loading preview…";
+    previewBody.append(previewStatus);
+
+    try {
+      preparedTweet = await prepareShareTweet(article);
+      if (generation !== loadGeneration) return;
+      previewBody.replaceChildren(renderDiscordPreview(buildDiscordPayloads(preparedTweet, shareOptions())));
+      setDestinationItemsDisabled(destinationItems, false);
+      positionPopover(menu, anchor);
+    } catch (error) {
+      if (generation !== loadGeneration) return;
+      console.error(error);
+      previewStatus.textContent = error.message || "Could not build a preview for this post.";
+      previewBody.replaceChildren(previewStatus);
+      setDestinationItemsDisabled(destinationItems, true);
+    }
+  }
+
   if (showQuoteOption) {
     const quoteOption = document.createElement("label");
     quoteOption.className = `${POPOVER_CLASS}__quote-option`;
@@ -1344,6 +1424,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     quoteCheckbox.checked = true;
     quoteCheckbox.addEventListener("change", () => {
       includeQuote = quoteCheckbox.checked;
+      refreshPreview();
     });
 
     const quoteLabel = document.createElement("span");
@@ -1353,24 +1434,31 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     menu.append(quoteOption);
   }
 
+  menu.append(previewWrap, destinationsHost);
+
   destinations.forEach((destination) => {
     const item = document.createElement("button");
     item.type = "button";
     item.className = `${POPOVER_CLASS}__item`;
     item.setAttribute("role", "menuitem");
     item.textContent = destination.label;
+    item.disabled = true;
+    item.setAttribute("aria-disabled", "true");
+    item.style.opacity = "0.55";
+    item.style.pointerEvents = "none";
     if (destination.id === last) {
       item.dataset.last = "true";
     }
     item.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
+      if (!preparedTweet) return;
       closeDestinationMenu();
       localStorage.setItem(DESTINATION_KEY, destination.id);
-      const shareOptions = showQuoteOption ? { includeQuote } : {};
-      runShare(article, destination.id, shareOptions);
+      runShare(article, destination.id, shareOptions(), preparedTweet);
     });
-    menu.append(item);
+    destinationsHost.append(item);
+    destinationItems.push(item);
   });
 
   const footer = document.createElement("div");
@@ -1390,6 +1478,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
 
   positionPopover(menu, anchor);
   activePopover = menu;
+  loadPreview();
 
   const onKeyDown = (event) => {
     if (event.key === "Escape") {
@@ -1409,23 +1498,17 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
   }, 0);
 
   activePopoverCleanup = () => {
+    loadGeneration += 1;
     document.removeEventListener("keydown", onKeyDown);
     document.removeEventListener("pointerdown", onPointerDown, true);
   };
 }
 
-async function runShare(article, destinationId, options = {}) {
-  showToast("Preparing…", "info");
+async function runShare(article, destinationId, options = {}, preparedTweet = null) {
+  showToast(preparedTweet ? "Sending…" : "Preparing…", "info");
 
   try {
-    const tweet = await enrichTweetMedia(extractTweet(article));
-    if (DEBUG_MEDIA_EXTRACTION) {
-      console.group("Tweet Discord Share media debug");
-      console.log(tweet);
-      console.log("Detected direct video URLs", directVideoUrlsFromDocument());
-      console.log("Cached video variants", Object.fromEntries(VIDEO_VARIANT_CACHE));
-      console.groupEnd();
-    }
+    const tweet = preparedTweet ?? await prepareShareTweet(article);
     await shareToDestination(destinationId, tweet, options);
     showToast(`Sent to ${await destinationLabel(destinationId)}`, "success");
   } catch (error) {
@@ -1443,12 +1526,6 @@ async function startDiscordShare(article, anchor) {
   }
 
   const showQuoteOption = articleHasQuotableTweet(article);
-  if (destinations.length === 1 && !showQuoteOption) {
-    closeXOverlay();
-    await runShare(article, destinations[0].id);
-    return;
-  }
-
   closeXOverlay();
   window.setTimeout(() => openDestinationMenu(anchor, article, destinations, { showQuoteOption }), 50);
 }
@@ -2124,4 +2201,349 @@ function registerSettingsMenuCommand() {
 }
 
 registerSettingsMenuCommand();
+
+  // --- 12-preview.js ---
+function embedColorCss(color) {
+  if (typeof color !== "number") return "#5865f2";
+  return `#${(color >>> 0).toString(16).padStart(6, "0").slice(-6)}`;
+}
+
+function appendLinkText(container, value) {
+  const text = String(value || "").trim();
+  if (!text) return;
+
+  const masked = /^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/i.exec(text);
+  if (masked) {
+    const link = document.createElement("a");
+    link.className = `${PREVIEW_CLASS}__link`;
+    link.href = masked[2];
+    link.textContent = masked[1];
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    container.append(link);
+    return;
+  }
+
+  if (/^https?:\/\//i.test(text)) {
+    const link = document.createElement("a");
+    link.className = `${PREVIEW_CLASS}__link`;
+    link.href = text;
+    link.textContent = text;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    container.append(link);
+    return;
+  }
+
+  container.textContent = text;
+}
+
+function createPreviewEmbed(embed) {
+  const card = document.createElement("article");
+  card.className = `${PREVIEW_CLASS}__embed`;
+  card.style.setProperty("--tds-preview-accent", embedColorCss(embed.color));
+
+  if (embed.author?.name) {
+    const author = document.createElement("div");
+    author.className = `${PREVIEW_CLASS}__author`;
+
+    if (embed.author.icon_url) {
+      const icon = document.createElement("img");
+      icon.className = `${PREVIEW_CLASS}__author-icon`;
+      icon.src = embed.author.icon_url;
+      icon.alt = "";
+      icon.loading = "lazy";
+      icon.referrerPolicy = "no-referrer";
+      author.append(icon);
+    }
+
+    const name = document.createElement("span");
+    name.className = `${PREVIEW_CLASS}__author-name`;
+    if (embed.author.url) {
+      const link = document.createElement("a");
+      link.className = `${PREVIEW_CLASS}__link`;
+      link.href = embed.author.url;
+      link.textContent = embed.author.name;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      name.append(link);
+    } else {
+      name.textContent = embed.author.name;
+    }
+
+    author.append(name);
+    card.append(author);
+  }
+
+  if (embed.title) {
+    const title = document.createElement("div");
+    title.className = `${PREVIEW_CLASS}__title`;
+    title.textContent = embed.title;
+    card.append(title);
+  }
+
+  if (embed.description) {
+    const description = document.createElement("div");
+    description.className = `${PREVIEW_CLASS}__description`;
+    description.textContent = embed.description;
+    card.append(description);
+  }
+
+  if (embed.image?.url) {
+    const imageWrap = document.createElement("div");
+    imageWrap.className = `${PREVIEW_CLASS}__image-wrap`;
+    const image = document.createElement("img");
+    image.className = `${PREVIEW_CLASS}__image`;
+    image.src = embed.image.url;
+    image.alt = "";
+    image.loading = "lazy";
+    image.referrerPolicy = "no-referrer";
+    imageWrap.append(image);
+    card.append(imageWrap);
+  }
+
+  for (const field of embed.fields || []) {
+    const fieldEl = document.createElement("div");
+    fieldEl.className = `${PREVIEW_CLASS}__field`;
+
+    const name = document.createElement("div");
+    name.className = `${PREVIEW_CLASS}__field-name`;
+    name.textContent = field.name || "";
+
+    const value = document.createElement("div");
+    value.className = `${PREVIEW_CLASS}__field-value`;
+    appendLinkText(value, field.value);
+
+    fieldEl.append(name, value);
+    card.append(fieldEl);
+  }
+
+  if (embed.footer?.text) {
+    const footer = document.createElement("div");
+    footer.className = `${PREVIEW_CLASS}__footer`;
+    footer.textContent = embed.footer.text;
+    card.append(footer);
+  }
+
+  return card;
+}
+
+function createPreviewMessage(payload, index, total) {
+  const message = document.createElement("div");
+  message.className = `${PREVIEW_CLASS}__message`;
+
+  if (total > 1) {
+    const label = document.createElement("div");
+    label.className = `${PREVIEW_CLASS}__message-label`;
+    label.textContent = `Message ${index + 1} of ${total}`;
+    message.append(label);
+  }
+
+  if (payload.username || payload.avatar_url) {
+    const header = document.createElement("div");
+    header.className = `${PREVIEW_CLASS}__webhook`;
+
+    if (payload.avatar_url) {
+      const avatar = document.createElement("img");
+      avatar.className = `${PREVIEW_CLASS}__webhook-avatar`;
+      avatar.src = payload.avatar_url;
+      avatar.alt = "";
+      avatar.loading = "lazy";
+      avatar.referrerPolicy = "no-referrer";
+      header.append(avatar);
+    }
+
+    const name = document.createElement("span");
+    name.className = `${PREVIEW_CLASS}__webhook-name`;
+    name.textContent = payload.username || "Tweet Share";
+    header.append(name);
+    message.append(header);
+  }
+
+  if (payload.content) {
+    const content = document.createElement("div");
+    content.className = `${PREVIEW_CLASS}__content`;
+    content.textContent = payload.content;
+    message.append(content);
+  }
+
+  for (const embed of payload.embeds || []) {
+    message.append(createPreviewEmbed(embed));
+  }
+
+  return message;
+}
+
+function renderDiscordPreview(payloads) {
+  const host = document.createElement("div");
+  host.className = PREVIEW_CLASS;
+  const list = Array.isArray(payloads) ? payloads : [];
+
+  if (!list.length) {
+    const empty = document.createElement("p");
+    empty.className = `${PREVIEW_CLASS}__empty`;
+    empty.textContent = "Nothing to preview for this post.";
+    host.append(empty);
+    return host;
+  }
+
+  list.forEach((payload, index) => {
+    host.append(createPreviewMessage(payload, index, list.length));
+  });
+
+  return host;
+}
+
+function previewStylesCss() {
+  return `
+    .${POPOVER_CLASS}--with-preview {
+      min-width: min(320px, calc(100vw - 16px));
+      max-width: min(400px, calc(100vw - 16px));
+    }
+    .${POPOVER_CLASS}__preview-wrap {
+      border-top-width: 1px;
+      border-top-style: solid;
+      border-color: rgb(var(--tds-border, 47 51 54));
+      margin: 4px 4px 8px;
+      max-height: min(42vh, 360px);
+      overflow: auto;
+      padding: 8px 8px 4px;
+    }
+    .${POPOVER_CLASS}__preview-label {
+      color: rgb(var(--tds-subtle, 113 118 123));
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      margin: 0 0 8px;
+      text-transform: uppercase;
+    }
+    .${POPOVER_CLASS}__preview-status {
+      color: rgb(var(--tds-subtle, 113 118 123));
+      font-size: 14px;
+      line-height: 1.4;
+      margin: 0;
+      padding: 8px 4px 12px;
+    }
+    .${PREVIEW_CLASS} {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .${PREVIEW_CLASS}__empty {
+      color: rgb(var(--tds-subtle, 113 118 123));
+      font-size: 14px;
+      line-height: 1.4;
+      margin: 0;
+    }
+    .${PREVIEW_CLASS}__message {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .${PREVIEW_CLASS}__message-label {
+      color: rgb(var(--tds-subtle, 113 118 123));
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .${PREVIEW_CLASS}__webhook {
+      align-items: center;
+      display: flex;
+      gap: 8px;
+    }
+    .${PREVIEW_CLASS}__webhook-avatar {
+      border-radius: 50%;
+      height: 20px;
+      object-fit: cover;
+      width: 20px;
+    }
+    .${PREVIEW_CLASS}__webhook-name {
+      color: rgb(var(--tds-text, 231 233 234));
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .${PREVIEW_CLASS}__content {
+      color: rgb(var(--tds-text, 231 233 234));
+      font-size: 14px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .${PREVIEW_CLASS}__embed {
+      background: rgb(var(--tds-text, 231 233 234) / 0.06);
+      border-left: 4px solid var(--tds-preview-accent, #5865f2);
+      border-radius: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 8px 10px 10px 8px;
+    }
+    .${PREVIEW_CLASS}__author {
+      align-items: center;
+      display: flex;
+      gap: 8px;
+    }
+    .${PREVIEW_CLASS}__author-icon {
+      border-radius: 50%;
+      height: 20px;
+      object-fit: cover;
+      width: 20px;
+    }
+    .${PREVIEW_CLASS}__author-name {
+      color: rgb(var(--tds-text, 231 233 234));
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .${PREVIEW_CLASS}__title {
+      color: rgb(var(--tds-text, 231 233 234));
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .${PREVIEW_CLASS}__description {
+      color: rgb(var(--tds-text, 231 233 234));
+      font-size: 14px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .${PREVIEW_CLASS}__image-wrap {
+      margin-top: 2px;
+      max-width: 100%;
+    }
+    .${PREVIEW_CLASS}__image {
+      border-radius: 4px;
+      display: block;
+      max-height: 200px;
+      max-width: 100%;
+      object-fit: contain;
+    }
+    .${PREVIEW_CLASS}__field {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .${PREVIEW_CLASS}__field-name {
+      color: rgb(var(--tds-text, 231 233 234));
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .${PREVIEW_CLASS}__field-value {
+      color: rgb(var(--tds-subtle, 113 118 123));
+      font-size: 13px;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+    .${PREVIEW_CLASS}__footer {
+      color: rgb(var(--tds-subtle, 113 118 123));
+      font-size: 12px;
+    }
+    .${PREVIEW_CLASS}__link {
+      color: rgb(var(--tds-blue, 29 155 240));
+      text-decoration: none;
+      word-break: break-all;
+    }
+    .${PREVIEW_CLASS}__link:hover {
+      text-decoration: underline;
+    }
+  `;
+}
 })();

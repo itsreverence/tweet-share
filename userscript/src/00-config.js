@@ -6,6 +6,7 @@ const POPOVER_CLASS = "tds-popover";
 const TOAST_HOST_CLASS = "tds-toast-host";
 const TOAST_CLASS = "tds-toast";
 const SETTINGS_CLASS = "tds-settings";
+const PREVIEW_CLASS = "tds-preview";
 const DESTINATION_KEY = "tds-last-destination";
 const DESTINATIONS_STORAGE_KEY = "tds-destinations";
 const WEBHOOK_URL_PATTERN = /^https:\/\/discord\.com\/api\/webhooks\/\d+\/[\w-]+$/i;

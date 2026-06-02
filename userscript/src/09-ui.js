@@ -21,6 +21,7 @@ function injectStyles() {
   const style = document.createElement("style");
   style.textContent = `
     ${tdsSharedSurfaceCss()}
+    ${previewStylesCss()}
 
     .${SHARE_MENU_ITEM_CLASS} {
       cursor: pointer;
@@ -178,7 +179,9 @@ function positionPopover(menu, anchor) {
   menu.style.visibility = "hidden";
   menu.style.left = "0";
   menu.style.top = "0";
-  document.body.append(menu);
+  if (!menu.isConnected) {
+    document.body.append(menu);
+  }
 
   const menuRect = menu.getBoundingClientRect();
   let top = rect.top - menuRect.height - margin;
@@ -202,23 +205,99 @@ function articleHasQuotableTweet(article) {
   }
 }
 
+async function prepareShareTweet(article) {
+  const tweet = await enrichTweetMedia(extractTweet(article));
+  if (DEBUG_MEDIA_EXTRACTION) {
+    console.group("Tweet Discord Share media debug");
+    console.log(tweet);
+    console.log("Detected direct video URLs", directVideoUrlsFromDocument());
+    console.log("Cached video variants", Object.fromEntries(VIDEO_VARIANT_CACHE));
+    console.groupEnd();
+  }
+  return tweet;
+}
+
+function setDestinationItemsDisabled(items, disabled) {
+  for (const item of items) {
+    item.disabled = disabled;
+    item.setAttribute("aria-disabled", disabled ? "true" : "false");
+    if (disabled) {
+      item.style.opacity = "0.55";
+      item.style.pointerEvents = "none";
+    } else {
+      item.style.opacity = "";
+      item.style.pointerEvents = "";
+    }
+  }
+}
+
 function openDestinationMenu(anchor, article, destinations, options = {}) {
   const { showQuoteOption = false } = options;
   closeDestinationMenu();
 
   const last = localStorage.getItem(DESTINATION_KEY);
   const menu = document.createElement("div");
-  menu.className = POPOVER_CLASS;
+  menu.className = `${POPOVER_CLASS} ${POPOVER_CLASS}--with-preview`;
   applyXThemeVars(menu);
   menu.setAttribute("role", "menu");
-  menu.setAttribute("aria-label", "Choose Discord destination");
+  menu.setAttribute("aria-label", "Share to Discord");
 
   const titleEl = document.createElement("div");
   titleEl.className = `${POPOVER_CLASS}__title`;
   titleEl.textContent = "Share to Discord";
   menu.append(titleEl);
 
+  const destinationsHost = document.createElement("div");
+
+  const previewWrap = document.createElement("div");
+  previewWrap.className = `${POPOVER_CLASS}__preview-wrap`;
+  const previewLabel = document.createElement("p");
+  previewLabel.className = `${POPOVER_CLASS}__preview-label`;
+  previewLabel.textContent = "Preview";
+  const previewBody = document.createElement("div");
+  const previewStatus = document.createElement("p");
+  previewStatus.className = `${POPOVER_CLASS}__preview-status`;
+  previewStatus.textContent = "Loading preview…";
+  previewBody.append(previewStatus);
+  previewWrap.append(previewLabel, previewBody);
+
   let includeQuote = true;
+  let preparedTweet = null;
+  let loadGeneration = 0;
+  const destinationItems = [];
+
+  function shareOptions() {
+    return showQuoteOption ? { includeQuote } : {};
+  }
+
+  function refreshPreview() {
+    if (!preparedTweet) return;
+    previewBody.replaceChildren(renderDiscordPreview(buildDiscordPayloads(preparedTweet, shareOptions())));
+    positionPopover(menu, anchor);
+  }
+
+  async function loadPreview() {
+    const generation = ++loadGeneration;
+    setDestinationItemsDisabled(destinationItems, true);
+    previewBody.replaceChildren();
+    previewStatus.textContent = "Loading preview…";
+    previewBody.append(previewStatus);
+
+    try {
+      preparedTweet = await prepareShareTweet(article);
+      if (generation !== loadGeneration) return;
+      previewBody.replaceChildren(renderDiscordPreview(buildDiscordPayloads(preparedTweet, shareOptions())));
+      setDestinationItemsDisabled(destinationItems, false);
+      positionPopover(menu, anchor);
+    } catch (error) {
+      if (generation !== loadGeneration) return;
+      console.error(error);
+      previewStatus.textContent = error.message || "Could not build a preview for this post.";
+      previewBody.replaceChildren(previewStatus);
+      setDestinationItemsDisabled(destinationItems, true);
+    }
+  }
+
   if (showQuoteOption) {
     const quoteOption = document.createElement("label");
     quoteOption.className = `${POPOVER_CLASS}__quote-option`;
@@ -228,6 +307,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     quoteCheckbox.checked = true;
     quoteCheckbox.addEventListener("change", () => {
       includeQuote = quoteCheckbox.checked;
+      refreshPreview();
     });
 
     const quoteLabel = document.createElement("span");
@@ -237,24 +317,31 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     menu.append(quoteOption);
   }
 
+  menu.append(previewWrap, destinationsHost);
+
   destinations.forEach((destination) => {
     const item = document.createElement("button");
     item.type = "button";
     item.className = `${POPOVER_CLASS}__item`;
     item.setAttribute("role", "menuitem");
     item.textContent = destination.label;
+    item.disabled = true;
+    item.setAttribute("aria-disabled", "true");
+    item.style.opacity = "0.55";
+    item.style.pointerEvents = "none";
     if (destination.id === last) {
       item.dataset.last = "true";
     }
     item.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
+      if (!preparedTweet) return;
       closeDestinationMenu();
       localStorage.setItem(DESTINATION_KEY, destination.id);
-      const shareOptions = showQuoteOption ? { includeQuote } : {};
-      runShare(article, destination.id, shareOptions);
+      runShare(article, destination.id, shareOptions(), preparedTweet);
     });
-    menu.append(item);
+    destinationsHost.append(item);
+    destinationItems.push(item);
   });
 
   const footer = document.createElement("div");
@@ -274,6 +361,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
 
   positionPopover(menu, anchor);
   activePopover = menu;
+  loadPreview();
 
   const onKeyDown = (event) => {
     if (event.key === "Escape") {
@@ -293,23 +381,17 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
   }, 0);
 
   activePopoverCleanup = () => {
+    loadGeneration += 1;
     document.removeEventListener("keydown", onKeyDown);
     document.removeEventListener("pointerdown", onPointerDown, true);
   };
 }
 
-async function runShare(article, destinationId, options = {}) {
-  showToast("Preparing…", "info");
+async function runShare(article, destinationId, options = {}, preparedTweet = null) {
+  showToast(preparedTweet ? "Sending…" : "Preparing…", "info");
 
   try {
-    const tweet = await enrichTweetMedia(extractTweet(article));
-    if (DEBUG_MEDIA_EXTRACTION) {
-      console.group("Tweet Discord Share media debug");
-      console.log(tweet);
-      console.log("Detected direct video URLs", directVideoUrlsFromDocument());
-      console.log("Cached video variants", Object.fromEntries(VIDEO_VARIANT_CACHE));
-      console.groupEnd();
-    }
+    const tweet = preparedTweet ?? await prepareShareTweet(article);
     await shareToDestination(destinationId, tweet, options);
     showToast(`Sent to ${await destinationLabel(destinationId)}`, "success");
   } catch (error) {
@@ -327,12 +409,6 @@ async function startDiscordShare(article, anchor) {
   }
 
   const showQuoteOption = articleHasQuotableTweet(article);
-  if (destinations.length === 1 && !showQuoteOption) {
-    closeXOverlay();
-    await runShare(article, destinations[0].id);
-    return;
-  }
-
   closeXOverlay();
   window.setTimeout(() => openDestinationMenu(anchor, article, destinations, { showQuoteOption }), 50);
 }
