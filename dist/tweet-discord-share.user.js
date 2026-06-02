@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweet Discord Share
 // @namespace    https://github.com/tweet-discord-share
-// @version      0.6.10
+// @version      0.6.11
 // @description  Share X/Twitter posts to Discord channels via webhooks (no server required).
 // @match        https://x.com/*
 // @match        https://twitter.com/*
@@ -606,16 +606,24 @@ function uniqueMediaLinks(items) {
   return items.filter((item, index, all) => item.url && all.findIndex((candidate) => candidate.url === item.url) === index);
 }
 
-function needsVideoPostPrefix(tweet, shareOptions = {}) {
+function tweetHasVisualMedia(tweet) {
+  return imageMedia(tweet).length > 0 || directPlayableVideoUrls(tweet).length > 0;
+}
+
+function needsMediaPostPrefix(rootTweet, shareOptions = {}) {
   const { includeQuote = true } = shareOptions;
-  if (!includeQuote || !hasQuoteTweet(tweet)) return false;
-  return directPlayableVideoUrls(tweet).length > 0 && directPlayableVideoUrls(tweet.quote).length > 0;
+  if (!includeQuote || !hasQuoteTweet(rootTweet)) return false;
+  return tweetHasVisualMedia(rootTweet) && tweetHasVisualMedia(rootTweet.quote);
+}
+
+function mediaCaption(kind, postTweet, index, shareOptions = {}, rootTweet = postTweet) {
+  const label = kind === "video" ? `Video ${index + 1}` : `Image ${index + 1}`;
+  if (!needsMediaPostPrefix(rootTweet, shareOptions)) return label;
+  return `${embedAuthorDisplayName(postTweet)} · ${label}`;
 }
 
 function videoCaption(postTweet, index, shareOptions = {}, rootTweet = postTweet) {
-  const label = `Video ${index + 1}`;
-  if (!needsVideoPostPrefix(rootTweet, shareOptions)) return label;
-  return `${embedAuthorDisplayName(postTweet)} · ${label}`;
+  return mediaCaption("video", postTweet, index, shareOptions, rootTweet);
 }
 
 function mediaLinks(tweet, shareOptions = {}) {
@@ -627,7 +635,7 @@ function mediaLinks(tweet, shareOptions = {}) {
   }));
   const images = imageMedia(tweet).map((item, index) => ({
     kind: "image",
-    label: `Image ${index + 1}`,
+    label: mediaCaption("image", tweet, index, shareOptions, rootTweet),
     url: item.url
   }));
 
@@ -712,11 +720,21 @@ function pickEmbedImageUrl(mediaItems) {
   return image?.url || mediaItems.find((item) => isHttpsUrl(item.url) && /pbs\.twimg\.com/i.test(item.url))?.url || "";
 }
 
-function buildMediaFieldsExcluding(mediaItems, excludeUrl, fieldOptions = {}) {
-  return buildMediaFields(
-    mediaItems.filter((item) => item.url !== excludeUrl),
-    fieldOptions
-  );
+function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind) {
+  const color = kind === "quote" ? EMBED_COLOR_QUOTE : EMBED_COLOR_MAIN;
+  const permalink = tweet.url || "";
+
+  return mediaItems
+    .filter((item) => item.kind === "image" && item.url && item.url !== heroUrl)
+    .map((item) =>
+      pruneEmbed({
+        color,
+        title: truncate(item.label, DISCORD_EMBED_LIMITS.title),
+        url: permalink || undefined,
+        image: { url: item.url },
+        footer: embedFooterForUrl(permalink)
+      })
+    );
 }
 
 function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
@@ -725,9 +743,10 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
   const text = String(tweet.text || "").trim();
   const media = mediaLinks(tweet, shareOptions);
   const heroImageUrl = pickEmbedImageUrl(media);
-  const mediaFields = buildMediaFieldsExcluding(media, heroImageUrl, {
-    videosBelow: shareOptions.videosBelow === true
-  });
+  const mediaFields = buildMediaFields(
+    media.filter((item) => item.kind === "video"),
+    { videosBelow: shareOptions.videosBelow === true }
+  );
   const footer = embedFooterForUrl(permalink);
   const descriptionChunks = splitText(text, DISCORD_EMBED_LIMITS.description);
   const embeds = [];
@@ -743,7 +762,7 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
       footer
     });
     embeds.push(embed);
-    return embeds;
+    return [...embeds, ...buildImageSupplementEmbeds(tweet, media, heroImageUrl, kind)];
   }
 
   descriptionChunks.forEach((chunk, index) => {
@@ -765,7 +784,7 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
     embeds.push(embed);
   });
 
-  return embeds;
+  return [...embeds, ...buildImageSupplementEmbeds(tweet, media, heroImageUrl, kind)];
 }
 
 function packEmbedsIntoMessages(embeds) {

@@ -132,6 +132,57 @@ test("videos label each post when both the main and quoted tweets have video", (
   assert.ok(quoteFields.some((field) => field.name === "Bob · Video 1"));
 });
 
+test("extra images become supplemental embeds instead of link fields", () => {
+  const tweet = {
+    ...sampleTweet,
+    media: [
+      { type: "image", url: "https://pbs.twimg.com/media/one.jpg" },
+      { type: "image", url: "https://pbs.twimg.com/media/two.jpg" },
+      { type: "image", url: "https://pbs.twimg.com/media/three.jpg" }
+    ]
+  };
+
+  const payloads = buildDiscordPayloads(tweet, { includeQuote: false });
+  const embeds = payloads[0].embeds;
+  assert.equal(embeds.length, 3);
+  assert.equal(embeds[0].image.url, "https://pbs.twimg.com/media/one.jpg");
+  assert.equal(embeds[1].title, "Image 2");
+  assert.equal(embeds[1].image.url, "https://pbs.twimg.com/media/two.jpg");
+  assert.equal(embeds[2].title, "Image 3");
+  assert.equal(embeds[0].fields, undefined);
+  assert.equal(embeds[0].color, 0x1da1f2);
+  assert.equal(embeds[1].color, 0x1da1f2);
+});
+
+test("supplemental images use quote color and author prefixes when both posts have media", () => {
+  const tweet = {
+    ...sampleTweet,
+    text: "main",
+    media: [
+      { type: "image", url: "https://pbs.twimg.com/media/main1.jpg" },
+      { type: "image", url: "https://pbs.twimg.com/media/main2.jpg" }
+    ],
+    quote: {
+      url: "https://x.com/bob/status/2",
+      author: { displayName: "Bob", username: "bob" },
+      text: "quote",
+      media: [
+        { type: "image", url: "https://pbs.twimg.com/media/q1.jpg" },
+        { type: "image", url: "https://pbs.twimg.com/media/q2.jpg" }
+      ]
+    }
+  };
+
+  const embeds = buildDiscordPayloads(tweet)[0].embeds;
+  assert.equal(embeds.length, 4);
+  assert.equal(embeds[0].color, 0x1da1f2);
+  assert.equal(embeds[1].title, "Alice · Image 2");
+  assert.equal(embeds[1].color, 0x1da1f2);
+  assert.equal(embeds[2].color, 0x536471);
+  assert.equal(embeds[3].title, "Bob · Image 2");
+  assert.equal(embeds[3].color, 0x536471);
+});
+
 test("long tweet text splits across continuation embeds without duplicate url", () => {
   const longTweet = {
     ...sampleTweet,
