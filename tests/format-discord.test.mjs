@@ -206,10 +206,10 @@ test("video, images, and quote media share labels and stay in order", () => {
   assert.equal(payloads[0].embeds.length, 3);
 
   const mainFields = payloads[0].embeds[0].fields || [];
-  assert.ok(mainFields.some((field) => field.name === "Video 1" && field.value === "Plays below ↓"));
+  assert.ok(mainFields.some((field) => field.name === "Alice · Video 1" && field.value === "Plays below ↓"));
   assert.ok(mainFields.some((field) => field.name === "More images" && /1 more image below/.test(field.value)));
 
-  assert.equal(payloads[0].embeds[1].title, "Image 2");
+  assert.equal(payloads[0].embeds[1].title, "Alice · Image 2");
   assert.equal(payloads[0].embeds[2].color, 0x536471);
   assert.equal(payloads[0].embeds[2].author.name, "Bob");
   assert.match(payloads[1].content, /after the extra images/);
