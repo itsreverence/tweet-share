@@ -9,7 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const srcDir = path.join(root, "userscript", "src");
 
 function loadFormatContext() {
-  const files = ["00-config.js", "02-utils.js", "04-video.js", "05-format-discord.js"];
+  const files = ["00-config.js", "02-utils.js", "04-video.js", "05-format-discord.js", "13-media-fetch.js"];
   const code = files.map((name) => readFileSync(path.join(srcDir, name), "utf8")).join("\n");
   const context = {
     console,
@@ -17,13 +17,15 @@ function loadFormatContext() {
     performance: { getEntriesByType: () => [] },
     document: { querySelectorAll: () => [] }
   };
-  runInNewContext(`${code}\nthis.exports = {\n  buildDiscordPayloads,\n  countEmbedChars,\n  packEmbedsIntoMessages,\n  buildTweetEmbedGroup,\n  hasQuoteTweet\n};`, context);
+  runInNewContext(`${code}\nthis.exports = {\n  buildDiscordPayloads,\n  collectMediaAttachmentUrls,\n  countEmbedChars,\n  discordEmbedTimestamp,\n  packEmbedsIntoMessages,\n  buildTweetEmbedGroup,\n  hasQuoteTweet\n};`, context);
   return context.exports;
 }
 
 const {
   buildDiscordPayloads,
+  collectMediaAttachmentUrls,
   countEmbedChars,
+  discordEmbedTimestamp,
   packEmbedsIntoMessages,
   buildTweetEmbedGroup,
   hasQuoteTweet
@@ -36,13 +38,76 @@ const sampleTweet = {
   media: [{ type: "image", url: "https://pbs.twimg.com/media/photo.jpg" }]
 };
 
+const jamieQuoteTweet = {
+  url: "https://x.com/JamieBonkiewicz/status/2064816452863988103",
+  author: {
+    displayName: "Jamie Bonkiewicz",
+    username: "JamieBonkiewicz",
+    avatarUrl: "https://pbs.twimg.com/profile_images/x.jpg"
+  },
+  text: "Then why isn't the Strait of Hormuz open?",
+  media: [],
+  quote: {
+    url: "https://x.com/atrupar/status/2064811778433818859",
+    author: { displayName: "Aaron Rupar", username: "atrupar" },
+    text: 'Hegseth: "The United States of America controls the Strait of Hormuz"',
+    media: [{ type: "video", url: "https://video.twimg.com/ext_tw_video/1/pu/vid/1280x720/q.mp4" }]
+  }
+};
+
+test("discordEmbedTimestamp parses ISO and Twitter date strings", () => {
+  assert.equal(discordEmbedTimestamp("2026-06-10T21:06:19.000Z"), "2026-06-10T21:06:19.000Z");
+  assert.equal(discordEmbedTimestamp("Tue May 26 12:00:00 +0000 2026"), "2026-05-26T12:00:00.000Z");
+  assert.equal(discordEmbedTimestamp("not a date"), undefined);
+  assert.equal(discordEmbedTimestamp(""), undefined);
+});
+
 test("buildDiscordPayloads returns a single embed message for a simple tweet", () => {
   const payloads = buildDiscordPayloads(sampleTweet, { includeQuote: false });
   assert.equal(payloads.length, 1);
   assert.equal(payloads[0].embeds.length, 1);
   assert.match(payloads[0].embeds[0].description, /Hello world/);
   assert.equal(payloads[0].embeds[0].url, sampleTweet.url);
-  assert.equal(payloads[0].content, undefined);
+  assert.equal(payloads[0].content, sampleTweet.url);
+});
+
+test("embed shares always include message content permalink", () => {
+  const payloads = buildDiscordPayloads(sampleTweet, { includeContentPermalink: false });
+  assert.equal(payloads[0].content, sampleTweet.url);
+});
+
+test("main embed includes timestamp when createdAt is parseable", () => {
+  const payloads = buildDiscordPayloads({
+    ...sampleTweet,
+    createdAt: "2026-06-10T21:06:19.000Z"
+  }, { includeQuote: false });
+
+  assert.equal(payloads[0].embeds[0].timestamp, "2026-06-10T21:06:19.000Z");
+});
+
+test("invalid createdAt omits timestamp", () => {
+  const payloads = buildDiscordPayloads({
+    ...sampleTweet,
+    createdAt: "nope"
+  }, { includeQuote: false });
+
+  assert.equal(payloads[0].embeds[0].timestamp, undefined);
+});
+
+test("card quote layout includes main URL in content but not quote URL line", () => {
+  const tweet = {
+    ...sampleTweet,
+    quote: {
+      url: "https://x.com/bob/status/2",
+      author: { displayName: "Bob", username: "bob" },
+      text: "Quoted text",
+      media: []
+    }
+  };
+
+  const payloads = buildDiscordPayloads(tweet, { quoteLayout: "card" });
+  assert.equal(payloads[0].content, sampleTweet.url);
+  assert.doesNotMatch(String(payloads[0].content || ""), /↳ Quotes:/);
 });
 
 test("webhook sender is branded while the embed shows the tweet author once", () => {
@@ -55,7 +120,7 @@ test("webhook sender is branded while the embed shows the tweet author once", ()
   assert.doesNotMatch(payloads[0].embeds[0].author.name, /@alice/);
 });
 
-test("quote tweet adds a second embed in the same message", () => {
+test("quoteLayout card adds a second embed in the same message", () => {
   const tweet = {
     ...sampleTweet,
     quote: {
@@ -67,10 +132,71 @@ test("quote tweet adds a second embed in the same message", () => {
   };
 
   assert.equal(hasQuoteTweet(tweet), true);
-  const payloads = buildDiscordPayloads(tweet);
+  const payloads = buildDiscordPayloads(tweet, { quoteLayout: "card" });
   assert.equal(payloads.length, 1);
   assert.equal(payloads[0].embeds.length, 2);
   assert.equal(payloads[0].embeds[1].color, 0x536471);
+});
+
+test("quote card embed does not use quote timestamp", () => {
+  const payloads = buildDiscordPayloads({
+    ...sampleTweet,
+    createdAt: "2026-06-10T21:06:19.000Z",
+    quote: {
+      url: "https://x.com/bob/status/2",
+      author: { displayName: "Bob", username: "bob" },
+      text: "Quoted text",
+      createdAt: "2026-06-11T10:00:00.000Z",
+      media: []
+    }
+  }, { quoteLayout: "card" });
+
+  assert.equal(payloads[0].embeds[0].timestamp, "2026-06-10T21:06:19.000Z");
+  assert.equal(payloads[0].embeds[1].timestamp, undefined);
+});
+
+test("auto quote layout inlines text-only main with quoted video", () => {
+  const payloads = buildDiscordPayloads(jamieQuoteTweet, { quoteLayout: "auto" });
+  const firstEmbed = payloads[0].embeds[0];
+  const quoteField = firstEmbed.fields.find((field) => field.name === "Quote from: atrupar");
+
+  assert.equal(payloads.length, 2);
+  assert.equal(payloads[0].embeds.length, 1);
+  assert.match(payloads[0].content, /JamieBonkiewicz\/status\/2064816452863988103/);
+  assert.match(payloads[0].content, /↳ Quotes: https:\/\/x\.com\/atrupar\/status\/2064811778433818859/);
+  assert.ok(quoteField);
+  assert.match(quoteField.value, /^> Hegseth:/);
+  assert.ok(firstEmbed.fields.some((field) => field.name === "Source" && field.value === jamieQuoteTweet.url));
+  assert.match(payloads[1].content, /q\.mp4/);
+});
+
+test("attach mode inline quote uses one embed and no quote author card", () => {
+  const payloads = buildDiscordPayloads(jamieQuoteTweet, {
+    attachMedia: true,
+    attachmentUrls: collectMediaAttachmentUrls(jamieQuoteTweet)
+  });
+
+  assert.equal(payloads.length, 1);
+  assert.equal(payloads[0].embeds.length, 1);
+  assert.equal(payloads[0].embeds.some((embed) => embed.author?.name === "Aaron Rupar"), false);
+  assert.ok(payloads[0].embeds[0].fields.some((field) => field.name === "Quote from: atrupar"));
+});
+
+test("auto quote layout keeps card mode when both posts have visual media", () => {
+  const tweet = {
+    ...sampleTweet,
+    media: [{ type: "image", url: "https://pbs.twimg.com/media/main1.jpg" }],
+    quote: {
+      url: "https://x.com/bob/status/2",
+      author: { displayName: "Bob", username: "bob" },
+      text: "quote",
+      media: [{ type: "image", url: "https://pbs.twimg.com/media/q1.jpg" }]
+    }
+  };
+
+  const payloads = buildDiscordPayloads(tweet, { quoteLayout: "auto" });
+  assert.equal(payloads[0].embeds.length, 2);
+  assert.equal(payloads[0].embeds[1].author.name, "Bob");
 });
 
 test("packEmbedsIntoMessages respects the 6000 character budget", () => {
@@ -98,7 +224,8 @@ test("videos are sent in a separate labeled message that matches the embed field
 
   const payloads = buildDiscordPayloads(tweet, { includeQuote: false });
   assert.equal(payloads.length, 2);
-  assert.equal(payloads[0].content, undefined);
+  assert.equal(payloads[0].content, tweet.url);
+  assert.doesNotMatch(String(payloads[1].content || ""), /\/status\/1/);
   assert.match(payloads[1].content, /Video for the post above/);
   assert.match(payloads[1].content, /\*\*Video 1\*\*/);
   assert.match(payloads[1].content, new RegExp(videoUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -225,4 +352,59 @@ test("long tweet text splits across continuation embeds without duplicate url", 
   assert.ok(embeds.length > 1);
   assert.equal(embeds[0].url, longTweet.url);
   assert.equal(embeds[1].url, undefined);
+});
+
+test("attach mode sends compact embeds without supplemental image or video follow-up messages", () => {
+  const videoUrl = "https://video.twimg.com/ext_tw_video/1/pu/vid/abc/1280x720/main.mp4";
+  const tweet = {
+    ...sampleTweet,
+    media: [
+      { type: "video", url: videoUrl, posterUrl: "https://pbs.twimg.com/ext_tw_video_thumb/1/pu/img/poster.jpg" },
+      { type: "image", url: "https://pbs.twimg.com/media/one.jpg" },
+      { type: "image", url: "https://pbs.twimg.com/media/two.jpg" },
+      { type: "image", url: "https://pbs.twimg.com/media/three.jpg" }
+    ]
+  };
+  const attachmentUrls = collectMediaAttachmentUrls(tweet, { includeQuote: false });
+
+  assert.deepEqual(Array.from(attachmentUrls), [
+    videoUrl,
+    "https://pbs.twimg.com/media/one.jpg",
+    "https://pbs.twimg.com/media/two.jpg",
+    "https://pbs.twimg.com/media/three.jpg"
+  ]);
+
+  const payloads = buildDiscordPayloads(tweet, { includeQuote: false, attachMedia: true, attachmentUrls });
+  assert.equal(payloads.length, 1);
+  assert.equal(payloads[0].content, tweet.url);
+  assert.equal(payloads[0].embeds.length, 1);
+  assert.equal(payloads[0].embeds[0].image, undefined);
+  assert.equal(payloads[0].embeds[0].fields, undefined);
+});
+
+test("attach mode keeps quote embed but avoids media clutter", () => {
+  const tweet = {
+    ...sampleTweet,
+    media: [
+      { type: "image", url: "https://pbs.twimg.com/media/main1.jpg" },
+      { type: "image", url: "https://pbs.twimg.com/media/main2.jpg" }
+    ],
+    quote: {
+      url: "https://x.com/bob/status/2",
+      author: { displayName: "Bob", username: "bob" },
+      text: "quote",
+      media: [
+        { type: "image", url: "https://pbs.twimg.com/media/q1.jpg" },
+        { type: "image", url: "https://pbs.twimg.com/media/q2.jpg" }
+      ]
+    }
+  };
+
+  const payloads = buildDiscordPayloads(tweet, {
+    attachMedia: true,
+    attachmentUrls: collectMediaAttachmentUrls(tweet)
+  });
+  assert.equal(payloads.length, 1);
+  assert.equal(payloads[0].embeds.length, 2);
+  assert.equal(payloads[0].embeds.every((embed) => !embed.image && !embed.fields), true);
 });

@@ -1,0 +1,10 @@
+{
+  "text": "Synthetic quoted parent without media.",
+  "user": {
+    "name": "Quote Parent",
+    "screen_name": "quote_parent"
+  },
+  "id_str": "1000000000000000002",
+  "photos": [],
+  "mediaDetails": []
+}

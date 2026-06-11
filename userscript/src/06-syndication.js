@@ -27,24 +27,120 @@ function bestSyndicationVideoUrl(data) {
     .sort((left, right) => (right.bitrate || videoQualityScore(right.url)) - (left.bitrate || videoQualityScore(left.url)))[0]?.url || "";
 }
 
+function bestSyndicationVariantUrl(variants = []) {
+  return variants
+    .map((variant) => ({
+      url: normalizeTweetVideoUrl(variant.url || variant.src || ""),
+      bitrate: variant.bitrate || 0,
+      type: variant.content_type || variant.type || ""
+    }))
+    .filter((variant) => variant.type === "video/mp4" && isPlayableTweetVideoUrl(variant.url))
+    .sort((left, right) => (right.bitrate || videoQualityScore(right.url)) - (left.bitrate || videoQualityScore(left.url)))[0]?.url || "";
+}
+
 function syndicationPosterUrl(data) {
   return data?.video?.poster || data?.mediaDetails?.find((media) => media.media_url_https)?.media_url_https || "";
 }
 
-function tweetFromSyndication(data, fallback = {}) {
-  if (!data) return fallback;
+function mediaFromSyndication(data) {
+  if (!data) return [];
 
   const photos = (data.photos || []).map((photo) => ({
     type: "image",
-    url: photo.url || photo.media_url_https || "",
+    url: highResolutionTweetImageUrl(photo.url || photo.media_url_https || ""),
     alt: photo.alt_text || ""
   }));
-  const mediaDetails = (data.mediaDetails || [])
-    .filter((media) => media.type === "photo" && media.media_url_https)
-    .map((media) => ({ type: "image", url: media.media_url_https, alt: media.ext_alt_text || "" }));
-  const videoUrl = normalizeTweetVideoUrl(bestSyndicationVideoUrl(data));
-  const posterUrl = syndicationPosterUrl(data);
-  const videos = videoUrl || posterUrl ? [{ type: "video", url: videoUrl, posterUrl, alt: "" }] : [];
+  const details = (data.mediaDetails || []).flatMap((media) => {
+    if (media.type === "photo" && media.media_url_https) {
+      return [{
+        type: "image",
+        url: highResolutionTweetImageUrl(media.media_url_https),
+        alt: media.ext_alt_text || ""
+      }];
+    }
+
+    if ((media.type === "video" || media.type === "animated_gif") && media.video_info?.variants) {
+      const videoUrl = bestSyndicationVariantUrl(media.video_info.variants);
+      const posterUrl = media.media_url_https || "";
+      return videoUrl || posterUrl ? [{ type: "video", url: videoUrl, posterUrl, alt: media.ext_alt_text || "" }] : [];
+    }
+
+    return [];
+  });
+  const topVideoUrl = bestSyndicationVariantUrl(data.video?.variants || []);
+  const topVideo = topVideoUrl || data.video?.poster
+    ? [{ type: "video", url: topVideoUrl, posterUrl: data.video?.poster || "", alt: "" }]
+    : [];
+
+  return uniqueMedia([...photos, ...details, ...topVideo]);
+}
+
+function sameTweetImage(left, right) {
+  const leftKey = tweetImageMediaKey(left.url);
+  return leftKey && leftKey === tweetImageMediaKey(right.url);
+}
+
+function sameTweetVideo(left, right) {
+  const leftPoster = posterMediaId(left.posterUrl);
+  return leftPoster && leftPoster === posterMediaId(right.posterUrl);
+}
+
+function mergeTweetMedia(primary = [], fallback = [], options = {}) {
+  const media = uniqueMedia([...(primary || []), ...(fallback || [])]);
+  const images = [];
+  const videos = [];
+
+  for (const item of media) {
+    if (item.type === "image") {
+      const normalized = { ...item, url: highResolutionTweetImageUrl(item.url) };
+      const existingIndex = images.findIndex((candidate) => sameTweetImage(candidate, normalized));
+      if (existingIndex >= 0) {
+        const existing = images[existingIndex];
+        images[existingIndex] = {
+          ...normalized,
+          url: existing.url || normalized.url,
+          alt: existing.alt || normalized.alt || ""
+        };
+      } else {
+        images.push(normalized);
+      }
+      continue;
+    }
+
+    if (item.type === "video") {
+      const normalized = { ...item, url: normalizeTweetVideoUrl(item.url || "") };
+      const existingIndex = videos.findIndex((candidate) => sameTweetVideo(candidate, normalized));
+      if (existingIndex >= 0) {
+        const existing = videos[existingIndex];
+        videos[existingIndex] = {
+          ...existing,
+          ...normalized,
+          url: isPlayableTweetVideoUrl(normalized.url) ? normalized.url : existing.url,
+          posterUrl: normalized.posterUrl || existing.posterUrl || "",
+          alt: normalized.alt || existing.alt || ""
+        };
+      } else {
+        videos.push(normalized);
+      }
+    }
+  }
+
+  const preferredVideoUrl = normalizeTweetVideoUrl(options.cachedVideoUrl || options.videoUrl || "");
+  if (preferredVideoUrl) {
+    const target = videos.find((item) => !isPlayableTweetVideoUrl(item.url)) || videos[0];
+    if (target) {
+      target.url = preferredVideoUrl;
+      target.posterUrl = target.posterUrl || options.posterUrl || "";
+    } else {
+      videos.push({ type: "video", url: preferredVideoUrl, posterUrl: options.posterUrl || "", alt: "" });
+    }
+  }
+
+  return uniqueMedia([...images, ...videos]);
+}
+
+function tweetFromSyndication(data, fallback = {}) {
+  if (!data) return fallback;
 
   return {
     ...fallback,
@@ -56,7 +152,7 @@ function tweetFromSyndication(data, fallback = {}) {
     },
     text: data.text || fallback.text || "",
     createdAt: data.created_at || fallback.createdAt || "",
-    media: uniqueMedia([...photos, ...mediaDetails, ...videos, ...(fallback.media || [])]),
+    media: mergeTweetMedia(mediaFromSyndication(data), fallback.media || []),
     quote: fallback.quote
   };
 }
@@ -86,18 +182,11 @@ async function enrichTweetMedia(tweet) {
   const videoUrl = normalizeTweetVideoUrl(bestSyndicationVideoUrl(data));
   const posterUrl = syndicationPosterUrl(data);
   const cachedVideoUrl = bestCachedVideoUrlForTweet(tweet);
-
-  if (cachedVideoUrl || videoUrl) {
-    const media = tweet.media || [];
-    const existingVideo = media.find((item) => item.type === "video");
-    if (existingVideo) {
-      existingVideo.url = cachedVideoUrl || videoUrl;
-      existingVideo.posterUrl = existingVideo.posterUrl || posterUrl;
-    } else {
-      media.push({ type: "video", url: cachedVideoUrl || videoUrl, posterUrl, alt: "" });
-    }
-    tweet.media = media;
-  }
+  tweet.media = mergeTweetMedia(data ? mediaFromSyndication(data) : [], tweet.media || [], {
+    cachedVideoUrl,
+    videoUrl,
+    posterUrl
+  });
 
   if (hasQuoteCandidate(tweet)) {
     await enrichTweetMedia(tweet.quote);

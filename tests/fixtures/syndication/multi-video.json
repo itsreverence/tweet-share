@@ -1,0 +1,57 @@
+{
+  "text": "Synthetic post with multiple videos.",
+  "user": {
+    "name": "Video Fixture",
+    "screen_name": "video_fixture"
+  },
+  "id_str": "1000000000000000003",
+  "photos": [
+    {
+      "url": "https://pbs.twimg.com/media/multi-photo.jpg",
+      "alt_text": "Multi-video fixture image"
+    }
+  ],
+  "mediaDetails": [
+    {
+      "type": "video",
+      "media_url_https": "https://pbs.twimg.com/ext_tw_video_thumb/2000000000000000001/pu/img/poster-one.jpg",
+      "video_info": {
+        "variants": [
+          {
+            "content_type": "video/mp4",
+            "url": "https://video.twimg.com/ext_tw_video/2000000000000000001/pu/vid/640x360/one-low.mp4",
+            "bitrate": 832000
+          },
+          {
+            "content_type": "video/mp4",
+            "url": "https://video.twimg.com/ext_tw_video/2000000000000000001/pu/vid/1280x720/one-high.mp4",
+            "bitrate": 2176000
+          }
+        ]
+      }
+    },
+    {
+      "type": "animated_gif",
+      "media_url_https": "https://pbs.twimg.com/tweet_video_thumb/2000000000000000002/pu/img/poster-two.jpg",
+      "video_info": {
+        "variants": [
+          {
+            "content_type": "video/mp4",
+            "url": "https://video.twimg.com/tweet_video/2000000000000000002/pu/vid/640x360/two.mp4",
+            "bitrate": 0
+          }
+        ]
+      }
+    }
+  ],
+  "video": {
+    "poster": "https://pbs.twimg.com/ext_tw_video_thumb/2000000000000000003/pu/img/poster-three.jpg",
+    "variants": [
+      {
+        "type": "video/mp4",
+        "src": "https://video.twimg.com/ext_tw_video/2000000000000000003/pu/vid/1280x720/three.mp4",
+        "bitrate": 2176000
+      }
+    ]
+  }
+}

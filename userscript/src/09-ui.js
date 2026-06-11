@@ -232,7 +232,7 @@ function setDestinationItemsDisabled(items, disabled) {
 }
 
 function openDestinationMenu(anchor, article, destinations, options = {}) {
-  const { showQuoteOption = false } = options;
+  const { showQuoteOption = false, preferences = DEFAULT_PREFERENCES } = options;
   closeDestinationMenu();
 
   const last = localStorage.getItem(DESTINATION_KEY);
@@ -267,12 +267,21 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
   const destinationItems = [];
 
   function shareOptions() {
-    return showQuoteOption ? { includeQuote } : {};
+    return {
+      includeQuote: showQuoteOption ? includeQuote : true,
+      preferences,
+      attachMedia: preferences.attachMedia !== false
+    };
   }
 
   function refreshPreview() {
     if (!preparedTweet) return;
-    previewBody.replaceChildren(renderDiscordPreview(buildDiscordPayloads(preparedTweet, shareOptions())));
+    const options = shareOptions();
+    previewBody.replaceChildren(renderDiscordPreview(buildDiscordPayloads(preparedTweet, options), {
+      attachmentCount: options.attachMedia
+        ? Math.min(collectMediaAttachmentUrls(preparedTweet, options).length, ATTACHMENT_MAX_COUNT)
+        : 0
+    }));
     positionPopover(menu, anchor);
   }
 
@@ -286,7 +295,12 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     try {
       preparedTweet = await prepareShareTweet(article);
       if (generation !== loadGeneration) return;
-      previewBody.replaceChildren(renderDiscordPreview(buildDiscordPayloads(preparedTweet, shareOptions())));
+      const options = shareOptions();
+      previewBody.replaceChildren(renderDiscordPreview(buildDiscordPayloads(preparedTweet, options), {
+        attachmentCount: options.attachMedia
+          ? Math.min(collectMediaAttachmentUrls(preparedTweet, options).length, ATTACHMENT_MAX_COUNT)
+          : 0
+      }));
       setDestinationItemsDisabled(destinationItems, false);
       positionPopover(menu, anchor);
     } catch (error) {
@@ -349,7 +363,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
   const manageBtn = document.createElement("button");
   manageBtn.type = "button";
   manageBtn.className = `${POPOVER_CLASS}__manage`;
-  manageBtn.textContent = "Manage channels…";
+  manageBtn.textContent = "Settings…";
   manageBtn.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -401,7 +415,7 @@ async function runShare(article, destinationId, options = {}, preparedTweet = nu
 }
 
 async function startDiscordShare(article, anchor) {
-  const destinations = await getDestinations();
+  const [destinations, preferences] = await Promise.all([getDestinations(), loadPreferences()]);
   if (destinations.length === 0) {
     closeXOverlay();
     openSettingsModal();
@@ -409,8 +423,21 @@ async function startDiscordShare(article, anchor) {
   }
 
   const showQuoteOption = articleHasQuotableTweet(article);
+  if (destinations.length === 1 && !showQuoteOption && !preferences.alwaysShowPreview) {
+    closeXOverlay();
+    await runShare(article, destinations[0].id, {
+      includeQuote: true,
+      preferences,
+      attachMedia: preferences.attachMedia !== false
+    }, null);
+    return;
+  }
+
   closeXOverlay();
-  window.setTimeout(() => openDestinationMenu(anchor, article, destinations, { showQuoteOption }), 50);
+  window.setTimeout(
+    () => openDestinationMenu(anchor, article, destinations, { showQuoteOption, preferences }),
+    50
+  );
 }
 
 function findShareButton(root) {

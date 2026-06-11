@@ -37,6 +37,19 @@ function highResolutionProfileImageUrl(url) {
   return (url || "").replace(/_normal(\.(?:jpg|jpeg|png|webp))(?:\?|$)/i, "$1");
 }
 
+function highResolutionTweetImageUrl(url) {
+  if (!url || !/pbs\.twimg\.com\/media\//.test(url)) return url;
+  const base = url.split("?")[0].replace(/:(?:small|medium|large|orig|thumb)$/i, "");
+  return `${base}?format=jpg&name=orig`;
+}
+
+function discordEmbedTimestamp(createdAt) {
+  const raw = String(createdAt || "").trim();
+  if (!raw) return undefined;
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
 function normalizeTextForMatch(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
@@ -85,6 +98,10 @@ function uniqueMedia(items) {
     const key = item.url || item.posterUrl;
     return key && all.findIndex((candidate) => (candidate.url || candidate.posterUrl) === key) === index;
   });
+}
+
+function tweetImageMediaKey(url) {
+  return (url || "").match(/pbs\.twimg\.com\/media\/([^.?/:]+)/)?.[1] || "";
 }
 
 function mergeAuthor(primary = {}, fallback = {}) {

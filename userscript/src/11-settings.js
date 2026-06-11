@@ -134,8 +134,63 @@ function injectSettingsStyles() {
       font-size: 15px;
       padding: 8px 0;
     }
+    .${SETTINGS_CLASS}__section-title {
+      font-size: 17px;
+      font-weight: 700;
+      margin: 0;
+    }
+    .${SETTINGS_CLASS}__option {
+      align-items: flex-start;
+      cursor: pointer;
+      display: flex;
+      font-size: 15px;
+      gap: 10px;
+      line-height: 1.45;
+      user-select: none;
+    }
+    .${SETTINGS_CLASS}__option input {
+      accent-color: rgb(var(--tds-blue, 29 155 240));
+      cursor: pointer;
+      flex-shrink: 0;
+      height: 16px;
+      margin-top: 3px;
+      width: 16px;
+    }
+    .${SETTINGS_CLASS}__option-text {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .${SETTINGS_CLASS}__option-detail {
+      color: rgb(var(--tds-subtle, 113 118 123));
+      font-size: 14px;
+    }
   `;
   appendWhenReady(style);
+}
+
+function createSettingsOption(labelText, detailText, checked) {
+  const option = document.createElement("label");
+  option.className = `${SETTINGS_CLASS}__option`;
+
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.checked = checked;
+
+  const text = document.createElement("span");
+  text.className = `${SETTINGS_CLASS}__option-text`;
+  const label = document.createElement("span");
+  label.textContent = labelText;
+  text.append(label);
+  if (detailText) {
+    const detail = document.createElement("span");
+    detail.className = `${SETTINGS_CLASS}__option-detail`;
+    detail.textContent = detailText;
+    text.append(detail);
+  }
+
+  option.append(input, text);
+  return { option, input };
 }
 
 function closeSettingsModal() {
@@ -156,6 +211,7 @@ async function openSettingsModal() {
   injectSettingsStyles();
 
   let destinations = [...(await loadAllDestinations())];
+  let preferences = await loadPreferences();
   const backdrop = document.createElement("div");
   backdrop.className = `${SETTINGS_CLASS}__backdrop`;
 
@@ -164,12 +220,12 @@ async function openSettingsModal() {
   applyXThemeVars(dialog);
   dialog.setAttribute("role", "dialog");
   dialog.setAttribute("aria-modal", "true");
-  dialog.setAttribute("aria-label", "Discord channel settings");
+  dialog.setAttribute("aria-label", "Tweet Share settings");
 
   const header = document.createElement("div");
   header.className = `${SETTINGS_CLASS}__header`;
   const heading = document.createElement("h2");
-  heading.textContent = "Discord channels";
+  heading.textContent = "Tweet Share settings";
   const closeBtn = document.createElement("button");
   closeBtn.type = "button";
   closeBtn.className = `${SETTINGS_CLASS}__close`;
@@ -181,10 +237,45 @@ async function openSettingsModal() {
   const body = document.createElement("div");
   body.className = `${SETTINGS_CLASS}__body`;
 
+  const sharingTitle = document.createElement("h3");
+  sharingTitle.className = `${SETTINGS_CLASS}__section-title`;
+  sharingTitle.textContent = "Sharing";
+
+  const attachMediaOption = createSettingsOption(
+    "Upload media to Discord",
+    "Best playback. Files over 8 MB are sent as links instead.",
+    preferences.attachMedia
+  );
+  attachMediaOption.input.addEventListener("change", () => {
+    preferences.attachMedia = attachMediaOption.input.checked;
+  });
+
+  const previewOption = createSettingsOption(
+    "Always show preview before sending",
+    "Turn off to send instantly when you have one channel and the post has no quote.",
+    preferences.alwaysShowPreview
+  );
+  previewOption.input.addEventListener("change", () => {
+    preferences.alwaysShowPreview = previewOption.input.checked;
+  });
+
+  const sharingCard = document.createElement("div");
+  sharingCard.className = `${SETTINGS_CLASS}__card`;
+  sharingCard.append(
+    sharingTitle,
+    attachMediaOption.option,
+    previewOption.option
+  );
+  body.append(sharingCard);
+
+  const channelsTitle = document.createElement("h3");
+  channelsTitle.className = `${SETTINGS_CLASS}__section-title`;
+  channelsTitle.textContent = "Discord channels";
+
   const hint = document.createElement("p");
   hint.className = `${SETTINGS_CLASS}__hint`;
-  hint.textContent = "Create webhooks in Discord: Channel settings → Integrations → Webhooks. Channels are saved in Violentmonkey (or Tampermonkey) and persist across script updates — do not put webhook URLs in the script source.";
-  body.append(hint);
+  hint.textContent = "Create webhooks in Discord: Channel settings → Integrations → Webhooks. Channels and preferences are saved in Violentmonkey (or Tampermonkey) and persist across script updates — do not put webhook URLs in the script source.";
+  body.append(channelsTitle, hint);
 
   const listEl = document.createElement("div");
   listEl.className = `${SETTINGS_CLASS}__list`;
@@ -314,8 +405,8 @@ async function openSettingsModal() {
       return;
     }
     try {
-      await saveAllDestinations(sanitized);
-      showToast("Channels saved.", "success");
+      await Promise.all([saveAllDestinations(sanitized), savePreferences(preferences)]);
+      showToast("Settings saved.", "success");
       closeSettingsModal();
       refreshShareButtons();
     } catch (error) {
@@ -355,7 +446,7 @@ function registerSettingsMenuCommand() {
       : null;
 
   if (!register) return;
-  register("Discord channels…", () => openSettingsModal());
+  register("Tweet Share settings…", () => openSettingsModal());
 }
 
 registerSettingsMenuCommand();

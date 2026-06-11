@@ -39,6 +39,14 @@ function needsMediaPostPrefix(rootTweet, shareOptions = {}) {
   return tweetHasVisualMedia(rootTweet) && tweetHasVisualMedia(rootTweet.quote);
 }
 
+function resolveQuoteLayout(tweet, shareOptions = {}) {
+  const mode = shareOptions.quoteLayout || "auto";
+  if (shareOptions.includeQuote === false || !hasQuoteTweet(tweet)) return "none";
+  if (mode === "card") return "card";
+  if (mode === "inline") return "inline";
+  return needsMediaPostPrefix(tweet, shareOptions) ? "card" : "inline";
+}
+
 function mediaCaption(kind, postTweet, index, shareOptions = {}, rootTweet = postTweet) {
   const label = kind === "video" ? `Video ${index + 1}` : `Image ${index + 1}`;
   if (!needsMediaPostPrefix(rootTweet, shareOptions)) return label;
@@ -63,6 +71,20 @@ function mediaLinks(tweet, shareOptions = {}) {
   }));
 
   return uniqueMediaLinks([...videos, ...images]);
+}
+
+function collectMediaAttachmentUrls(tweet, shareOptions = {}) {
+  const { includeQuote = true } = shareOptions;
+  const urls = [];
+
+  function appendPostMedia(post) {
+    urls.push(...directPlayableVideoUrls(post));
+    urls.push(...imageMedia(post).map((item) => item.url).filter(Boolean));
+  }
+
+  appendPostMedia(tweet);
+  if (includeQuote && hasQuoteTweet(tweet)) appendPostMedia(tweet.quote);
+  return unique(urls);
 }
 
 function isHttpsUrl(url) {
@@ -138,6 +160,45 @@ function buildMediaFields(mediaItems, fieldOptions = {}) {
   return fields;
 }
 
+function formatQuoteFieldValue(text) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) return "";
+  return truncate(trimmed.split("\n").map((line) => `> ${line}`).join("\n"), DISCORD_EMBED_LIMITS.fieldValue);
+}
+
+function buildInlineQuoteFields(tweet) {
+  const quote = tweet.quote;
+  if (!quote) return [];
+
+  const username = quote.author?.username || "unknown";
+  const fields = [];
+  const quoteBody = formatQuoteFieldValue(quote.text);
+  if (quoteBody) {
+    fields.push({
+      name: truncate(`Quote from: ${username}`, DISCORD_EMBED_LIMITS.fieldName),
+      value: quoteBody,
+      inline: false
+    });
+  }
+  if (tweet.url) {
+    fields.push({
+      name: "Source",
+      value: truncate(tweet.url, DISCORD_EMBED_LIMITS.fieldValue),
+      inline: false
+    });
+  }
+  return fields;
+}
+
+function buildShareContentLines(tweet, shareOptions = {}) {
+  const lines = [];
+  if (tweet.url) lines.push(tweet.url);
+  if (resolveQuoteLayout(tweet, shareOptions) === "inline" && tweet.quote?.url) {
+    lines.push(`↳ Quotes: ${tweet.quote.url}`);
+  }
+  return lines.length ? truncate(lines.join("\n"), DISCORD_LIMITS.content) : undefined;
+}
+
 function pickEmbedImageUrl(mediaItems) {
   const image = mediaItems.find((item) => isHttpsUrl(item.url) && /\.(?:jpg|jpeg|png|webp|gif)(?:\?|$)/i.test(item.url));
   return image?.url || mediaItems.find((item) => isHttpsUrl(item.url) && /pbs\.twimg\.com/i.test(item.url))?.url || "";
@@ -198,6 +259,8 @@ function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind) {
 }
 
 function assembleTweetEmbedGroup(tweet, kind, shareOptions, contentEmbeds, media, heroImageUrl) {
+  if (shareOptions.attachMedia === true) return contentEmbeds;
+
   const supplements = buildImageSupplementEmbeds(tweet, media, heroImageUrl, kind);
   const withHints = appendMediaHintToLastContentEmbed(
     contentEmbeds,
@@ -212,10 +275,15 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
   const permalink = tweet.url || "";
   const text = String(tweet.text || "").trim();
   const media = mediaLinks(tweet, shareOptions);
-  const heroImageUrl = pickEmbedHeroUrl(tweet, media);
-  const mediaFields = buildMediaFields(media.filter((item) => item.kind === "video"), {
-    videosBelow: shareOptions.videosBelow === true
-  });
+  const attachmentUrls = shareOptions.attachmentUrls || [];
+  const candidateHeroUrl = pickEmbedHeroUrl(tweet, media);
+  const heroImageUrl = shareOptions.attachMedia === true && attachmentUrls.includes(candidateHeroUrl) ? "" : candidateHeroUrl;
+  const mediaFields = shareOptions.attachMedia === true
+    ? []
+    : buildMediaFields(media.filter((item) => item.kind === "video"), {
+      videosBelow: shareOptions.videosBelow === true
+    });
+  const inlineQuoteFields = kind === "main" ? (shareOptions.inlineQuoteFields || []) : [];
   const footer = embedFooterForUrl(permalink);
   const descriptionChunks = splitText(text, DISCORD_EMBED_LIMITS.description);
   const contentEmbeds = [];
@@ -228,7 +296,8 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
         description: media.length ? undefined : "(No text found)",
         url: permalink || undefined,
         image: heroImageUrl ? { url: heroImageUrl } : undefined,
-        fields: mediaFields.length ? mediaFields : undefined,
+        fields: [...mediaFields, ...inlineQuoteFields].length ? [...mediaFields, ...inlineQuoteFields] : undefined,
+        timestamp: kind === "main" ? discordEmbedTimestamp(tweet.createdAt) : undefined,
         footer
       })
     );
@@ -249,7 +318,8 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
         description: chunk,
         url: isFirst && permalink ? permalink : undefined,
         image: isFirst && heroImageUrl ? { url: heroImageUrl } : undefined,
-        fields: isLast && mediaFields.length ? mediaFields : undefined,
+        fields: isLast && [...mediaFields, ...inlineQuoteFields].length ? [...mediaFields, ...inlineQuoteFields] : undefined,
+        timestamp: kind === "main" && isFirst ? discordEmbedTimestamp(tweet.createdAt) : undefined,
         footer: isLast ? footer : undefined
       })
     );
@@ -339,10 +409,21 @@ function buildVideoFollowUpContent(entries, context = {}) {
 function buildEmbedDiscordPayloads(tweet, options = {}) {
   const { includeQuote = true } = options;
   const videoEntries = collectShareVideoEntries(tweet, options);
-  const shareOptions = { ...options, rootTweet: tweet, videosBelow: videoEntries.length > 0 };
+  const attachMedia = options.attachMedia === true;
+  const attachmentUrls = options.attachmentUrls || (attachMedia ? collectMediaAttachmentUrls(tweet, options) : []);
+  const quoteLayout = resolveQuoteLayout(tweet, options);
+  const shareOptions = {
+    ...options,
+    attachmentUrls,
+    attachMedia,
+    quoteLayout,
+    inlineQuoteFields: quoteLayout === "inline" ? buildInlineQuoteFields(tweet) : [],
+    rootTweet: tweet,
+    videosBelow: !attachMedia && videoEntries.length > 0
+  };
   const embeds = [...buildTweetEmbedGroup(tweet, "main", shareOptions)];
 
-  if (includeQuote && hasQuoteTweet(tweet)) {
+  if (includeQuote && hasQuoteTweet(tweet) && quoteLayout === "card") {
     embeds.push(...buildTweetEmbedGroup(tweet.quote, "quote", shareOptions));
   }
 
@@ -352,11 +433,12 @@ function buildEmbedDiscordPayloads(tweet, options = {}) {
 
   const messages = packed.map((group, index) =>
     buildWebhookPayload(group, tweet, {
+      content: index === 0 ? buildShareContentLines(tweet, shareOptions) : undefined,
       messageLabel: packed.length > 1 ? `Tweet embeds ${index + 1}/${packed.length}` : undefined
     })
   );
 
-  const videoContent = buildVideoFollowUpContent(videoEntries, { imageSupplementCount });
+  const videoContent = attachMedia ? undefined : buildVideoFollowUpContent(videoEntries, { imageSupplementCount });
   if (videoContent) {
     // Discord unfurls MP4 links in content, but not when custom embeds are on the same message.
     messages.push(

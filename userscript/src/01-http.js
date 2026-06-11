@@ -40,6 +40,33 @@ function request(method, url, body) {
   });
 }
 
+function requestMultipart(url, payloadJson, files = []) {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    formData.append("payload_json", JSON.stringify(payloadJson || {}));
+    files.forEach((file, index) => {
+      const blob = file.blob || new Blob([file.bytes], { type: file.contentType || "application/octet-stream" });
+      formData.append(file.name || `files[${index}]`, blob, file.filename || `media_${index}`);
+    });
+
+    xhrClient()({
+      method: "POST",
+      url,
+      data: formData,
+      onload(response) {
+        try {
+          resolve(parseDiscordResponse(response));
+        } catch (error) {
+          reject(error);
+        }
+      },
+      onerror() {
+        reject(new Error("Could not reach Discord. Check your network and webhook URL."));
+      }
+    });
+  });
+}
+
 function delay(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }

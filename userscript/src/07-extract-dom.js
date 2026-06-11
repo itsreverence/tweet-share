@@ -44,7 +44,7 @@ function extractMedia(article, excludedNodes = []) {
   const images = [...article.querySelectorAll('[data-testid="tweetPhoto"] img')]
     .filter((img) => !isInsideExcludedNode(img, excludedNodes))
     .filter((img) => !isTweetVideoThumbnailUrl(img.src))
-    .map((img) => ({ type: "image", url: img.src, alt: img.alt || "" }));
+    .map((img) => ({ type: "image", url: highResolutionTweetImageUrl(img.src), alt: img.alt || "" }));
 
   const videos = [...article.querySelectorAll("video")]
     .filter((video) => !isInsideExcludedNode(video, excludedNodes))

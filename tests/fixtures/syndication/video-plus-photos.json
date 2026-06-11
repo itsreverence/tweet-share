@@ -1,0 +1,59 @@
+{
+  "text": "Synthetic post with several media attachments.",
+  "user": {
+    "name": "Fixture Author",
+    "screen_name": "fixture_author",
+    "profile_image_url_https": "https://pbs.twimg.com/profile_images/fixture_normal.jpg"
+  },
+  "id_str": "1000000000000000001",
+  "created_at": "Tue May 26 12:00:00 +0000 2026",
+  "photos": [
+    {
+      "url": "https://pbs.twimg.com/media/photo-one.jpg",
+      "alt_text": "First synthetic image"
+    },
+    {
+      "url": "https://pbs.twimg.com/media/photo-two.jpg",
+      "alt_text": "Second synthetic image"
+    }
+  ],
+  "video": {
+    "poster": "https://pbs.twimg.com/ext_tw_video_thumb/1000000000000000001/pu/img/poster.jpg",
+    "variants": [
+      {
+        "type": "application/x-mpegURL",
+        "src": "https://video.twimg.com/ext_tw_video/1000000000000000001/pu/pl/playlist.m3u8"
+      },
+      {
+        "type": "video/mp4",
+        "src": "https://video.twimg.com/ext_tw_video/1000000000000000001/pu/vid/640x360/video-low.mp4",
+        "bitrate": 832000
+      },
+      {
+        "type": "video/mp4",
+        "src": "https://video.twimg.com/ext_tw_video/1000000000000000001/pu/vid/1280x720/video-high.mp4",
+        "bitrate": 2176000
+      }
+    ]
+  },
+  "mediaDetails": [
+    {
+      "type": "photo",
+      "media_url_https": "https://pbs.twimg.com/media/photo-three.jpg",
+      "ext_alt_text": "Third synthetic image"
+    },
+    {
+      "type": "video",
+      "media_url_https": "https://pbs.twimg.com/ext_tw_video_thumb/1000000000000000001/pu/img/poster-detail.jpg",
+      "video_info": {
+        "variants": [
+          {
+            "content_type": "video/mp4",
+            "url": "https://video.twimg.com/ext_tw_video/1000000000000000001/pu/vid/480x270/video-detail.mp4",
+            "bitrate": 256000
+          }
+        ]
+      }
+    }
+  ]
+}
