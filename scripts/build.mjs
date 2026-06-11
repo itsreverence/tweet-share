@@ -4,10 +4,15 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const headerPath = path.join(root, "userscript", "metadata.txt");
+const packagePath = path.join(root, "package.json");
 const srcDir = path.join(root, "userscript", "src");
 const outPath = path.join(root, "dist", "tweet-discord-share.user.js");
 
-const header = fs.readFileSync(headerPath, "utf8").trimEnd();
+const { version } = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+const header = fs
+  .readFileSync(headerPath, "utf8")
+  .replace(/^\/\/ @version\s+.*$/m, `// @version      ${version}`)
+  .trimEnd();
 const modules = fs
   .readdirSync(srcDir)
   .filter((name) => name.endsWith(".js"))

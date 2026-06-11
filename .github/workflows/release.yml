@@ -1,10 +1,10 @@
 name: Release
 
-# Bump package.json version, push to main — publishes v{version} as Latest + Discord.
+# Bump package.json version, push to master — publishes v{version} as Latest.
 
 on:
   push:
-    branches: [main, master]
+    branches: [master]
 
 permissions:
   contents: write
@@ -18,6 +18,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+
+      - name: Verify release build
+        run: |
+          npm test
+          npm run check
 
       - name: Publish when package.json version is new
         id: publish
@@ -33,8 +38,6 @@ jobs:
             exit 0
           fi
 
-          npm run build
-          node --check dist/tweet-discord-share.user.js
           cp dist/tweet-discord-share.user.js "$ASSET"
           sha256sum "$ASSET" > checksums.txt
 
@@ -43,14 +46,3 @@ jobs:
           echo "created=true" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
-
-      - name: Discord
-        if: steps.publish.outputs.created == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
-          REPO: ${{ github.repository }}
-          TAG: ${{ steps.publish.outputs.tag }}
-          ASSET_PATH: ${{ steps.publish.outputs.asset }}
-          ASSET_NAME: ${{ steps.publish.outputs.asset }}
-        run: bash .github/scripts/post-discord-release.sh
