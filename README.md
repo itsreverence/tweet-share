@@ -2,6 +2,8 @@
 
 [Tampermonkey](https://www.tampermonkey.net/) / [Violentmonkey](https://violentmonkey.github.io/) userscript that shares X/Twitter posts to Discord via webhooks. No X API or server required — it runs locally in your browser on `x.com` / `twitter.com`.
 
+This is an unofficial personal sharing helper. It is not affiliated with, endorsed by, or supported by X/Twitter or Discord. Use it only for posts you are allowed to view and share, and follow the rules of the services and communities you use it with.
+
 ## Install
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/) or [Violentmonkey](https://violentmonkey.github.io/).
@@ -28,6 +30,13 @@ Channels live in userscript-manager storage on your machine, not in this repo. *
 - Sends post text, permalink, timestamps, images, and video links/attachments where available
 - Supports quoted posts and lets you choose whether to include the quote when sharing
 - Scrapes what’s visible on the page; private/protected posts only work while you can see them
+
+## Responsible use
+
+- This project is unofficial and may stop working if X/Twitter changes its website or policies.
+- Do not use it to bypass access controls, scrape content you cannot normally view, bulk-export posts, harass people, spam Discord channels, or repost private/protected content without permission.
+- The script can send selected post text/media and Discord webhook URLs through your browser/userscript manager. Review what you share and keep webhook URLs private.
+- X/Twitter, Discord, or a Discord server owner may restrict content sharing or automated tooling differently. You are responsible for using the script within those rules.
 
 ## Development
 
