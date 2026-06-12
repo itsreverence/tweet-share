@@ -1543,16 +1543,10 @@ async function shareToDestination(destinationId, tweet, options = {}) {
   }
 }
 
-  // --- 09-ui.js ---
-// Simple person outline (head + shoulders), readable at menu size.
-const PERSON_ICON_PATHS = [
-  "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2",
-  "M12 11a4 4 0 0 1 0-8 4 4 0 0 1 0 8z",
-];
-
+  // --- 09-surface.js ---
+// Shared UI surface helpers: styles, toasts, and popover positioning.
 let activePopover = null;
 let activePopoverCleanup = null;
-let pendingShareArticle = null;
 
 function appendWhenReady(node) {
   if (document.documentElement) {
@@ -1743,6 +1737,14 @@ function positionPopover(menu, anchor) {
   menu.style.visibility = "visible";
 }
 
+  // --- 09-ui.js ---
+// Simple person outline (head + shoulders), readable at menu size.
+const PERSON_ICON_PATHS = [
+  "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2",
+  "M12 11a4 4 0 0 1 0-8 4 4 0 0 1 0 8z",
+];
+
+let pendingShareArticle = null;
 function articleHasQuotableTweet(article) {
   try {
     return hasQuoteTweet(extractTweet(article));
@@ -2322,7 +2324,8 @@ async function savePreferences(preferences) {
   return sanitized;
 }
 
-  // --- 11-settings.js ---
+  // --- 11-settings-surface.js ---
+// Settings modal surface helpers: styles and small DOM builders.
 function injectSettingsStyles() {
   if (document.getElementById("tds-settings-style")) return;
 
@@ -2531,6 +2534,7 @@ function createSettingsField(labelText, input) {
   return fieldEl;
 }
 
+  // --- 11-settings.js ---
 async function openSettingsModal() {
   closeDestinationMenu();
   injectSettingsStyles();
