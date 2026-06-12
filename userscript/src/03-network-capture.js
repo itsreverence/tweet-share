@@ -1,13 +1,6 @@
 function cacheVideoVariants(mediaId, variants) {
   if (!mediaId || !Array.isArray(variants)) return;
-  const mp4s = variants
-    .map((variant) => ({
-      url: normalizeTweetVideoUrl(variant.url || variant.src || ""),
-      bitrate: variant.bitrate || 0,
-      type: variant.content_type || variant.type || ""
-    }))
-    .filter((variant) => variant.type === "video/mp4" && isPlayableTweetVideoUrl(variant.url))
-    .sort((left, right) => (right.bitrate || videoQualityScore(right.url)) - (left.bitrate || videoQualityScore(left.url)));
+  const mp4s = playableVideoVariants(variants);
 
   if (mp4s.length > 0) {
     VIDEO_VARIANT_CACHE.set(mediaId, mp4s);
@@ -54,18 +47,11 @@ function mediaFromLegacyTweet(legacy) {
     }
 
     if (item.video_info?.variants) {
-      const bestVideo = item.video_info.variants
-        .map((variant) => ({
-          url: normalizeTweetVideoUrl(variant.url || ""),
-          bitrate: variant.bitrate || 0,
-          type: variant.content_type || ""
-        }))
-        .filter((variant) => variant.type === "video/mp4" && isPlayableTweetVideoUrl(variant.url))
-        .sort((left, right) => (right.bitrate || videoQualityScore(right.url)) - (left.bitrate || videoQualityScore(left.url)))[0];
+      const bestVideoUrl = bestPlayableVideoVariantUrl(item.video_info.variants);
 
       return [{
         type: "video",
-        url: bestVideo?.url || "",
+        url: bestVideoUrl || "",
         posterUrl: item.media_url_https || item.media_url || "",
         alt: item.ext_alt_text || ""
       }];

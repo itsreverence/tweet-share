@@ -93,6 +93,21 @@ function compareTweetVideoQuality(left, right) {
   return videoQualityScore(right) - videoQualityScore(left);
 }
 
+function playableVideoVariants(variants = []) {
+  return variants
+    .map((variant) => ({
+      url: normalizeTweetVideoUrl(variant.url || variant.src || ""),
+      bitrate: variant.bitrate || 0,
+      type: variant.content_type || variant.type || ""
+    }))
+    .filter((variant) => variant.type === "video/mp4" && isPlayableTweetVideoUrl(variant.url))
+    .sort((left, right) => (right.bitrate || videoQualityScore(right.url)) - (left.bitrate || videoQualityScore(left.url)));
+}
+
+function bestPlayableVideoVariantUrl(variants = []) {
+  return playableVideoVariants(variants)[0]?.url || "";
+}
+
 function uniqueMedia(items) {
   return items.filter((item, index, all) => {
     const key = item.url || item.posterUrl;
