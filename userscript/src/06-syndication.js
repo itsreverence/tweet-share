@@ -10,32 +10,11 @@ async function fetchSyndicationTweet(tweetId) {
 
 function bestSyndicationVideoUrl(data) {
   const candidates = [
-    ...(data?.video?.variants || []).map((variant) => ({
-      url: variant.src,
-      bitrate: variant.bitrate || 0,
-      type: variant.type
-    })),
-    ...(data?.mediaDetails || []).flatMap((media) => (media.video_info?.variants || []).map((variant) => ({
-      url: variant.url,
-      bitrate: variant.bitrate || 0,
-      type: variant.content_type
-    })))
+    ...(data?.video?.variants || []),
+    ...(data?.mediaDetails || []).flatMap((media) => media.video_info?.variants || [])
   ];
 
-  return candidates
-    .filter((variant) => variant.type === "video/mp4" && isPlayableTweetVideoUrl(variant.url))
-    .sort((left, right) => (right.bitrate || videoQualityScore(right.url)) - (left.bitrate || videoQualityScore(left.url)))[0]?.url || "";
-}
-
-function bestSyndicationVariantUrl(variants = []) {
-  return variants
-    .map((variant) => ({
-      url: normalizeTweetVideoUrl(variant.url || variant.src || ""),
-      bitrate: variant.bitrate || 0,
-      type: variant.content_type || variant.type || ""
-    }))
-    .filter((variant) => variant.type === "video/mp4" && isPlayableTweetVideoUrl(variant.url))
-    .sort((left, right) => (right.bitrate || videoQualityScore(right.url)) - (left.bitrate || videoQualityScore(left.url)))[0]?.url || "";
+  return bestPlayableVideoVariantUrl(candidates);
 }
 
 function syndicationPosterUrl(data) {
@@ -60,14 +39,14 @@ function mediaFromSyndication(data) {
     }
 
     if ((media.type === "video" || media.type === "animated_gif") && media.video_info?.variants) {
-      const videoUrl = bestSyndicationVariantUrl(media.video_info.variants);
+      const videoUrl = bestPlayableVideoVariantUrl(media.video_info.variants);
       const posterUrl = media.media_url_https || "";
       return videoUrl || posterUrl ? [{ type: "video", url: videoUrl, posterUrl, alt: media.ext_alt_text || "" }] : [];
     }
 
     return [];
   });
-  const topVideoUrl = bestSyndicationVariantUrl(data.video?.variants || []);
+  const topVideoUrl = bestPlayableVideoVariantUrl(data.video?.variants || []);
   const topVideo = topVideoUrl || data.video?.poster
     ? [{ type: "video", url: topVideoUrl, posterUrl: data.video?.poster || "", alt: "" }]
     : [];
