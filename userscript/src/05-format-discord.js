@@ -99,14 +99,22 @@ function embedAuthorBlock(tweet) {
   return block;
 }
 
-function embedFooterForUrl(url) {
-  if (!url) return undefined;
-  try {
-    const host = new URL(url).hostname.replace(/^www\./, "");
-    return { text: truncate(host, DISCORD_EMBED_LIMITS.footer) };
-  } catch {
-    return { text: truncate(url, DISCORD_EMBED_LIMITS.footer) };
-  }
+function tweetSourceLabel(tweet, kind = "main") {
+  const parts = [];
+  if (kind === "quote") parts.push("Quoted post");
+
+  const username = String(tweet.author?.username || "").trim();
+  if (username) parts.push(`@${username}`);
+
+  const url = String(tweet.url || "").trim();
+  const hostMatch = /^https?:\/\/([^/]+)/i.exec(url);
+  if (hostMatch) parts.push(hostMatch[1].replace(/^www\./, ""));
+
+  return parts.length ? parts.join(" · ") : "x.com";
+}
+
+function embedFooterForTweet(tweet, kind = "main") {
+  return { text: truncate(tweetSourceLabel(tweet, kind), DISCORD_EMBED_LIMITS.footer) };
 }
 
 function countEmbedChars(embed) {
@@ -170,19 +178,19 @@ function buildInlineQuoteFields(tweet) {
   const quote = tweet.quote;
   if (!quote) return [];
 
-  const username = quote.author?.username || "unknown";
+  const username = quote.author?.username ? `@${quote.author.username}` : "unknown";
   const fields = [];
   const quoteBody = formatQuoteFieldValue(quote.text);
   if (quoteBody) {
     fields.push({
-      name: truncate(`Quote from: ${username}`, DISCORD_EMBED_LIMITS.fieldName),
+      name: truncate(`Quoted post from ${username}`, DISCORD_EMBED_LIMITS.fieldName),
       value: quoteBody,
       inline: false
     });
   }
   if (tweet.url) {
     fields.push({
-      name: "Source",
+      name: "Original post",
       value: truncate(tweet.url, DISCORD_EMBED_LIMITS.fieldValue),
       inline: false
     });
@@ -284,7 +292,7 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
       videosBelow: shareOptions.videosBelow === true
     });
   const inlineQuoteFields = kind === "main" ? (shareOptions.inlineQuoteFields || []) : [];
-  const footer = embedFooterForUrl(permalink);
+  const footer = embedFooterForTweet(tweet, kind);
   const descriptionChunks = splitText(text, DISCORD_EMBED_LIMITS.description);
   const contentEmbeds = [];
 

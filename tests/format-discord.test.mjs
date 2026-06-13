@@ -116,6 +116,7 @@ test("webhook sender is branded while the embed shows the tweet author once", ()
   assert.match(payloads[0].avatar_url, /^https:\/\//);
   assert.equal(payloads[0].embeds[0].author.name, "Alice");
   assert.equal(payloads[0].embeds[0].author.url, "https://x.com/alice");
+  assert.equal(payloads[0].embeds[0].footer.text, "@alice · x.com");
   assert.match(payloads[0].embeds[0].author.icon_url, /profile_images/);
   assert.doesNotMatch(payloads[0].embeds[0].author.name, /@alice/);
 });
@@ -136,6 +137,7 @@ test("quoteLayout card adds a second embed in the same message", () => {
   assert.equal(payloads.length, 1);
   assert.equal(payloads[0].embeds.length, 2);
   assert.equal(payloads[0].embeds[1].color, 0x536471);
+  assert.equal(payloads[0].embeds[1].footer.text, "Quoted post · @bob · x.com");
 });
 
 test("quote card embed does not use quote timestamp", () => {
@@ -158,7 +160,7 @@ test("quote card embed does not use quote timestamp", () => {
 test("auto quote layout inlines text-only main with quoted video", () => {
   const payloads = buildDiscordPayloads(jamieQuoteTweet, { quoteLayout: "auto" });
   const firstEmbed = payloads[0].embeds[0];
-  const quoteField = firstEmbed.fields.find((field) => field.name === "Quote from: atrupar");
+  const quoteField = firstEmbed.fields.find((field) => field.name === "Quoted post from @atrupar");
 
   assert.equal(payloads.length, 2);
   assert.equal(payloads[0].embeds.length, 1);
@@ -166,7 +168,7 @@ test("auto quote layout inlines text-only main with quoted video", () => {
   assert.match(payloads[0].content, /↳ Quotes: https:\/\/x\.com\/atrupar\/status\/2064811778433818859/);
   assert.ok(quoteField);
   assert.match(quoteField.value, /^> Hegseth:/);
-  assert.ok(firstEmbed.fields.some((field) => field.name === "Source" && field.value === jamieQuoteTweet.url));
+  assert.ok(firstEmbed.fields.some((field) => field.name === "Original post" && field.value === jamieQuoteTweet.url));
   assert.match(payloads[1].content, /q\.mp4/);
 });
 
@@ -179,7 +181,7 @@ test("attach mode inline quote uses one embed and no quote author card", () => {
   assert.equal(payloads.length, 1);
   assert.equal(payloads[0].embeds.length, 1);
   assert.equal(payloads[0].embeds.some((embed) => embed.author?.name === "Aaron Rupar"), false);
-  assert.ok(payloads[0].embeds[0].fields.some((field) => field.name === "Quote from: atrupar"));
+  assert.ok(payloads[0].embeds[0].fields.some((field) => field.name === "Quoted post from @atrupar"));
 });
 
 test("auto quote layout keeps card mode when both posts have visual media", () => {
