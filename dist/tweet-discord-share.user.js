@@ -914,8 +914,10 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
   const permalink = tweet.url || "";
   const text = String(tweet.text || "").trim();
   const media = mediaLinks(tweet, shareOptions);
+  const inlineQuote = kind === "main" && shareOptions.quoteLayout === "inline" ? shareOptions.rootTweet?.quote : null;
+  const inlineQuoteMedia = inlineQuote ? mediaLinks(inlineQuote, shareOptions).filter((item) => item.kind === "image") : [];
   const attachmentUrls = shareOptions.attachmentUrls || [];
-  const candidateHeroUrl = pickEmbedHeroUrl(tweet, media);
+  const candidateHeroUrl = pickEmbedHeroUrl(tweet, media) || (inlineQuote ? pickEmbedHeroUrl(inlineQuote, inlineQuoteMedia) : "");
   const heroImageUrl = shareOptions.attachMedia === true && attachmentUrls.includes(candidateHeroUrl) ? "" : candidateHeroUrl;
   const mediaFields = shareOptions.attachMedia === true
     ? []

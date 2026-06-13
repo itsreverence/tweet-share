@@ -202,6 +202,25 @@ test("auto quote layout keeps card mode when both posts have visual media", () =
   assert.equal(payloads[0].embeds[1].author.name, "Bob");
 });
 
+test("auto inline quote uses quoted image as the embed hero when main has no media", () => {
+  const tweet = {
+    ...sampleTweet,
+    media: [],
+    quote: {
+      url: "https://x.com/bob/status/2",
+      author: { displayName: "Bob", username: "bob" },
+      text: "Quoted image",
+      media: [{ type: "image", url: "https://pbs.twimg.com/media/q1.jpg" }]
+    }
+  };
+
+  const payloads = buildDiscordPayloads(tweet, { quoteLayout: "auto", attachMedia: true });
+  assert.equal(payloads.length, 1);
+  assert.equal(payloads[0].embeds.length, 1);
+  assert.equal(payloads[0].embeds[0].image.url, "https://pbs.twimg.com/media/q1.jpg");
+  assert.ok(payloads[0].embeds[0].fields.some((field) => field.name === "Quoted post from @bob"));
+});
+
 test("packEmbedsIntoMessages respects the 6000 character budget", () => {
   const embeds = Array.from({ length: 4 }, (_, index) => ({
     description: "x".repeat(1800),
