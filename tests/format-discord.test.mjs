@@ -369,22 +369,20 @@ test("attach mode sends compact embeds without supplemental image or video follo
   };
   const attachmentUrls = collectMediaAttachmentUrls(tweet, { includeQuote: false });
 
-  assert.deepEqual(Array.from(attachmentUrls), [
-    videoUrl,
-    "https://pbs.twimg.com/media/one.jpg",
-    "https://pbs.twimg.com/media/two.jpg",
-    "https://pbs.twimg.com/media/three.jpg"
-  ]);
+  assert.deepEqual(Array.from(attachmentUrls), [videoUrl]);
 
   const payloads = buildDiscordPayloads(tweet, { includeQuote: false, attachMedia: true, attachmentUrls });
   assert.equal(payloads.length, 1);
   assert.equal(payloads[0].content, tweet.url);
-  assert.equal(payloads[0].embeds.length, 1);
-  assert.equal(payloads[0].embeds[0].image, undefined);
-  assert.equal(payloads[0].embeds[0].fields, undefined);
+  assert.equal(payloads[0].embeds.length, 3);
+  assert.equal(payloads[0].embeds[0].image.url, "https://pbs.twimg.com/media/one.jpg");
+  assert.equal(payloads[0].embeds[1].image.url, "https://pbs.twimg.com/media/two.jpg");
+  assert.equal(payloads[0].embeds[2].image.url, "https://pbs.twimg.com/media/three.jpg");
+  assert.ok(payloads[0].embeds[0].fields?.some((field) => field.name === "More images"));
+  assert.equal(payloads[0].embeds[0].fields.some((field) => /Video/.test(field.name)), false);
 });
 
-test("attach mode keeps quote embed but avoids media clutter", () => {
+test("attach mode keeps quote images embedded while avoiding video clutter", () => {
   const tweet = {
     ...sampleTweet,
     media: [
@@ -407,6 +405,9 @@ test("attach mode keeps quote embed but avoids media clutter", () => {
     attachmentUrls: collectMediaAttachmentUrls(tweet)
   });
   assert.equal(payloads.length, 1);
-  assert.equal(payloads[0].embeds.length, 2);
-  assert.equal(payloads[0].embeds.every((embed) => !embed.image && !embed.fields), true);
+  assert.equal(payloads[0].embeds.length, 4);
+  assert.equal(payloads[0].embeds[0].image.url, "https://pbs.twimg.com/media/main1.jpg");
+  assert.equal(payloads[0].embeds[1].image.url, "https://pbs.twimg.com/media/main2.jpg");
+  assert.equal(payloads[0].embeds[2].image.url, "https://pbs.twimg.com/media/q1.jpg");
+  assert.equal(payloads[0].embeds[3].image.url, "https://pbs.twimg.com/media/q2.jpg");
 });

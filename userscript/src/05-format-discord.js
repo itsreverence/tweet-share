@@ -78,8 +78,9 @@ function collectMediaAttachmentUrls(tweet, shareOptions = {}) {
   const urls = [];
 
   function appendPostMedia(post) {
+    // Videos need native uploads/follow-up handling for reliable Discord playback.
+    // Images render well inside embeds, which keeps the tweet card easier to read.
     urls.push(...directPlayableVideoUrls(post));
-    urls.push(...imageMedia(post).map((item) => item.url).filter(Boolean));
   }
 
   appendPostMedia(tweet);
@@ -267,8 +268,6 @@ function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind) {
 }
 
 function assembleTweetEmbedGroup(tweet, kind, shareOptions, contentEmbeds, media, heroImageUrl) {
-  if (shareOptions.attachMedia === true) return contentEmbeds;
-
   const supplements = buildImageSupplementEmbeds(tweet, media, heroImageUrl, kind);
   const withHints = appendMediaHintToLastContentEmbed(
     contentEmbeds,
