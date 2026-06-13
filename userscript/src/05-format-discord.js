@@ -29,14 +29,14 @@ function uniqueMediaLinks(items) {
   return items.filter((item, index, all) => item.url && all.findIndex((candidate) => candidate.url === item.url) === index);
 }
 
-function tweetHasVisualMedia(tweet) {
-  return imageMedia(tweet).length > 0 || directPlayableVideoUrls(tweet).length > 0;
+function tweetHasEmbedImageMedia(tweet) {
+  return imageMedia(tweet).length > 0;
 }
 
 function needsMediaPostPrefix(rootTweet, shareOptions = {}) {
   const { includeQuote = true } = shareOptions;
   if (!includeQuote || !hasQuoteTweet(rootTweet)) return false;
-  return tweetHasVisualMedia(rootTweet) && tweetHasVisualMedia(rootTweet.quote);
+  return tweetHasEmbedImageMedia(rootTweet) && tweetHasEmbedImageMedia(rootTweet.quote);
 }
 
 function resolveQuoteLayout(tweet, shareOptions = {}) {
@@ -54,7 +54,11 @@ function mediaCaption(kind, postTweet, index, shareOptions = {}, rootTweet = pos
 }
 
 function videoCaption(postTweet, index, shareOptions = {}, rootTweet = postTweet) {
-  return mediaCaption("video", postTweet, index, shareOptions, rootTweet);
+  const includeQuote = shareOptions.includeQuote !== false;
+  const label = `Video ${index + 1}`;
+  if (!includeQuote || !hasQuoteTweet(rootTweet)) return label;
+  const bothPostsHaveVideo = directPlayableVideoUrls(rootTweet).length > 0 && directPlayableVideoUrls(rootTweet.quote).length > 0;
+  return bothPostsHaveVideo || needsMediaPostPrefix(rootTweet, shareOptions) ? `${embedAuthorDisplayName(postTweet)} · ${label}` : label;
 }
 
 function mediaLinks(tweet, shareOptions = {}) {
@@ -207,7 +211,7 @@ function buildShareContentLines(tweet, shareOptions = {}) {
   const lines = [];
   if (tweet.url) lines.push(tweet.url);
   if (resolveQuoteLayout(tweet, shareOptions) === "inline" && tweet.quote?.url) {
-    lines.push(`↳ Quoted post: ${tweet.quote.url}`);
+    lines.push(`↳ 📑 Quoted post: ${tweet.quote.url}`);
   }
   return lines.length ? truncate(lines.join("\n"), DISCORD_LIMITS.content) : undefined;
 }

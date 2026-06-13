@@ -166,7 +166,7 @@ test("auto quote layout inlines text-only main with quoted video", () => {
   assert.equal(payloads.length, 2);
   assert.equal(payloads[0].embeds.length, 1);
   assert.match(payloads[0].content, /JamieBonkiewicz\/status\/2064816452863988103/);
-  assert.match(payloads[0].content, /↳ Quoted post: https:\/\/x\.com\/atrupar\/status\/2064811778433818859/);
+  assert.match(payloads[0].content, /↳ 📑 Quoted post: https:\/\/x\.com\/atrupar\/status\/2064811778433818859/);
   assert.ok(quoteField);
   assert.match(quoteField.value, /^> Hegseth:/);
   assert.ok(firstEmbed.fields.some((field) => field.name === "Original post" && field.value === jamieQuoteTweet.url));
@@ -218,6 +218,31 @@ test("auto inline quote uses quoted image as the embed hero when main has no med
   assert.equal(payloads.length, 1);
   assert.equal(payloads[0].embeds.length, 1);
   assert.equal(payloads[0].embeds[0].image.url, "https://pbs.twimg.com/media/q1.jpg");
+  assert.ok(payloads[0].embeds[0].fields.some((field) => field.name === "Quoted post from @bob"));
+});
+
+test("auto quote layout inlines main and quoted videos because videos upload as attachments", () => {
+  const mainVideo = "https://video.twimg.com/ext_tw_video/1/pu/vid/abc/1280x720/main.mp4";
+  const quoteVideo = "https://video.twimg.com/ext_tw_video/2/pu/vid/abc/1280x720/quote.mp4";
+  const tweet = {
+    ...sampleTweet,
+    text: "Main clip",
+    media: [{ type: "video", url: mainVideo }],
+    quote: {
+      url: "https://x.com/bob/status/2",
+      author: { displayName: "Bob", username: "bob" },
+      text: "Quoted clip",
+      media: [{ type: "video", url: quoteVideo }]
+    }
+  };
+
+  const payloads = buildDiscordPayloads(tweet, {
+    attachMedia: true,
+    attachmentUrls: collectMediaAttachmentUrls(tweet)
+  });
+  assert.equal(payloads.length, 1);
+  assert.equal(payloads[0].embeds.length, 1);
+  assert.match(payloads[0].content, /↳ 📑 Quoted post: https:\/\/x\.com\/bob\/status\/2/);
   assert.ok(payloads[0].embeds[0].fields.some((field) => field.name === "Quoted post from @bob"));
 });
 
@@ -276,9 +301,8 @@ test("videos label each post when both the main and quoted tweets have video", (
   assert.match(payloads[1].content, /\*\*Bob · Video 1\*\*/);
 
   const mainFields = payloads[0].embeds[0]?.fields || [];
-  const quoteFields = payloads[0].embeds[1]?.fields || [];
   assert.ok(mainFields.some((field) => field.name === "Alice · Video 1"));
-  assert.ok(quoteFields.some((field) => field.name === "Bob · Video 1"));
+  assert.ok(mainFields.some((field) => field.name === "Quoted post from @bob"));
 });
 
 test("extra images become supplemental embeds instead of link fields", () => {
