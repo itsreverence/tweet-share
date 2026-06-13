@@ -175,6 +175,15 @@ function formatQuoteFieldValue(text) {
   return truncate(trimmed.split("\n").map((line) => `> ${line}`).join("\n"), DISCORD_EMBED_LIMITS.fieldValue);
 }
 
+function permalinkField(name, url) {
+  if (!url) return null;
+  return {
+    name: truncate(name, DISCORD_EMBED_LIMITS.fieldName),
+    value: truncate(url, DISCORD_EMBED_LIMITS.fieldValue),
+    inline: false
+  };
+}
+
 function buildInlineQuoteFields(tweet) {
   const quote = tweet.quote;
   if (!quote) return [];
@@ -189,13 +198,8 @@ function buildInlineQuoteFields(tweet) {
       inline: false
     });
   }
-  if (tweet.url) {
-    fields.push({
-      name: "Original post",
-      value: truncate(tweet.url, DISCORD_EMBED_LIMITS.fieldValue),
-      inline: false
-    });
-  }
+  const originalField = permalinkField("Original post", tweet.url);
+  if (originalField) fields.push(originalField);
   return fields;
 }
 
@@ -203,7 +207,7 @@ function buildShareContentLines(tweet, shareOptions = {}) {
   const lines = [];
   if (tweet.url) lines.push(tweet.url);
   if (resolveQuoteLayout(tweet, shareOptions) === "inline" && tweet.quote?.url) {
-    lines.push(`↳ Quotes: ${tweet.quote.url}`);
+    lines.push(`↳ Quoted post: ${tweet.quote.url}`);
   }
   return lines.length ? truncate(lines.join("\n"), DISCORD_LIMITS.content) : undefined;
 }
@@ -291,6 +295,7 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
       videosBelow: shareOptions.videosBelow === true
     });
   const inlineQuoteFields = kind === "main" ? (shareOptions.inlineQuoteFields || []) : [];
+  const permalinkFields = kind === "quote" ? [permalinkField("Quoted post", permalink)].filter(Boolean) : [];
   const footer = embedFooterForTweet(tweet, kind);
   const descriptionChunks = splitText(text, DISCORD_EMBED_LIMITS.description);
   const contentEmbeds = [];
@@ -303,7 +308,7 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
         description: media.length ? undefined : "(No text found)",
         url: permalink || undefined,
         image: heroImageUrl ? { url: heroImageUrl } : undefined,
-        fields: [...mediaFields, ...inlineQuoteFields].length ? [...mediaFields, ...inlineQuoteFields] : undefined,
+        fields: [...mediaFields, ...inlineQuoteFields, ...permalinkFields].length ? [...mediaFields, ...inlineQuoteFields, ...permalinkFields] : undefined,
         timestamp: kind === "main" ? discordEmbedTimestamp(tweet.createdAt) : undefined,
         footer
       })
@@ -325,7 +330,7 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
         description: chunk,
         url: isFirst && permalink ? permalink : undefined,
         image: isFirst && heroImageUrl ? { url: heroImageUrl } : undefined,
-        fields: isLast && [...mediaFields, ...inlineQuoteFields].length ? [...mediaFields, ...inlineQuoteFields] : undefined,
+        fields: isLast && [...mediaFields, ...inlineQuoteFields, ...permalinkFields].length ? [...mediaFields, ...inlineQuoteFields, ...permalinkFields] : undefined,
         timestamp: kind === "main" && isFirst ? discordEmbedTimestamp(tweet.createdAt) : undefined,
         footer: isLast ? footer : undefined
       })

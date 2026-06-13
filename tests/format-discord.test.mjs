@@ -138,6 +138,7 @@ test("quoteLayout card adds a second embed in the same message", () => {
   assert.equal(payloads[0].embeds.length, 2);
   assert.equal(payloads[0].embeds[1].color, 0x536471);
   assert.equal(payloads[0].embeds[1].footer.text, "Quoted post · @bob · x.com");
+  assert.ok(payloads[0].embeds[1].fields.some((field) => field.name === "Quoted post" && field.value === tweet.quote.url));
 });
 
 test("quote card embed does not use quote timestamp", () => {
@@ -165,7 +166,7 @@ test("auto quote layout inlines text-only main with quoted video", () => {
   assert.equal(payloads.length, 2);
   assert.equal(payloads[0].embeds.length, 1);
   assert.match(payloads[0].content, /JamieBonkiewicz\/status\/2064816452863988103/);
-  assert.match(payloads[0].content, /↳ Quotes: https:\/\/x\.com\/atrupar\/status\/2064811778433818859/);
+  assert.match(payloads[0].content, /↳ Quoted post: https:\/\/x\.com\/atrupar\/status\/2064811778433818859/);
   assert.ok(quoteField);
   assert.match(quoteField.value, /^> Hegseth:/);
   assert.ok(firstEmbed.fields.some((field) => field.name === "Original post" && field.value === jamieQuoteTweet.url));
