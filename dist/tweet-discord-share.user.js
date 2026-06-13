@@ -1737,34 +1737,8 @@ function positionPopover(menu, anchor) {
   menu.style.visibility = "visible";
 }
 
-  // --- 09-ui.js ---
-// Simple person outline (head + shoulders), readable at menu size.
-const PERSON_ICON_PATHS = [
-  "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2",
-  "M12 11a4 4 0 0 1 0-8 4 4 0 0 1 0 8z",
-];
-
-let pendingShareArticle = null;
-function articleHasQuotableTweet(article) {
-  try {
-    return hasQuoteTweet(extractTweet(article));
-  } catch {
-    return false;
-  }
-}
-
-async function prepareShareTweet(article) {
-  const tweet = await enrichTweetMedia(extractTweet(article));
-  if (DEBUG_MEDIA_EXTRACTION) {
-    console.group("Tweet Discord Share media debug");
-    console.log(tweet);
-    console.log("Detected direct video URLs", directVideoUrlsFromDocument());
-    console.log("Cached video variants", Object.fromEntries(VIDEO_VARIANT_CACHE));
-    console.groupEnd();
-  }
-  return tweet;
-}
-
+  // --- 09-tweet-popover.js ---
+// Destination popover: preview, quote toggle, destination selection, and settings handoff.
 function setDestinationItemsDisabled(items, disabled) {
   for (const item of items) {
     item.disabled = disabled;
@@ -1948,6 +1922,35 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     document.removeEventListener("pointerdown", onPointerDown, true);
   };
 }
+
+  // --- 09-ui.js ---
+// Simple person outline (head + shoulders), readable at menu size.
+const PERSON_ICON_PATHS = [
+  "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2",
+  "M12 11a4 4 0 0 1 0-8 4 4 0 0 1 0 8z",
+];
+
+let pendingShareArticle = null;
+function articleHasQuotableTweet(article) {
+  try {
+    return hasQuoteTweet(extractTweet(article));
+  } catch {
+    return false;
+  }
+}
+
+async function prepareShareTweet(article) {
+  const tweet = await enrichTweetMedia(extractTweet(article));
+  if (DEBUG_MEDIA_EXTRACTION) {
+    console.group("Tweet Discord Share media debug");
+    console.log(tweet);
+    console.log("Detected direct video URLs", directVideoUrlsFromDocument());
+    console.log("Cached video variants", Object.fromEntries(VIDEO_VARIANT_CACHE));
+    console.groupEnd();
+  }
+  return tweet;
+}
+
 
 async function runShare(article, destinationId, options = {}, preparedTweet = null) {
   showToast(preparedTweet ? "Sending…" : "Preparing…", "info");
