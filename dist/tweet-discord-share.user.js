@@ -672,7 +672,7 @@ function resolveQuoteLayout(tweet, shareOptions = {}) {
   if (shareOptions.includeQuote === false || !hasQuoteTweet(tweet)) return "none";
   if (mode === "card") return "card";
   if (mode === "inline") return "inline";
-  return needsMediaPostPrefix(tweet, shareOptions) ? "card" : "inline";
+  return "inline";
 }
 
 function mediaCaption(kind, postTweet, index, shareOptions = {}, rootTweet = postTweet) {
@@ -917,9 +917,9 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
   const color = kind === "quote" ? EMBED_COLOR_QUOTE : EMBED_COLOR_MAIN;
   const permalink = tweet.url || "";
   const text = String(tweet.text || "").trim();
-  const media = mediaLinks(tweet, shareOptions);
   const inlineQuote = kind === "main" && shareOptions.quoteLayout === "inline" ? shareOptions.rootTweet?.quote : null;
   const inlineQuoteMedia = inlineQuote ? mediaLinks(inlineQuote, shareOptions).filter((item) => item.kind === "image") : [];
+  const media = [...mediaLinks(tweet, shareOptions), ...inlineQuoteMedia];
   const attachmentUrls = shareOptions.attachmentUrls || [];
   const candidateHeroUrl = pickEmbedHeroUrl(tweet, media) || (inlineQuote ? pickEmbedHeroUrl(inlineQuote, inlineQuoteMedia) : "");
   const heroImageUrl = shareOptions.attachMedia === true && attachmentUrls.includes(candidateHeroUrl) ? "" : candidateHeroUrl;

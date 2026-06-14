@@ -185,7 +185,7 @@ test("attach mode inline quote uses one embed and no quote author card", () => {
   assert.ok(payloads[0].embeds[0].fields.some((field) => field.name === "Quoted post from @atrupar"));
 });
 
-test("auto quote layout keeps card mode when both posts have visual media", () => {
+test("auto quote layout groups main and quoted images in one contextual card", () => {
   const tweet = {
     ...sampleTweet,
     media: [{ type: "image", url: "https://pbs.twimg.com/media/main1.jpg" }],
@@ -199,7 +199,11 @@ test("auto quote layout keeps card mode when both posts have visual media", () =
 
   const payloads = buildDiscordPayloads(tweet, { quoteLayout: "auto" });
   assert.equal(payloads[0].embeds.length, 2);
-  assert.equal(payloads[0].embeds[1].author.name, "Bob");
+  assert.equal(payloads[0].embeds[0].image.url, "https://pbs.twimg.com/media/main1.jpg");
+  assert.equal(payloads[0].embeds[1].title, "Bob · Image 1");
+  assert.equal(payloads[0].embeds[1].url, tweet.url);
+  assert.equal(payloads[0].embeds[1].image.url, "https://pbs.twimg.com/media/q1.jpg");
+  assert.ok(payloads[0].embeds[0].fields.some((field) => field.name === "Quoted post from @bob"));
 });
 
 test("auto inline quote uses quoted image as the embed hero when main has no media", () => {
@@ -327,7 +331,7 @@ test("extra images become supplemental embeds instead of link fields", () => {
   assert.equal(embeds[1].color, 0x1da1f2);
 });
 
-test("supplemental images use quote color and author prefixes when both posts have media", () => {
+test("supplemental images use author prefixes and shared URL grouping when both posts have media", () => {
   const tweet = {
     ...sampleTweet,
     text: "main",
@@ -351,9 +355,12 @@ test("supplemental images use quote color and author prefixes when both posts ha
   assert.equal(embeds[0].color, 0x1da1f2);
   assert.equal(embeds[1].title, "Alice · Image 2");
   assert.equal(embeds[1].color, 0x1da1f2);
-  assert.equal(embeds[2].color, 0x536471);
+  assert.equal(embeds[2].title, "Bob · Image 1");
+  assert.equal(embeds[2].url, tweet.url);
+  assert.equal(embeds[2].color, 0x1da1f2);
   assert.equal(embeds[3].title, "Bob · Image 2");
-  assert.equal(embeds[3].color, 0x536471);
+  assert.equal(embeds[3].url, tweet.url);
+  assert.equal(embeds[3].color, 0x1da1f2);
 });
 
 test("video, images, and quote media share labels and stay in order", () => {
@@ -380,11 +387,12 @@ test("video, images, and quote media share labels and stay in order", () => {
 
   const mainFields = payloads[0].embeds[0].fields || [];
   assert.ok(mainFields.some((field) => field.name === "Alice · Video 1" && field.value === "Plays below ↓"));
-  assert.ok(mainFields.some((field) => field.name === "More images" && /1 more image below/.test(field.value)));
+  assert.ok(mainFields.some((field) => field.name === "More images" && /2 more images below/.test(field.value)));
 
   assert.equal(payloads[0].embeds[1].title, "Alice · Image 2");
-  assert.equal(payloads[0].embeds[2].color, 0x536471);
-  assert.equal(payloads[0].embeds[2].author.name, "Bob");
+  assert.equal(payloads[0].embeds[2].title, "Bob · Image 1");
+  assert.equal(payloads[0].embeds[2].color, 0x1da1f2);
+  assert.equal(payloads[0].embeds[2].url, tweet.url);
   assert.match(payloads[1].content, /after the extra images/);
   assert.match(payloads[1].content, /\*\*Alice · Video 1\*\*/);
 });
