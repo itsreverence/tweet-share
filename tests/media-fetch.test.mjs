@@ -57,10 +57,13 @@ const tweet = {
   }
 };
 
-test("collectMediaAttachmentUrls keeps only videos for native upload, main before quote", () => {
+test("collectMediaAttachmentUrls uploads mixed image/video media in post order, main before quote", () => {
   assert.deepEqual(Array.from(collectMediaAttachmentUrls(tweet)), [
+    "https://pbs.twimg.com/media/main-one.jpg",
     "https://video.twimg.com/ext_tw_video/1/pu/vid/1280x720/main.mp4",
-    "https://video.twimg.com/ext_tw_video/2/pu/vid/1280x720/quote.mp4"
+    "https://pbs.twimg.com/media/main-two.png",
+    "https://video.twimg.com/ext_tw_video/2/pu/vid/1280x720/quote.mp4",
+    "https://pbs.twimg.com/media/quote-one.webp"
   ]);
 });
 
@@ -89,9 +92,12 @@ test("resolveAttachmentsForTweet skips oversized videos without throwing", async
     }
   });
 
-  assert.equal(resolved.attachments.length, 1);
+  assert.equal(resolved.attachments.length, 4);
   assert.deepEqual(Array.from(resolved.attachments, (item) => item.sourceUrl), [
-    "https://video.twimg.com/ext_tw_video/1/pu/vid/1280x720/main.mp4"
+    "https://pbs.twimg.com/media/main-one.jpg",
+    "https://video.twimg.com/ext_tw_video/1/pu/vid/1280x720/main.mp4",
+    "https://pbs.twimg.com/media/main-two.png",
+    "https://pbs.twimg.com/media/quote-one.webp"
   ]);
   assert.ok(resolved.skipped.some((item) => /quote\.mp4$/.test(item.sourceUrl) && item.reason === "size"));
 });

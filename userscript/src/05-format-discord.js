@@ -79,16 +79,26 @@ function mediaLinks(tweet, shareOptions = {}) {
 
 function collectMediaAttachmentUrls(tweet, shareOptions = {}) {
   const { includeQuote = true } = shareOptions;
+  const posts = [tweet];
+  if (includeQuote && hasQuoteTweet(tweet)) posts.push(tweet.quote);
+
+  const hasPlayableVideo = posts.some((post) => directPlayableVideoUrls(post).length > 0);
   const urls = [];
 
   function appendPostMedia(post) {
-    // Videos need native uploads/follow-up handling for reliable Discord playback.
-    // Images render well inside embeds, which keeps the tweet card easier to read.
-    urls.push(...directPlayableVideoUrls(post));
+    for (const item of post.media || []) {
+      if (item.type === "video") {
+        const url = normalizeTweetVideoUrl(item.url);
+        if (isPlayableTweetVideoUrl(url)) urls.push(url);
+      } else if (hasPlayableVideo && item.type === "image" && item.url && !isTweetVideoThumbnailUrl(item.url)) {
+        // When a share mixes still images with playable video, native attachments keep
+        // the media together below the single context card, matching Faytuks-style output.
+        urls.push(item.url);
+      }
+    }
   }
 
-  appendPostMedia(tweet);
-  if (includeQuote && hasQuoteTweet(tweet)) appendPostMedia(tweet.quote);
+  posts.forEach(appendPostMedia);
   return unique(urls);
 }
 
@@ -259,12 +269,13 @@ function appendMediaHintToLastContentEmbed(embeds, imageSupplementCount, videosB
   return embeds;
 }
 
-function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind) {
+function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind, shareOptions = {}) {
   const color = kind === "quote" ? EMBED_COLOR_QUOTE : EMBED_COLOR_MAIN;
   const permalink = tweet.url || "";
+  const attachmentUrls = shareOptions.attachmentUrls || [];
 
   return mediaItems
-    .filter((item) => item.kind === "image" && item.url && item.url !== heroUrl)
+    .filter((item) => item.kind === "image" && item.url && item.url !== heroUrl && !attachmentUrls.includes(item.url))
     .map((item) =>
       pruneEmbed({
         color,
@@ -276,7 +287,7 @@ function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind) {
 }
 
 function assembleTweetEmbedGroup(tweet, kind, shareOptions, contentEmbeds, media, heroImageUrl) {
-  const supplements = buildImageSupplementEmbeds(tweet, media, heroImageUrl, kind);
+  const supplements = buildImageSupplementEmbeds(tweet, media, heroImageUrl, kind, shareOptions);
   const withHints = appendMediaHintToLastContentEmbed(
     contentEmbeds,
     supplements.length,

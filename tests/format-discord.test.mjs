@@ -250,6 +250,31 @@ test("auto quote layout inlines main and quoted videos because videos upload as 
   assert.ok(payloads[0].embeds[0].fields.some((field) => field.name === "Quoted post from @bob"));
 });
 
+test("attach mode uploads mixed image and quoted video media below one context embed", () => {
+  const mainImage = "https://pbs.twimg.com/media/main1.png";
+  const quoteVideo = "https://video.twimg.com/ext_tw_video/2/pu/vid/abc/1280x720/quote.mp4";
+  const tweet = {
+    ...sampleTweet,
+    text: "Main image",
+    media: [{ type: "image", url: mainImage }],
+    quote: {
+      url: "https://x.com/bob/status/2",
+      author: { displayName: "Bob", username: "bob" },
+      text: "Quoted clip",
+      media: [{ type: "video", url: quoteVideo }]
+    }
+  };
+
+  const attachmentUrls = collectMediaAttachmentUrls(tweet);
+  assert.deepEqual(Array.from(attachmentUrls), [mainImage, quoteVideo]);
+
+  const payloads = buildDiscordPayloads(tweet, { attachMedia: true, attachmentUrls });
+  assert.equal(payloads.length, 1);
+  assert.equal(payloads[0].embeds.length, 1);
+  assert.equal(payloads[0].embeds[0].image, undefined);
+  assert.ok(payloads[0].embeds[0].fields.some((field) => field.name === "Quoted post from @bob"));
+});
+
 test("packEmbedsIntoMessages respects the 6000 character budget", () => {
   const embeds = Array.from({ length: 4 }, (_, index) => ({
     description: "x".repeat(1800),
@@ -421,17 +446,19 @@ test("attach mode sends compact embeds without supplemental image or video follo
   };
   const attachmentUrls = collectMediaAttachmentUrls(tweet, { includeQuote: false });
 
-  assert.deepEqual(Array.from(attachmentUrls), [videoUrl]);
+  assert.deepEqual(Array.from(attachmentUrls), [
+    videoUrl,
+    "https://pbs.twimg.com/media/one.jpg",
+    "https://pbs.twimg.com/media/two.jpg",
+    "https://pbs.twimg.com/media/three.jpg"
+  ]);
 
   const payloads = buildDiscordPayloads(tweet, { includeQuote: false, attachMedia: true, attachmentUrls });
   assert.equal(payloads.length, 1);
   assert.equal(payloads[0].content, tweet.url);
-  assert.equal(payloads[0].embeds.length, 3);
-  assert.equal(payloads[0].embeds[0].image.url, "https://pbs.twimg.com/media/one.jpg");
-  assert.equal(payloads[0].embeds[1].image.url, "https://pbs.twimg.com/media/two.jpg");
-  assert.equal(payloads[0].embeds[2].image.url, "https://pbs.twimg.com/media/three.jpg");
-  assert.ok(payloads[0].embeds[0].fields?.some((field) => field.name === "More images"));
-  assert.equal(payloads[0].embeds[0].fields.some((field) => /Video/.test(field.name)), false);
+  assert.equal(payloads[0].embeds.length, 1);
+  assert.equal(payloads[0].embeds[0].image, undefined);
+  assert.equal(Boolean(payloads[0].embeds[0].fields?.some((field) => /Video|More images/.test(field.name))), false);
 });
 
 test("attach mode keeps quote images embedded while avoiding video clutter", () => {
