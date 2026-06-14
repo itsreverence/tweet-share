@@ -231,7 +231,7 @@ test("auto quote layout inlines main and quoted videos because videos upload as 
   const tweet = {
     ...sampleTweet,
     text: "Main clip",
-    media: [{ type: "video", url: mainVideo }],
+    media: [{ type: "video", url: mainVideo, posterUrl: "https://pbs.twimg.com/ext_tw_video_thumb/1/pu/img/poster.jpg" }],
     quote: {
       url: "https://x.com/bob/status/2",
       author: { displayName: "Bob", username: "bob" },
@@ -246,6 +246,7 @@ test("auto quote layout inlines main and quoted videos because videos upload as 
   });
   assert.equal(payloads.length, 1);
   assert.equal(payloads[0].embeds.length, 1);
+  assert.equal(payloads[0].embeds[0].image, undefined);
   assert.match(payloads[0].content, /↳ 📑 Quoted post: https:\/\/x\.com\/bob\/status\/2/);
   assert.ok(payloads[0].embeds[0].fields.some((field) => field.name === "Quoted post from @bob"));
 });

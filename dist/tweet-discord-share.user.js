@@ -933,7 +933,7 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
   const media = [...mediaLinks(tweet, shareOptions), ...inlineQuoteMedia];
   const attachmentUrls = shareOptions.attachmentUrls || [];
   const candidateHeroUrl = pickEmbedHeroUrl(tweet, media) || (inlineQuote ? pickEmbedHeroUrl(inlineQuote, inlineQuoteMedia) : "");
-  const heroImageUrl = shareOptions.attachMedia === true && attachmentUrls.includes(candidateHeroUrl) ? "" : candidateHeroUrl;
+  const heroImageUrl = shareOptions.attachMedia === true && attachmentUrls.length > 0 ? "" : candidateHeroUrl;
   const mediaFields = shareOptions.attachMedia === true
     ? []
     : buildMediaFields(media.filter((item) => item.kind === "video"), {
