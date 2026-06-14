@@ -27,7 +27,9 @@ async function shareToDestination(destinationId, tweet, options = {}) {
       });
     } else {
       payloads = buildDiscordPayloads(tweet, { ...options, attachMedia: false });
-      showToast("Media upload failed; sent links instead.", "info");
+      if (resolved.skipped.length > 0) {
+        showToast("Media upload failed; sent links instead.", "info");
+      }
     }
   } else {
     payloads = buildDiscordPayloads(tweet, options);

@@ -657,14 +657,14 @@ function uniqueMediaLinks(items) {
   return items.filter((item, index, all) => item.url && all.findIndex((candidate) => candidate.url === item.url) === index);
 }
 
-function tweetHasVisualMedia(tweet) {
-  return imageMedia(tweet).length > 0 || directPlayableVideoUrls(tweet).length > 0;
+function tweetHasEmbedImageMedia(tweet) {
+  return imageMedia(tweet).length > 0;
 }
 
 function needsMediaPostPrefix(rootTweet, shareOptions = {}) {
   const { includeQuote = true } = shareOptions;
   if (!includeQuote || !hasQuoteTweet(rootTweet)) return false;
-  return tweetHasVisualMedia(rootTweet) && tweetHasVisualMedia(rootTweet.quote);
+  return tweetHasEmbedImageMedia(rootTweet) && tweetHasEmbedImageMedia(rootTweet.quote);
 }
 
 function resolveQuoteLayout(tweet, shareOptions = {}) {
@@ -672,7 +672,7 @@ function resolveQuoteLayout(tweet, shareOptions = {}) {
   if (shareOptions.includeQuote === false || !hasQuoteTweet(tweet)) return "none";
   if (mode === "card") return "card";
   if (mode === "inline") return "inline";
-  return needsMediaPostPrefix(tweet, shareOptions) ? "card" : "inline";
+  return "inline";
 }
 
 function mediaCaption(kind, postTweet, index, shareOptions = {}, rootTweet = postTweet) {
@@ -682,7 +682,11 @@ function mediaCaption(kind, postTweet, index, shareOptions = {}, rootTweet = pos
 }
 
 function videoCaption(postTweet, index, shareOptions = {}, rootTweet = postTweet) {
-  return mediaCaption("video", postTweet, index, shareOptions, rootTweet);
+  const includeQuote = shareOptions.includeQuote !== false;
+  const label = `Video ${index + 1}`;
+  if (!includeQuote || !hasQuoteTweet(rootTweet)) return label;
+  const bothPostsHaveVideo = directPlayableVideoUrls(rootTweet).length > 0 && directPlayableVideoUrls(rootTweet.quote).length > 0;
+  return bothPostsHaveVideo || needsMediaPostPrefix(rootTweet, shareOptions) ? `${embedAuthorDisplayName(postTweet)} · ${label}` : label;
 }
 
 function mediaLinks(tweet, shareOptions = {}) {
@@ -703,15 +707,26 @@ function mediaLinks(tweet, shareOptions = {}) {
 
 function collectMediaAttachmentUrls(tweet, shareOptions = {}) {
   const { includeQuote = true } = shareOptions;
+  const posts = [tweet];
+  if (includeQuote && hasQuoteTweet(tweet)) posts.push(tweet.quote);
+
+  const hasPlayableVideo = posts.some((post) => directPlayableVideoUrls(post).length > 0);
   const urls = [];
 
   function appendPostMedia(post) {
-    urls.push(...directPlayableVideoUrls(post));
-    urls.push(...imageMedia(post).map((item) => item.url).filter(Boolean));
+    for (const item of post.media || []) {
+      if (item.type === "video") {
+        const url = normalizeTweetVideoUrl(item.url);
+        if (isPlayableTweetVideoUrl(url)) urls.push(url);
+      } else if (hasPlayableVideo && item.type === "image" && item.url && !isTweetVideoThumbnailUrl(item.url)) {
+        // When a share mixes still images with playable video, native attachments keep
+        // the media together below the single context card, matching Faytuks-style output.
+        urls.push(item.url);
+      }
+    }
   }
 
-  appendPostMedia(tweet);
-  if (includeQuote && hasQuoteTweet(tweet)) appendPostMedia(tweet.quote);
+  posts.forEach(appendPostMedia);
   return unique(urls);
 }
 
@@ -727,14 +742,22 @@ function embedAuthorBlock(tweet) {
   return block;
 }
 
-function embedFooterForUrl(url) {
-  if (!url) return undefined;
-  try {
-    const host = new URL(url).hostname.replace(/^www\./, "");
-    return { text: truncate(host, DISCORD_EMBED_LIMITS.footer) };
-  } catch {
-    return { text: truncate(url, DISCORD_EMBED_LIMITS.footer) };
-  }
+function tweetSourceLabel(tweet, kind = "main") {
+  const parts = [];
+  if (kind === "quote") parts.push("Quoted post");
+
+  const username = String(tweet.author?.username || "").trim();
+  if (username) parts.push(`@${username}`);
+
+  const url = String(tweet.url || "").trim();
+  const hostMatch = /^https?:\/\/([^/]+)/i.exec(url);
+  if (hostMatch) parts.push(hostMatch[1].replace(/^www\./, ""));
+
+  return parts.length ? parts.join(" · ") : "x.com";
+}
+
+function embedFooterForTweet(tweet, kind = "main") {
+  return { text: truncate(tweetSourceLabel(tweet, kind), DISCORD_EMBED_LIMITS.footer) };
 }
 
 function countEmbedChars(embed) {
@@ -794,35 +817,39 @@ function formatQuoteFieldValue(text) {
   return truncate(trimmed.split("\n").map((line) => `> ${line}`).join("\n"), DISCORD_EMBED_LIMITS.fieldValue);
 }
 
+function permalinkField(name, url) {
+  if (!url) return null;
+  return {
+    name: truncate(name, DISCORD_EMBED_LIMITS.fieldName),
+    value: truncate(url, DISCORD_EMBED_LIMITS.fieldValue),
+    inline: false
+  };
+}
+
 function buildInlineQuoteFields(tweet) {
   const quote = tweet.quote;
   if (!quote) return [];
 
-  const username = quote.author?.username || "unknown";
+  const username = quote.author?.username ? `@${quote.author.username}` : "unknown";
   const fields = [];
   const quoteBody = formatQuoteFieldValue(quote.text);
   if (quoteBody) {
     fields.push({
-      name: truncate(`Quote from: ${username}`, DISCORD_EMBED_LIMITS.fieldName),
+      name: truncate(`Quoted post from ${username}`, DISCORD_EMBED_LIMITS.fieldName),
       value: quoteBody,
       inline: false
     });
   }
-  if (tweet.url) {
-    fields.push({
-      name: "Source",
-      value: truncate(tweet.url, DISCORD_EMBED_LIMITS.fieldValue),
-      inline: false
-    });
-  }
+  const originalField = permalinkField("Original post", tweet.url);
+  if (originalField) fields.push(originalField);
   return fields;
 }
 
 function buildShareContentLines(tweet, shareOptions = {}) {
   const lines = [];
   if (tweet.url) lines.push(tweet.url);
-  if (resolveQuoteLayout(tweet, shareOptions) === "inline" && tweet.quote?.url) {
-    lines.push(`↳ Quotes: ${tweet.quote.url}`);
+  if (resolveQuoteLayout(tweet, shareOptions) !== "none" && tweet.quote?.url) {
+    lines.push(`↳ 📑 Quoted post: ${tweet.quote.url}`);
   }
   return lines.length ? truncate(lines.join("\n"), DISCORD_LIMITS.content) : undefined;
 }
@@ -870,12 +897,13 @@ function appendMediaHintToLastContentEmbed(embeds, imageSupplementCount, videosB
   return embeds;
 }
 
-function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind) {
+function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind, shareOptions = {}) {
   const color = kind === "quote" ? EMBED_COLOR_QUOTE : EMBED_COLOR_MAIN;
   const permalink = tweet.url || "";
+  const attachmentUrls = shareOptions.attachmentUrls || [];
 
   return mediaItems
-    .filter((item) => item.kind === "image" && item.url && item.url !== heroUrl)
+    .filter((item) => item.kind === "image" && item.url && item.url !== heroUrl && !attachmentUrls.includes(item.url))
     .map((item) =>
       pruneEmbed({
         color,
@@ -887,9 +915,7 @@ function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind) {
 }
 
 function assembleTweetEmbedGroup(tweet, kind, shareOptions, contentEmbeds, media, heroImageUrl) {
-  if (shareOptions.attachMedia === true) return contentEmbeds;
-
-  const supplements = buildImageSupplementEmbeds(tweet, media, heroImageUrl, kind);
+  const supplements = buildImageSupplementEmbeds(tweet, media, heroImageUrl, kind, shareOptions);
   const withHints = appendMediaHintToLastContentEmbed(
     contentEmbeds,
     supplements.length,
@@ -902,17 +928,20 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
   const color = kind === "quote" ? EMBED_COLOR_QUOTE : EMBED_COLOR_MAIN;
   const permalink = tweet.url || "";
   const text = String(tweet.text || "").trim();
-  const media = mediaLinks(tweet, shareOptions);
+  const inlineQuote = kind === "main" && shareOptions.quoteLayout === "inline" ? shareOptions.rootTweet?.quote : null;
+  const inlineQuoteMedia = inlineQuote ? mediaLinks(inlineQuote, shareOptions).filter((item) => item.kind === "image") : [];
+  const media = [...mediaLinks(tweet, shareOptions), ...inlineQuoteMedia];
   const attachmentUrls = shareOptions.attachmentUrls || [];
-  const candidateHeroUrl = pickEmbedHeroUrl(tweet, media);
-  const heroImageUrl = shareOptions.attachMedia === true && attachmentUrls.includes(candidateHeroUrl) ? "" : candidateHeroUrl;
+  const candidateHeroUrl = pickEmbedHeroUrl(tweet, media) || (inlineQuote ? pickEmbedHeroUrl(inlineQuote, inlineQuoteMedia) : "");
+  const heroImageUrl = shareOptions.attachMedia === true && attachmentUrls.length > 0 ? "" : candidateHeroUrl;
   const mediaFields = shareOptions.attachMedia === true
     ? []
     : buildMediaFields(media.filter((item) => item.kind === "video"), {
       videosBelow: shareOptions.videosBelow === true
     });
   const inlineQuoteFields = kind === "main" ? (shareOptions.inlineQuoteFields || []) : [];
-  const footer = embedFooterForUrl(permalink);
+  const permalinkFields = kind === "quote" ? [permalinkField("Quoted post", permalink)].filter(Boolean) : [];
+  const footer = embedFooterForTweet(tweet, kind);
   const descriptionChunks = splitText(text, DISCORD_EMBED_LIMITS.description);
   const contentEmbeds = [];
 
@@ -924,7 +953,7 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
         description: media.length ? undefined : "(No text found)",
         url: permalink || undefined,
         image: heroImageUrl ? { url: heroImageUrl } : undefined,
-        fields: [...mediaFields, ...inlineQuoteFields].length ? [...mediaFields, ...inlineQuoteFields] : undefined,
+        fields: [...mediaFields, ...inlineQuoteFields, ...permalinkFields].length ? [...mediaFields, ...inlineQuoteFields, ...permalinkFields] : undefined,
         timestamp: kind === "main" ? discordEmbedTimestamp(tweet.createdAt) : undefined,
         footer
       })
@@ -946,7 +975,7 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
         description: chunk,
         url: isFirst && permalink ? permalink : undefined,
         image: isFirst && heroImageUrl ? { url: heroImageUrl } : undefined,
-        fields: isLast && [...mediaFields, ...inlineQuoteFields].length ? [...mediaFields, ...inlineQuoteFields] : undefined,
+        fields: isLast && [...mediaFields, ...inlineQuoteFields, ...permalinkFields].length ? [...mediaFields, ...inlineQuoteFields, ...permalinkFields] : undefined,
         timestamp: kind === "main" && isFirst ? discordEmbedTimestamp(tweet.createdAt) : undefined,
         footer: isLast ? footer : undefined
       })
@@ -1511,7 +1540,9 @@ async function shareToDestination(destinationId, tweet, options = {}) {
       });
     } else {
       payloads = buildDiscordPayloads(tweet, { ...options, attachMedia: false });
-      showToast("Media upload failed; sent links instead.", "info");
+      if (resolved.skipped.length > 0) {
+        showToast("Media upload failed; sent links instead.", "info");
+      }
     }
   } else {
     payloads = buildDiscordPayloads(tweet, options);

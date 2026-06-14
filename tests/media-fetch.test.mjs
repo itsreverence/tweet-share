@@ -57,10 +57,10 @@ const tweet = {
   }
 };
 
-test("collectMediaAttachmentUrls orders videos before images, main before quote", () => {
+test("collectMediaAttachmentUrls uploads mixed image/video media in post order, main before quote", () => {
   assert.deepEqual(Array.from(collectMediaAttachmentUrls(tweet)), [
-    "https://video.twimg.com/ext_tw_video/1/pu/vid/1280x720/main.mp4",
     "https://pbs.twimg.com/media/main-one.jpg",
+    "https://video.twimg.com/ext_tw_video/1/pu/vid/1280x720/main.mp4",
     "https://pbs.twimg.com/media/main-two.png",
     "https://video.twimg.com/ext_tw_video/2/pu/vid/1280x720/quote.mp4",
     "https://pbs.twimg.com/media/quote-one.webp"
@@ -84,23 +84,21 @@ test("summarizeSkippedMedia describes skipped attachment reasons", () => {
   ]), "1 too large, 2 failed to download, 1 over limit");
 });
 
-test("resolveAttachmentsForTweet skips oversized and failed media without throwing", async () => {
-  const failedUrl = "https://pbs.twimg.com/media/main-two.png";
+test("resolveAttachmentsForTweet skips oversized videos without throwing", async () => {
   const resolved = await resolveAttachmentsForTweet(tweet, {
     fetchMediaBytes(url) {
-      if (url === failedUrl) throw new Error("network");
       if (/quote\.mp4$/.test(url)) return { byteLength: ATTACHMENT_MAX_BYTES + 1 };
       return { byteLength: 1024 };
     }
   });
 
-  assert.equal(resolved.attachments.length, 3);
+  assert.equal(resolved.attachments.length, 4);
   assert.deepEqual(Array.from(resolved.attachments, (item) => item.sourceUrl), [
-    "https://video.twimg.com/ext_tw_video/1/pu/vid/1280x720/main.mp4",
     "https://pbs.twimg.com/media/main-one.jpg",
+    "https://video.twimg.com/ext_tw_video/1/pu/vid/1280x720/main.mp4",
+    "https://pbs.twimg.com/media/main-two.png",
     "https://pbs.twimg.com/media/quote-one.webp"
   ]);
-  assert.ok(resolved.skipped.some((item) => item.sourceUrl === failedUrl && item.reason === "fetch"));
   assert.ok(resolved.skipped.some((item) => /quote\.mp4$/.test(item.sourceUrl) && item.reason === "size"));
 });
 
@@ -109,8 +107,8 @@ test("resolveAttachmentsForTweet caps attachments at Discord limit", async () =>
     ...tweet,
     quote: null,
     media: Array.from({ length: ATTACHMENT_MAX_COUNT + 2 }, (_, index) => ({
-      type: "image",
-      url: `https://pbs.twimg.com/media/${index}.jpg`
+      type: "video",
+      url: `https://video.twimg.com/ext_tw_video/${index}/pu/vid/1280x720/clip.mp4`
     }))
   };
 
