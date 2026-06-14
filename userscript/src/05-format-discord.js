@@ -210,7 +210,7 @@ function buildInlineQuoteFields(tweet) {
 function buildShareContentLines(tweet, shareOptions = {}) {
   const lines = [];
   if (tweet.url) lines.push(tweet.url);
-  if (resolveQuoteLayout(tweet, shareOptions) === "inline" && tweet.quote?.url) {
+  if (resolveQuoteLayout(tweet, shareOptions) !== "none" && tweet.quote?.url) {
     lines.push(`↳ 📑 Quoted post: ${tweet.quote.url}`);
   }
   return lines.length ? truncate(lines.join("\n"), DISCORD_LIMITS.content) : undefined;

@@ -94,7 +94,7 @@ test("invalid createdAt omits timestamp", () => {
   assert.equal(payloads[0].embeds[0].timestamp, undefined);
 });
 
-test("card quote layout includes main URL in content but not quote URL line", () => {
+test("card quote layout includes main and quoted URLs in content", () => {
   const tweet = {
     ...sampleTweet,
     quote: {
@@ -106,8 +106,8 @@ test("card quote layout includes main URL in content but not quote URL line", ()
   };
 
   const payloads = buildDiscordPayloads(tweet, { quoteLayout: "card" });
-  assert.equal(payloads[0].content, sampleTweet.url);
-  assert.doesNotMatch(String(payloads[0].content || ""), /↳ Quotes:/);
+  assert.match(payloads[0].content, /https:\/\/x\.com\/alice\/status\/1/);
+  assert.match(payloads[0].content, /↳ 📑 Quoted post: https:\/\/x\.com\/bob\/status\/2/);
 });
 
 test("webhook sender is branded while the embed shows the tweet author once", () => {
