@@ -13,6 +13,7 @@ function loadFormatContext() {
   const code = files.map((name) => readFileSync(path.join(srcDir, name), "utf8")).join("\n");
   const context = {
     console,
+    URL,
     location: { href: "https://x.com/" },
     performance: { getEntriesByType: () => [] },
     document: { querySelectorAll: () => [] }
@@ -355,6 +356,24 @@ test("extra images become supplemental embeds instead of link fields", () => {
   assert.ok(embeds[0].fields?.some((field) => field.name === "More images"));
   assert.equal(embeds[0].color, 0x1da1f2);
   assert.equal(embeds[1].color, 0x1da1f2);
+});
+
+test("supplemental image embeds reject non-Twitter HTTPS image URLs", () => {
+  const tweet = {
+    ...sampleTweet,
+    media: [
+      { type: "image", url: "https://pbs.twimg.com/media/one.jpg" },
+      { type: "image", url: "https://evil.example/tracker.png" },
+      { type: "image", url: "https://pbs.twimg.com.evil.example/media/two.jpg" },
+      { type: "image", url: "https://pbs.twimg.com/media/three.jpg" }
+    ]
+  };
+
+  const embeds = buildDiscordPayloads(tweet, { includeQuote: false })[0].embeds;
+  assert.equal(embeds.length, 2);
+  assert.equal(embeds[0].image.url, "https://pbs.twimg.com/media/one.jpg");
+  assert.equal(embeds[1].image.url, "https://pbs.twimg.com/media/three.jpg");
+  assert.equal(embeds[1].title, "Image 4");
 });
 
 test("supplemental images use author prefixes and shared URL grouping when both posts have media", () => {

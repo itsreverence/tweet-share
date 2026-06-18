@@ -600,8 +600,7 @@ function nearestPlayableVideoUrl(video) {
   const matchingPoster = loadedVideos.find((url) => posterName && url.includes(posterName));
   if (matchingPoster) return matchingPoster;
 
-  const primaryTweetVideo = loadedVideos.find((url) => /\/amplify_video\/|\/ext_tw_video\//.test(url));
-  return primaryTweetVideo || "";
+  return "";
 }
 
 function imageMedia(tweet) {
@@ -734,6 +733,15 @@ function isHttpsUrl(url) {
   return /^https:\/\//i.test(String(url || ""));
 }
 
+function isValidEmbedImageUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && parsed.hostname === "pbs.twimg.com";
+  } catch {
+    return false;
+  }
+}
+
 function embedAuthorBlock(tweet) {
   const block = { name: embedAuthorDisplayName(tweet) };
   const iconUrl = tweetAuthorAvatarUrl(tweet);
@@ -855,8 +863,8 @@ function buildShareContentLines(tweet, shareOptions = {}) {
 }
 
 function pickEmbedImageUrl(mediaItems) {
-  const image = mediaItems.find((item) => isHttpsUrl(item.url) && /\.(?:jpg|jpeg|png|webp|gif)(?:\?|$)/i.test(item.url));
-  return image?.url || mediaItems.find((item) => isHttpsUrl(item.url) && /pbs\.twimg\.com/i.test(item.url))?.url || "";
+  const image = mediaItems.find((item) => isValidEmbedImageUrl(item.url));
+  return image?.url || "";
 }
 
 function pickEmbedHeroUrl(tweet, mediaItems) {
@@ -903,7 +911,13 @@ function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind, shareOptio
   const attachmentUrls = shareOptions.attachmentUrls || [];
 
   return mediaItems
-    .filter((item) => item.kind === "image" && item.url && item.url !== heroUrl && !attachmentUrls.includes(item.url))
+    .filter((item) =>
+      item.kind === "image"
+      && item.url
+      && item.url !== heroUrl
+      && !attachmentUrls.includes(item.url)
+      && isValidEmbedImageUrl(item.url)
+    )
     .map((item) =>
       pruneEmbed({
         color,
@@ -2360,6 +2374,8 @@ async function savePreferences(preferences) {
 
   // --- 11-settings-surface.js ---
 // Settings modal surface helpers: styles and small DOM builders.
+let settingsModalCleanup = null;
+
 function injectSettingsStyles() {
   if (document.getElementById("tds-settings-style")) return;
 
@@ -2556,6 +2572,10 @@ function createSettingsOption(labelText, detailText, checked) {
 }
 
 function closeSettingsModal() {
+  if (settingsModalCleanup) {
+    settingsModalCleanup();
+    settingsModalCleanup = null;
+  }
   document.querySelector(`.${SETTINGS_CLASS}__backdrop`)?.remove();
 }
 
@@ -2571,6 +2591,7 @@ function createSettingsField(labelText, input) {
   // --- 11-settings.js ---
 async function openSettingsModal() {
   closeDestinationMenu();
+  if (document.querySelector(`.${SETTINGS_CLASS}__backdrop`)) return;
   injectSettingsStyles();
 
   let destinations = [...(await loadAllDestinations())];
@@ -2767,6 +2788,10 @@ async function openSettingsModal() {
       showToast("Fix invalid names or webhook URLs before saving.", "error");
       return;
     }
+    if (sanitized.length !== destinations.length) {
+      showToast("Fix invalid channel names or webhook URLs before saving.", "error");
+      return;
+    }
     try {
       await Promise.all([saveAllDestinations(sanitized), savePreferences(preferences)]);
       showToast("Settings saved.", "success");
@@ -2787,8 +2812,10 @@ async function openSettingsModal() {
   const onEscape = (event) => {
     if (event.key === "Escape") {
       closeSettingsModal();
-      document.removeEventListener("keydown", onEscape);
     }
+  };
+  settingsModalCleanup = () => {
+    document.removeEventListener("keydown", onEscape);
   };
   document.addEventListener("keydown", onEscape);
 

@@ -1,4 +1,6 @@
 // Settings modal surface helpers: styles and small DOM builders.
+let settingsModalCleanup = null;
+
 function injectSettingsStyles() {
   if (document.getElementById("tds-settings-style")) return;
 
@@ -195,6 +197,10 @@ function createSettingsOption(labelText, detailText, checked) {
 }
 
 function closeSettingsModal() {
+  if (settingsModalCleanup) {
+    settingsModalCleanup();
+    settingsModalCleanup = null;
+  }
   document.querySelector(`.${SETTINGS_CLASS}__backdrop`)?.remove();
 }
 

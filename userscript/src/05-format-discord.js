@@ -106,6 +106,15 @@ function isHttpsUrl(url) {
   return /^https:\/\//i.test(String(url || ""));
 }
 
+function isValidEmbedImageUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && parsed.hostname === "pbs.twimg.com";
+  } catch {
+    return false;
+  }
+}
+
 function embedAuthorBlock(tweet) {
   const block = { name: embedAuthorDisplayName(tweet) };
   const iconUrl = tweetAuthorAvatarUrl(tweet);
@@ -227,8 +236,8 @@ function buildShareContentLines(tweet, shareOptions = {}) {
 }
 
 function pickEmbedImageUrl(mediaItems) {
-  const image = mediaItems.find((item) => isHttpsUrl(item.url) && /\.(?:jpg|jpeg|png|webp|gif)(?:\?|$)/i.test(item.url));
-  return image?.url || mediaItems.find((item) => isHttpsUrl(item.url) && /pbs\.twimg\.com/i.test(item.url))?.url || "";
+  const image = mediaItems.find((item) => isValidEmbedImageUrl(item.url));
+  return image?.url || "";
 }
 
 function pickEmbedHeroUrl(tweet, mediaItems) {
@@ -275,7 +284,13 @@ function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind, shareOptio
   const attachmentUrls = shareOptions.attachmentUrls || [];
 
   return mediaItems
-    .filter((item) => item.kind === "image" && item.url && item.url !== heroUrl && !attachmentUrls.includes(item.url))
+    .filter((item) =>
+      item.kind === "image"
+      && item.url
+      && item.url !== heroUrl
+      && !attachmentUrls.includes(item.url)
+      && isValidEmbedImageUrl(item.url)
+    )
     .map((item) =>
       pruneEmbed({
         color,
