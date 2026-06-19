@@ -18,7 +18,7 @@ function loadFormatContext() {
     performance: { getEntriesByType: () => [] },
     document: { querySelectorAll: () => [] }
   };
-  runInNewContext(`${code}\nthis.exports = {\n  buildDiscordPayloads,\n  collectMediaAttachmentUrls,\n  countEmbedChars,\n  discordEmbedTimestamp,\n  packEmbedsIntoMessages,\n  buildTweetEmbedGroup,\n  hasQuoteTweet\n};`, context);
+  runInNewContext(`${code}\nthis.exports = {\n  buildDiscordPayloads,\n  collectMediaAttachmentUrls,\n  countEmbedChars,\n  discordEmbedTimestamp,\n  packEmbedsIntoMessages,\n  buildTweetEmbedGroup,\n  hasQuoteTweet,\n  rebalanceEmbedsForCharBudget\n};`, context);
   return context.exports;
 }
 
@@ -29,7 +29,8 @@ const {
   discordEmbedTimestamp,
   packEmbedsIntoMessages,
   buildTweetEmbedGroup,
-  hasQuoteTweet
+  hasQuoteTweet,
+  rebalanceEmbedsForCharBudget
 } = loadFormatContext();
 
 const sampleTweet = {
@@ -219,7 +220,7 @@ test("auto inline quote uses quoted image as the embed hero when main has no med
     }
   };
 
-  const payloads = buildDiscordPayloads(tweet, { quoteLayout: "auto", attachMedia: true });
+  const payloads = buildDiscordPayloads(tweet, { quoteLayout: "auto" });
   assert.equal(payloads.length, 1);
   assert.equal(payloads[0].embeds.length, 1);
   assert.equal(payloads[0].embeds[0].image.url, "https://pbs.twimg.com/media/q1.jpg");
@@ -290,6 +291,66 @@ test("packEmbedsIntoMessages respects the 6000 character budget", () => {
     assert.ok(total <= 6000);
     assert.ok(group.length <= 10);
   }
+});
+
+test("rebalanceEmbedsForCharBudget splits fields when one embed exceeds 6000 chars", () => {
+  const embed = {
+    color: 1942002,
+    author: { name: "Alice" },
+    description: "Main tweet with a quoted post attached inline.",
+    fields: Array.from({ length: 8 }, (_, index) => ({
+      name: `Field ${index + 1}`,
+      value: "x".repeat(900),
+      inline: false
+    }))
+  };
+
+  const rebalanced = rebalanceEmbedsForCharBudget([embed]);
+  assert.ok(rebalanced.length >= 2);
+  for (const part of rebalanced) {
+    assert.ok(countEmbedChars(part) <= 6000);
+  }
+});
+
+test("collectMediaAttachmentUrls includes image-only posts when attach mode is enabled", () => {
+  const photoTweet = {
+    ...sampleTweet,
+    media: [
+      { type: "image", url: "https://pbs.twimg.com/media/one.jpg" },
+      { type: "image", url: "https://pbs.twimg.com/media/two.jpg" }
+    ],
+    quote: null
+  };
+
+  assert.equal(collectMediaAttachmentUrls(photoTweet).length, 0);
+  const attachmentUrls = collectMediaAttachmentUrls(photoTweet, { attachMedia: true });
+  assert.deepEqual([...attachmentUrls], [
+    "https://pbs.twimg.com/media/one.jpg",
+    "https://pbs.twimg.com/media/two.jpg"
+  ]);
+});
+
+test("buildDiscordPayloads uploads image-only media when attach mode is enabled", () => {
+  const photoTweet = {
+    ...sampleTweet,
+    media: [
+      { type: "image", url: "https://pbs.twimg.com/media/one.jpg" },
+      { type: "image", url: "https://pbs.twimg.com/media/two.jpg" }
+    ]
+  };
+  const attachmentUrls = collectMediaAttachmentUrls(photoTweet, { attachMedia: true, includeQuote: false });
+  const payloads = buildDiscordPayloads(photoTweet, {
+    includeQuote: false,
+    attachMedia: true,
+    attachmentUrls
+  });
+
+  assert.deepEqual(Array.from(attachmentUrls), [
+    "https://pbs.twimg.com/media/one.jpg",
+    "https://pbs.twimg.com/media/two.jpg"
+  ]);
+  assert.equal(payloads.length, 1);
+  assert.equal(payloads[0].embeds[0].image, undefined);
 });
 
 test("videos are sent in a separate labeled message that matches the embed field", () => {

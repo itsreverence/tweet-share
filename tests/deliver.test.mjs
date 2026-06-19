@@ -144,6 +144,24 @@ test("shareToDestination uses multipart for the first payload when attachments r
   assert.equal(calls.requests.length, 0);
 });
 
+test("shareToDestination uploads image-only media when enabled by preferences", async () => {
+  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
+  await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
+
+  await shareToDestination("main", sampleTweet, {
+    includeQuote: false,
+    preferences: { alwaysShowPreview: true, attachMedia: true },
+    fetchMediaBytes() {
+      return { byteLength: 128 };
+    }
+  });
+
+  assert.equal(calls.multipart.length, 1);
+  assert.equal(calls.multipart[0].files.length, 1);
+  assert.equal(calls.multipart[0].files[0].contentType, "image/jpeg");
+  assert.equal(calls.requests.length, 0);
+});
+
 test("shareToDestination falls back to links and shows info toast when all attachments fail", async () => {
   const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
   await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);

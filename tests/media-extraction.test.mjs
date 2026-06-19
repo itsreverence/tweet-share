@@ -59,7 +59,9 @@ function loadMediaContext() {
     bestCachedVideoUrlForTweet,
     imageMedia,
     VIDEO_VARIANT_CACHE,
-    TWEET_CACHE
+    TWEET_CACHE,
+    bestCachedTweetForQuote,
+    cacheTweetResult
   };`, context);
   return context.exports;
 }
@@ -83,7 +85,9 @@ const {
   bestCachedVideoUrlForTweet,
   imageMedia,
   VIDEO_VARIANT_CACHE,
-  TWEET_CACHE
+  TWEET_CACHE,
+  bestCachedTweetForQuote,
+  cacheTweetResult
 } = loadMediaContext();
 
 function readFixture(name) {
@@ -401,6 +405,99 @@ test("extractQuote returns null when only the main status link is present", () =
   });
 
   assert.equal(extractQuote(article), null);
+});
+
+test("extractQuote with link only does not borrow main tweet author metadata", () => {
+  const mainAuthorBlock = fakeNode({
+    querySelectorAll(selector) {
+      if (selector === "span") {
+        return [{ textContent: "@alice" }, { textContent: "Alice" }];
+      }
+      if (selector === 'a[href^="/"]') return [{ getAttribute: () => "/alice" }];
+      return [];
+    }
+  });
+  const article = fakeNode({
+    querySelector(selector) {
+      if (selector === '[data-testid="User-Name"]') return mainAuthorBlock;
+      if (selector === "time") return { getAttribute: () => "2026-06-10T12:00:00.000Z" };
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === 'a[href*="/status/"]') {
+        return [
+          { href: "https://x.com/alice/status/1", getAttribute: () => "/alice/status/1" },
+          { href: "https://x.com/bob/status/2", getAttribute: () => "/bob/status/2" }
+        ];
+      }
+      if (selector === '[role="link"]' || selector === '[data-testid="card.wrapper"]') return [];
+      return [];
+    }
+  });
+
+  const quote = extractQuote(article);
+  assert.ok(quote);
+  assert.equal(quote.url, "https://x.com/bob/status/2");
+  assert.equal(quote.author.displayName, "");
+  assert.equal(quote.author.username, "");
+  assert.equal(quote.createdAt, "");
+});
+
+test("bestCachedTweetForQuote prefers status id and requires author match for fuzzy text", () => {
+  TWEET_CACHE.clear();
+  cacheTweetResult({
+    rest_id: "200",
+    legacy: {
+      full_text: "Exact quoted tweet body for testing",
+      created_at: "Tue May 26 12:00:00 +0000 2026"
+    },
+    core: {
+      user_results: {
+        result: {
+          legacy: { name: "Bob", screen_name: "bob", profile_image_url_https: "https://pbs.twimg.com/profile_images/b.jpg" }
+        }
+      }
+    }
+  });
+  cacheTweetResult({
+    rest_id: "999",
+    legacy: { full_text: "Exact quoted tweet body for testing but from wrong user" },
+    core: {
+      user_results: {
+        result: {
+          legacy: { name: "Eve", screen_name: "eve", profile_image_url_https: "https://pbs.twimg.com/profile_images/e.jpg" }
+        }
+      }
+    }
+  });
+
+  const byId = bestCachedTweetForQuote({
+    url: "https://x.com/bob/status/200",
+    author: { username: "bob" },
+    text: ""
+  }, "100");
+  assert.equal(byId?.author?.username, "bob");
+
+  const fuzzy = bestCachedTweetForQuote({
+    url: "",
+    author: { username: "bob" },
+    text: "Exact quoted tweet body for testing"
+  }, "100");
+  assert.equal(fuzzy?.author?.username, "bob");
+
+  const wrongUser = bestCachedTweetForQuote({
+    url: "",
+    author: { username: "alice" },
+    text: "Exact quoted tweet body for testing"
+  }, "100");
+  assert.equal(wrongUser, null);
+
+  const shortText = bestCachedTweetForQuote({
+    url: "",
+    author: { username: "bob" },
+    text: "quoted"
+  }, "100");
+  assert.equal(shortText, null);
 });
 
 test("tweetUrlFromArticle falls back to the page URL when no status link exists", () => {

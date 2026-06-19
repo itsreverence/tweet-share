@@ -138,18 +138,26 @@ function tweetFromSyndication(data, fallback = {}) {
 
 function bestCachedTweetForQuote(quote, mainTweetId = "") {
   const quoteText = normalizeTextForMatch(quote.text);
-  const quoteUsername = quote.author?.username || "";
-  if (!quoteText && !quoteUsername) return null;
+  const quoteUsername = String(quote.author?.username || "").trim();
+  const quoteId = quote.url ? tweetIdFromUrl(quote.url) : "";
+  if (!quoteText && !quoteUsername && !quoteId) return null;
+
+  if (quoteId && quoteId !== mainTweetId) {
+    const byId = TWEET_CACHE.get(quoteId);
+    if (byId) return byId;
+  }
+
+  if (!quoteUsername) return null;
 
   for (const [id, cachedTweet] of TWEET_CACHE) {
-    if (id === mainTweetId) continue;
-    const cachedText = normalizeTextForMatch(cachedTweet.text);
-    const textMatches = quoteText && (cachedText.includes(quoteText) || quoteText.includes(cachedText));
-    const authorMatches = quoteUsername && cachedTweet.author?.username === quoteUsername;
+    if (id === mainTweetId || !/^\d+$/.test(String(id))) continue;
+    if (cachedTweet.author?.username !== quoteUsername) continue;
 
-    if ((textMatches && (!quoteUsername || authorMatches)) || (authorMatches && quoteText && cachedText)) {
-      return cachedTweet;
-    }
+    const cachedText = normalizeTextForMatch(cachedTweet.text);
+    if (!quoteText) return cachedTweet;
+    if (cachedText === quoteText) return cachedTweet;
+    if (quoteText.length >= 24 && cachedText.includes(quoteText)) return cachedTweet;
+    if (cachedText.length >= 24 && quoteText.includes(cachedText)) return cachedTweet;
   }
 
   return null;

@@ -83,6 +83,7 @@ function collectMediaAttachmentUrls(tweet, shareOptions = {}) {
   if (includeQuote && hasQuoteTweet(tweet)) posts.push(tweet.quote);
 
   const hasPlayableVideo = posts.some((post) => directPlayableVideoUrls(post).length > 0);
+  const attachImages = shareOptions.attachMedia === true || hasPlayableVideo;
   const urls = [];
 
   function appendPostMedia(post) {
@@ -90,9 +91,7 @@ function collectMediaAttachmentUrls(tweet, shareOptions = {}) {
       if (item.type === "video") {
         const url = normalizeTweetVideoUrl(item.url);
         if (isPlayableTweetVideoUrl(url)) urls.push(url);
-      } else if (hasPlayableVideo && item.type === "image" && item.url && !isTweetVideoThumbnailUrl(item.url)) {
-        // When a share mixes still images with playable video, native attachments keep
-        // the media together below the single context card, matching Faytuks-style output.
+      } else if (attachImages && item.type === "image" && item.url && !isTweetVideoThumbnailUrl(item.url)) {
         urls.push(item.url);
       }
     }
@@ -151,6 +150,56 @@ function countEmbedChars(embed) {
     total += (field.name || "").length + (field.value || "").length;
   }
   return total;
+}
+
+function rebalanceEmbedFields(embed, maxChars = DISCORD_EMBED_LIMITS.totalEmbedChars) {
+  if (countEmbedChars(embed) <= maxChars) return [embed];
+
+  const fields = [...(embed.fields || [])];
+  if (!fields.length) return [embed];
+
+  const base = { ...embed };
+  delete base.fields;
+  const kept = [];
+  const spilled = [];
+
+  for (const field of fields) {
+    const trial = pruneEmbed({ ...base, fields: [...kept, field] });
+    if (countEmbedChars(trial) <= maxChars) {
+      kept.push(field);
+    } else {
+      spilled.push(field);
+    }
+  }
+
+  const primary = pruneEmbed(kept.length ? { ...embed, fields: kept } : base);
+  if (!spilled.length) return [primary];
+
+  const spillEmbeds = [];
+  let batch = [];
+  for (const field of spilled) {
+    const trial = pruneEmbed({ color: embed.color, fields: [...batch, field] });
+    if (countEmbedChars(trial) <= maxChars || !batch.length) {
+      batch.push(field);
+    } else {
+      spillEmbeds.push(pruneEmbed({ color: embed.color, fields: batch }));
+      batch = [field];
+    }
+  }
+  if (batch.length) spillEmbeds.push(pruneEmbed({ color: embed.color, fields: batch }));
+
+  const parts = [primary, ...spillEmbeds].filter((part) => countEmbedChars(part) > 0);
+  return parts.map((part, index) => {
+    if (index === 0) return part;
+    return pruneEmbed({
+      ...part,
+      title: truncate(`Continued (${index + 1}/${parts.length})`, DISCORD_EMBED_LIMITS.title)
+    });
+  });
+}
+
+function rebalanceEmbedsForCharBudget(embeds, maxChars = DISCORD_EMBED_LIMITS.totalEmbedChars) {
+  return embeds.flatMap((embed) => rebalanceEmbedFields(embed, maxChars));
 }
 
 function pruneEmbed(embed) {
@@ -345,7 +394,14 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
         footer
       })
     );
-    return assembleTweetEmbedGroup(tweet, kind, shareOptions, contentEmbeds, media, heroImageUrl);
+    return assembleTweetEmbedGroup(
+      tweet,
+      kind,
+      shareOptions,
+      rebalanceEmbedsForCharBudget(contentEmbeds),
+      media,
+      heroImageUrl
+    );
   }
 
   descriptionChunks.forEach((chunk, index) => {
@@ -369,7 +425,14 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
     );
   });
 
-  return assembleTweetEmbedGroup(tweet, kind, shareOptions, contentEmbeds, media, heroImageUrl);
+  return assembleTweetEmbedGroup(
+    tweet,
+    kind,
+    shareOptions,
+    rebalanceEmbedsForCharBudget(contentEmbeds),
+    media,
+    heroImageUrl
+  );
 }
 
 function packEmbedsIntoMessages(embeds) {
@@ -454,7 +517,7 @@ function buildEmbedDiscordPayloads(tweet, options = {}) {
   const { includeQuote = true } = options;
   const videoEntries = collectShareVideoEntries(tweet, options);
   const attachMedia = options.attachMedia === true;
-  const attachmentUrls = options.attachmentUrls || (attachMedia ? collectMediaAttachmentUrls(tweet, options) : []);
+  const attachmentUrls = options.attachmentUrls || (attachMedia ? collectMediaAttachmentUrls(tweet, { ...options, attachMedia: true }) : []);
   const quoteLayout = resolveQuoteLayout(tweet, options);
   const shareOptions = {
     ...options,
