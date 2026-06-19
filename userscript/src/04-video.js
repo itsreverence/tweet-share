@@ -34,8 +34,7 @@ function nearestPlayableVideoUrl(video) {
   const matchingPoster = loadedVideos.find((url) => posterName && url.includes(posterName));
   if (matchingPoster) return matchingPoster;
 
-  const primaryTweetVideo = loadedVideos.find((url) => /\/amplify_video\/|\/ext_tw_video\//.test(url));
-  return primaryTweetVideo || "";
+  return "";
 }
 
 function imageMedia(tweet) {

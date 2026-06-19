@@ -600,8 +600,7 @@ function nearestPlayableVideoUrl(video) {
   const matchingPoster = loadedVideos.find((url) => posterName && url.includes(posterName));
   if (matchingPoster) return matchingPoster;
 
-  const primaryTweetVideo = loadedVideos.find((url) => /\/amplify_video\/|\/ext_tw_video\//.test(url));
-  return primaryTweetVideo || "";
+  return "";
 }
 
 function imageMedia(tweet) {
@@ -711,6 +710,7 @@ function collectMediaAttachmentUrls(tweet, shareOptions = {}) {
   if (includeQuote && hasQuoteTweet(tweet)) posts.push(tweet.quote);
 
   const hasPlayableVideo = posts.some((post) => directPlayableVideoUrls(post).length > 0);
+  const attachImages = shareOptions.attachMedia === true || hasPlayableVideo;
   const urls = [];
 
   function appendPostMedia(post) {
@@ -718,9 +718,7 @@ function collectMediaAttachmentUrls(tweet, shareOptions = {}) {
       if (item.type === "video") {
         const url = normalizeTweetVideoUrl(item.url);
         if (isPlayableTweetVideoUrl(url)) urls.push(url);
-      } else if (hasPlayableVideo && item.type === "image" && item.url && !isTweetVideoThumbnailUrl(item.url)) {
-        // When a share mixes still images with playable video, native attachments keep
-        // the media together below the single context card, matching Faytuks-style output.
+      } else if (attachImages && item.type === "image" && item.url && !isTweetVideoThumbnailUrl(item.url)) {
         urls.push(item.url);
       }
     }
@@ -732,6 +730,15 @@ function collectMediaAttachmentUrls(tweet, shareOptions = {}) {
 
 function isHttpsUrl(url) {
   return /^https:\/\//i.test(String(url || ""));
+}
+
+function isValidEmbedImageUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && parsed.hostname === "pbs.twimg.com";
+  } catch {
+    return false;
+  }
 }
 
 function embedAuthorBlock(tweet) {
@@ -770,6 +777,56 @@ function countEmbedChars(embed) {
     total += (field.name || "").length + (field.value || "").length;
   }
   return total;
+}
+
+function rebalanceEmbedFields(embed, maxChars = DISCORD_EMBED_LIMITS.totalEmbedChars) {
+  if (countEmbedChars(embed) <= maxChars) return [embed];
+
+  const fields = [...(embed.fields || [])];
+  if (!fields.length) return [embed];
+
+  const base = { ...embed };
+  delete base.fields;
+  const kept = [];
+  const spilled = [];
+
+  for (const field of fields) {
+    const trial = pruneEmbed({ ...base, fields: [...kept, field] });
+    if (countEmbedChars(trial) <= maxChars) {
+      kept.push(field);
+    } else {
+      spilled.push(field);
+    }
+  }
+
+  const primary = pruneEmbed(kept.length ? { ...embed, fields: kept } : base);
+  if (!spilled.length) return [primary];
+
+  const spillEmbeds = [];
+  let batch = [];
+  for (const field of spilled) {
+    const trial = pruneEmbed({ color: embed.color, fields: [...batch, field] });
+    if (countEmbedChars(trial) <= maxChars || !batch.length) {
+      batch.push(field);
+    } else {
+      spillEmbeds.push(pruneEmbed({ color: embed.color, fields: batch }));
+      batch = [field];
+    }
+  }
+  if (batch.length) spillEmbeds.push(pruneEmbed({ color: embed.color, fields: batch }));
+
+  const parts = [primary, ...spillEmbeds].filter((part) => countEmbedChars(part) > 0);
+  return parts.map((part, index) => {
+    if (index === 0) return part;
+    return pruneEmbed({
+      ...part,
+      title: truncate(`Continued (${index + 1}/${parts.length})`, DISCORD_EMBED_LIMITS.title)
+    });
+  });
+}
+
+function rebalanceEmbedsForCharBudget(embeds, maxChars = DISCORD_EMBED_LIMITS.totalEmbedChars) {
+  return embeds.flatMap((embed) => rebalanceEmbedFields(embed, maxChars));
 }
 
 function pruneEmbed(embed) {
@@ -855,8 +912,8 @@ function buildShareContentLines(tweet, shareOptions = {}) {
 }
 
 function pickEmbedImageUrl(mediaItems) {
-  const image = mediaItems.find((item) => isHttpsUrl(item.url) && /\.(?:jpg|jpeg|png|webp|gif)(?:\?|$)/i.test(item.url));
-  return image?.url || mediaItems.find((item) => isHttpsUrl(item.url) && /pbs\.twimg\.com/i.test(item.url))?.url || "";
+  const image = mediaItems.find((item) => isValidEmbedImageUrl(item.url));
+  return image?.url || "";
 }
 
 function pickEmbedHeroUrl(tweet, mediaItems) {
@@ -903,7 +960,13 @@ function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind, shareOptio
   const attachmentUrls = shareOptions.attachmentUrls || [];
 
   return mediaItems
-    .filter((item) => item.kind === "image" && item.url && item.url !== heroUrl && !attachmentUrls.includes(item.url))
+    .filter((item) =>
+      item.kind === "image"
+      && item.url
+      && item.url !== heroUrl
+      && !attachmentUrls.includes(item.url)
+      && isValidEmbedImageUrl(item.url)
+    )
     .map((item) =>
       pruneEmbed({
         color,
@@ -958,7 +1021,14 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
         footer
       })
     );
-    return assembleTweetEmbedGroup(tweet, kind, shareOptions, contentEmbeds, media, heroImageUrl);
+    return assembleTweetEmbedGroup(
+      tweet,
+      kind,
+      shareOptions,
+      rebalanceEmbedsForCharBudget(contentEmbeds),
+      media,
+      heroImageUrl
+    );
   }
 
   descriptionChunks.forEach((chunk, index) => {
@@ -982,7 +1052,14 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
     );
   });
 
-  return assembleTweetEmbedGroup(tweet, kind, shareOptions, contentEmbeds, media, heroImageUrl);
+  return assembleTweetEmbedGroup(
+    tweet,
+    kind,
+    shareOptions,
+    rebalanceEmbedsForCharBudget(contentEmbeds),
+    media,
+    heroImageUrl
+  );
 }
 
 function packEmbedsIntoMessages(embeds) {
@@ -1067,7 +1144,7 @@ function buildEmbedDiscordPayloads(tweet, options = {}) {
   const { includeQuote = true } = options;
   const videoEntries = collectShareVideoEntries(tweet, options);
   const attachMedia = options.attachMedia === true;
-  const attachmentUrls = options.attachmentUrls || (attachMedia ? collectMediaAttachmentUrls(tweet, options) : []);
+  const attachmentUrls = options.attachmentUrls || (attachMedia ? collectMediaAttachmentUrls(tweet, { ...options, attachMedia: true }) : []);
   const quoteLayout = resolveQuoteLayout(tweet, options);
   const shareOptions = {
     ...options,
@@ -1334,18 +1411,26 @@ function tweetFromSyndication(data, fallback = {}) {
 
 function bestCachedTweetForQuote(quote, mainTweetId = "") {
   const quoteText = normalizeTextForMatch(quote.text);
-  const quoteUsername = quote.author?.username || "";
-  if (!quoteText && !quoteUsername) return null;
+  const quoteUsername = String(quote.author?.username || "").trim();
+  const quoteId = quote.url ? tweetIdFromUrl(quote.url) : "";
+  if (!quoteText && !quoteUsername && !quoteId) return null;
+
+  if (quoteId && quoteId !== mainTweetId) {
+    const byId = TWEET_CACHE.get(quoteId);
+    if (byId) return byId;
+  }
+
+  if (!quoteUsername) return null;
 
   for (const [id, cachedTweet] of TWEET_CACHE) {
-    if (id === mainTweetId) continue;
-    const cachedText = normalizeTextForMatch(cachedTweet.text);
-    const textMatches = quoteText && (cachedText.includes(quoteText) || quoteText.includes(cachedText));
-    const authorMatches = quoteUsername && cachedTweet.author?.username === quoteUsername;
+    if (id === mainTweetId || !/^\d+$/.test(String(id))) continue;
+    if (cachedTweet.author?.username !== quoteUsername) continue;
 
-    if ((textMatches && (!quoteUsername || authorMatches)) || (authorMatches && quoteText && cachedText)) {
-      return cachedTweet;
-    }
+    const cachedText = normalizeTextForMatch(cachedTweet.text);
+    if (!quoteText) return cachedTweet;
+    if (cachedText === quoteText) return cachedTweet;
+    if (quoteText.length >= 24 && cachedText.includes(quoteText)) return cachedTweet;
+    if (cachedText.length >= 24 && quoteText.includes(cachedText)) return cachedTweet;
   }
 
   return null;
@@ -1458,10 +1543,10 @@ function extractQuote(article) {
 
   const quote = {
     url: quotedLink ? normalizeTweetUrl(quotedLink) : "",
-    author: extractAuthor(quotedContainer || article),
+    author: quotedContainer ? extractAuthor(quotedContainer) : { displayName: "", username: "", avatarUrl: "" },
     text: quotedContainer ? extractText(quotedContainer) : "",
     media: quotedContainer ? extractMedia(quotedContainer) : [],
-    createdAt: extractTimestamp(quotedContainer || article),
+    createdAt: quotedContainer ? extractTimestamp(quotedContainer) : "",
     container: quotedContainer || null
   };
 
@@ -1529,7 +1614,7 @@ async function shareToDestination(destinationId, tweet, options = {}) {
   let skippedSummary = "";
 
   if (attachMedia) {
-    const resolved = await resolveAttachmentsForTweet(tweet, options);
+    const resolved = await resolveAttachmentsForTweet(tweet, { ...options, attachMedia: true });
     attachments = resolved.attachments;
     if (attachments.length > 0) {
       skippedSummary = summarizeSkippedMedia(resolved.skipped);
@@ -2360,6 +2445,8 @@ async function savePreferences(preferences) {
 
   // --- 11-settings-surface.js ---
 // Settings modal surface helpers: styles and small DOM builders.
+let settingsModalCleanup = null;
+
 function injectSettingsStyles() {
   if (document.getElementById("tds-settings-style")) return;
 
@@ -2556,6 +2643,10 @@ function createSettingsOption(labelText, detailText, checked) {
 }
 
 function closeSettingsModal() {
+  if (settingsModalCleanup) {
+    settingsModalCleanup();
+    settingsModalCleanup = null;
+  }
   document.querySelector(`.${SETTINGS_CLASS}__backdrop`)?.remove();
 }
 
@@ -2571,6 +2662,7 @@ function createSettingsField(labelText, input) {
   // --- 11-settings.js ---
 async function openSettingsModal() {
   closeDestinationMenu();
+  if (document.querySelector(`.${SETTINGS_CLASS}__backdrop`)) return;
   injectSettingsStyles();
 
   let destinations = [...(await loadAllDestinations())];
@@ -2767,6 +2859,10 @@ async function openSettingsModal() {
       showToast("Fix invalid names or webhook URLs before saving.", "error");
       return;
     }
+    if (sanitized.length !== destinations.length) {
+      showToast("Fix invalid channel names or webhook URLs before saving.", "error");
+      return;
+    }
     try {
       await Promise.all([saveAllDestinations(sanitized), savePreferences(preferences)]);
       showToast("Settings saved.", "success");
@@ -2787,8 +2883,10 @@ async function openSettingsModal() {
   const onEscape = (event) => {
     if (event.key === "Escape") {
       closeSettingsModal();
-      document.removeEventListener("keydown", onEscape);
     }
+  };
+  settingsModalCleanup = () => {
+    document.removeEventListener("keydown", onEscape);
   };
   document.addEventListener("keydown", onEscape);
 

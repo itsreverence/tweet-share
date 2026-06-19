@@ -81,10 +81,10 @@ function extractQuote(article) {
 
   const quote = {
     url: quotedLink ? normalizeTweetUrl(quotedLink) : "",
-    author: extractAuthor(quotedContainer || article),
+    author: quotedContainer ? extractAuthor(quotedContainer) : { displayName: "", username: "", avatarUrl: "" },
     text: quotedContainer ? extractText(quotedContainer) : "",
     media: quotedContainer ? extractMedia(quotedContainer) : [],
-    createdAt: extractTimestamp(quotedContainer || article),
+    createdAt: quotedContainer ? extractTimestamp(quotedContainer) : "",
     container: quotedContainer || null
   };
 

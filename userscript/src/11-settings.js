@@ -1,5 +1,6 @@
 async function openSettingsModal() {
   closeDestinationMenu();
+  if (document.querySelector(`.${SETTINGS_CLASS}__backdrop`)) return;
   injectSettingsStyles();
 
   let destinations = [...(await loadAllDestinations())];
@@ -196,6 +197,10 @@ async function openSettingsModal() {
       showToast("Fix invalid names or webhook URLs before saving.", "error");
       return;
     }
+    if (sanitized.length !== destinations.length) {
+      showToast("Fix invalid channel names or webhook URLs before saving.", "error");
+      return;
+    }
     try {
       await Promise.all([saveAllDestinations(sanitized), savePreferences(preferences)]);
       showToast("Settings saved.", "success");
@@ -216,8 +221,10 @@ async function openSettingsModal() {
   const onEscape = (event) => {
     if (event.key === "Escape") {
       closeSettingsModal();
-      document.removeEventListener("keydown", onEscape);
     }
+  };
+  settingsModalCleanup = () => {
+    document.removeEventListener("keydown", onEscape);
   };
   document.addEventListener("keydown", onEscape);
 

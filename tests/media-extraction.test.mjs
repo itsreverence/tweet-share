@@ -30,9 +30,14 @@ function loadMediaContext() {
   const code = files.map((name) => readFileSync(path.join(srcDir, name), "utf8")).join("\n");
   const context = createContext({
     console,
+    URL,
     location: { href: "https://x.com/fixture_author/status/1000000000000000001" },
     performance: { getEntriesByType: () => [] },
-    document: { querySelectorAll: () => [] },
+    document: {
+      querySelectorAll() {
+        return [];
+      }
+    },
     request: () => Promise.resolve(null)
   });
   runInNewContext(`${code}\nthis.exports = {
@@ -44,13 +49,19 @@ function loadMediaContext() {
     bestSyndicationVideoUrl,
     uniqueMedia,
     extractMedia,
+    extractTweet,
+    extractQuote,
+    tweetUrlFromArticle,
     nearestPlayableVideoUrl,
     isPlayableTweetVideoUrl,
     normalizeTweetVideoUrl,
     highResolutionTweetImageUrl,
     bestCachedVideoUrlForTweet,
     imageMedia,
-    VIDEO_VARIANT_CACHE
+    VIDEO_VARIANT_CACHE,
+    TWEET_CACHE,
+    bestCachedTweetForQuote,
+    cacheTweetResult
   };`, context);
   return context.exports;
 }
@@ -64,13 +75,19 @@ const {
   bestSyndicationVideoUrl,
   uniqueMedia,
   extractMedia,
+  extractTweet,
+  extractQuote,
+  tweetUrlFromArticle,
   nearestPlayableVideoUrl,
   isPlayableTweetVideoUrl,
   normalizeTweetVideoUrl,
   highResolutionTweetImageUrl,
   bestCachedVideoUrlForTweet,
   imageMedia,
-  VIDEO_VARIANT_CACHE
+  VIDEO_VARIANT_CACHE,
+  TWEET_CACHE,
+  bestCachedTweetForQuote,
+  cacheTweetResult
 } = loadMediaContext();
 
 function readFixture(name) {
@@ -274,6 +291,226 @@ test("nearestPlayableVideoUrl returns a playable currentSrc URL", () => {
 
   assert.equal(result, normalizeTweetVideoUrl(url));
   assert.equal(isPlayableTweetVideoUrl(result), true);
+});
+
+test("nearestPlayableVideoUrl does not borrow unrelated page videos when poster matching fails", () => {
+  const unrelated = "https://video.twimg.com/ext_tw_video/111/pu/vid/1280x720/other-tweet.mp4";
+  const context = createContext({
+    console,
+    URL,
+    location: { href: "https://x.com/" },
+    performance: {
+      getEntriesByType() {
+        return [{ name: unrelated }];
+      }
+    },
+    document: {
+      querySelectorAll(selector) {
+        if (selector === "video source[src], video[src]") {
+          return [{ src: unrelated, getAttribute: () => unrelated }];
+        }
+        return [];
+      }
+    },
+    request: () => Promise.resolve(null)
+  });
+  const files = [
+    "00-config.js",
+    "02-utils.js",
+    "03-network-capture.js",
+    "04-video.js",
+    "06-syndication.js",
+    "07-extract-dom.js"
+  ];
+  const code = files.map((name) => readFileSync(path.join(srcDir, name), "utf8")).join("\n");
+  runInNewContext(`${code}\nthis.result = nearestPlayableVideoUrl({
+    currentSrc: "",
+    src: "",
+    poster: "https://pbs.twimg.com/ext_tw_video_thumb/222/pu/img/unmatched.jpg",
+    querySelectorAll() { return []; }
+  });`, context);
+
+  assert.equal(context.result, "");
+});
+
+test("extractTweet excludes quoted text and media from the main tweet", () => {
+  const quoteTextNode = fakeNode({ innerText: "Quoted body" });
+  const mainTextNode = fakeNode({ innerText: "Main body" });
+  const quoteImage = fakeNode({ src: "https://pbs.twimg.com/media/quote.jpg", alt: "quote" });
+  const mainImage = fakeNode({ src: "https://pbs.twimg.com/media/main.jpg", alt: "main" });
+  const quoteContainer = fakeNode({
+    contains(node) {
+      return node === quoteContainer || node === quoteTextNode || node === quoteImage;
+    },
+    querySelectorAll(selector) {
+      if (selector === '[data-testid="tweetText"]') return [quoteTextNode];
+      if (selector === 'a[href*="/status/"]') {
+        return [{ href: "https://x.com/bob/status/2", getAttribute: () => "/bob/status/2" }];
+      }
+      if (selector === '[role="link"]' || selector === '[data-testid="card.wrapper"]') return [];
+      if (selector === '[data-testid="tweetPhoto"] img') return [quoteImage];
+      if (selector === "video") return [];
+      return [];
+    }
+  });
+  quoteContainer.querySelector = (selector) => {
+    if (selector === '[data-testid="tweetText"]') return quoteTextNode;
+    return null;
+  };
+
+  const article = fakeNode({
+    contains(node) {
+      return node === article || node === mainTextNode || node === mainImage || quoteContainer.contains(node);
+    },
+    querySelector(selector) {
+      if (selector === "time") return { getAttribute: () => "2026-06-10T12:00:00.000Z" };
+      if (selector === '[data-testid="User-Name"]') return null;
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === 'a[href*="/status/"]') {
+        return [
+          { href: "https://x.com/alice/status/1", getAttribute: () => "/alice/status/1" },
+          { href: "https://x.com/bob/status/2", getAttribute: () => "/bob/status/2" }
+        ];
+      }
+      if (selector === '[data-testid="tweetText"]') return [mainTextNode, quoteTextNode];
+      if (selector === '[data-testid="tweetPhoto"] img') return [mainImage, quoteImage];
+      if (selector === "video") return [];
+      if (selector === '[role="link"]') return [quoteContainer];
+      if (selector === '[data-testid="card.wrapper"]') return [];
+      return [];
+    }
+  });
+
+  const tweet = extractTweet(article);
+  assert.equal(tweet.url, "https://x.com/alice/status/1");
+  assert.equal(tweet.text, "Main body");
+  assert.equal(tweet.media.length, 1);
+  assert.equal(tweet.media[0].url, "https://pbs.twimg.com/media/main.jpg?format=jpg&name=orig");
+  assert.ok(tweet.quote);
+  assert.equal(tweet.quote.url, "https://x.com/bob/status/2");
+  assert.equal(tweet.quote.text, "Quoted body");
+});
+
+test("extractQuote returns null when only the main status link is present", () => {
+  const article = fakeNode({
+    querySelectorAll(selector) {
+      if (selector === 'a[href*="/status/"]') {
+        return [{ href: "https://x.com/alice/status/1", getAttribute: () => "/alice/status/1" }];
+      }
+      if (selector === '[role="link"]' || selector === '[data-testid="card.wrapper"]') return [];
+      return [];
+    }
+  });
+
+  assert.equal(extractQuote(article), null);
+});
+
+test("extractQuote with link only does not borrow main tweet author metadata", () => {
+  const mainAuthorBlock = fakeNode({
+    querySelectorAll(selector) {
+      if (selector === "span") {
+        return [{ textContent: "@alice" }, { textContent: "Alice" }];
+      }
+      if (selector === 'a[href^="/"]') return [{ getAttribute: () => "/alice" }];
+      return [];
+    }
+  });
+  const article = fakeNode({
+    querySelector(selector) {
+      if (selector === '[data-testid="User-Name"]') return mainAuthorBlock;
+      if (selector === "time") return { getAttribute: () => "2026-06-10T12:00:00.000Z" };
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === 'a[href*="/status/"]') {
+        return [
+          { href: "https://x.com/alice/status/1", getAttribute: () => "/alice/status/1" },
+          { href: "https://x.com/bob/status/2", getAttribute: () => "/bob/status/2" }
+        ];
+      }
+      if (selector === '[role="link"]' || selector === '[data-testid="card.wrapper"]') return [];
+      return [];
+    }
+  });
+
+  const quote = extractQuote(article);
+  assert.ok(quote);
+  assert.equal(quote.url, "https://x.com/bob/status/2");
+  assert.equal(quote.author.displayName, "");
+  assert.equal(quote.author.username, "");
+  assert.equal(quote.createdAt, "");
+});
+
+test("bestCachedTweetForQuote prefers status id and requires author match for fuzzy text", () => {
+  TWEET_CACHE.clear();
+  cacheTweetResult({
+    rest_id: "200",
+    legacy: {
+      full_text: "Exact quoted tweet body for testing",
+      created_at: "Tue May 26 12:00:00 +0000 2026"
+    },
+    core: {
+      user_results: {
+        result: {
+          legacy: { name: "Bob", screen_name: "bob", profile_image_url_https: "https://pbs.twimg.com/profile_images/b.jpg" }
+        }
+      }
+    }
+  });
+  cacheTweetResult({
+    rest_id: "999",
+    legacy: { full_text: "Exact quoted tweet body for testing but from wrong user" },
+    core: {
+      user_results: {
+        result: {
+          legacy: { name: "Eve", screen_name: "eve", profile_image_url_https: "https://pbs.twimg.com/profile_images/e.jpg" }
+        }
+      }
+    }
+  });
+
+  const byId = bestCachedTweetForQuote({
+    url: "https://x.com/bob/status/200",
+    author: { username: "bob" },
+    text: ""
+  }, "100");
+  assert.equal(byId?.author?.username, "bob");
+
+  const fuzzy = bestCachedTweetForQuote({
+    url: "",
+    author: { username: "bob" },
+    text: "Exact quoted tweet body for testing"
+  }, "100");
+  assert.equal(fuzzy?.author?.username, "bob");
+
+  const wrongUser = bestCachedTweetForQuote({
+    url: "",
+    author: { username: "alice" },
+    text: "Exact quoted tweet body for testing"
+  }, "100");
+  assert.equal(wrongUser, null);
+
+  const shortText = bestCachedTweetForQuote({
+    url: "",
+    author: { username: "bob" },
+    text: "quoted"
+  }, "100");
+  assert.equal(shortText, null);
+});
+
+test("tweetUrlFromArticle falls back to the page URL when no status link exists", () => {
+  const article = fakeNode({
+    querySelectorAll() {
+      return [];
+    }
+  });
+
+  assert.equal(
+    tweetUrlFromArticle(article),
+    "https://x.com/fixture_author/status/1000000000000000001"
+  );
 });
 
 test("highResolutionTweetImageUrl upgrades media URLs and leaves other URLs alone", () => {

@@ -13,11 +13,12 @@ function loadFormatContext() {
   const code = files.map((name) => readFileSync(path.join(srcDir, name), "utf8")).join("\n");
   const context = {
     console,
+    URL,
     location: { href: "https://x.com/" },
     performance: { getEntriesByType: () => [] },
     document: { querySelectorAll: () => [] }
   };
-  runInNewContext(`${code}\nthis.exports = {\n  buildDiscordPayloads,\n  collectMediaAttachmentUrls,\n  countEmbedChars,\n  discordEmbedTimestamp,\n  packEmbedsIntoMessages,\n  buildTweetEmbedGroup,\n  hasQuoteTweet\n};`, context);
+  runInNewContext(`${code}\nthis.exports = {\n  buildDiscordPayloads,\n  collectMediaAttachmentUrls,\n  countEmbedChars,\n  discordEmbedTimestamp,\n  packEmbedsIntoMessages,\n  buildTweetEmbedGroup,\n  hasQuoteTweet,\n  rebalanceEmbedsForCharBudget\n};`, context);
   return context.exports;
 }
 
@@ -28,7 +29,8 @@ const {
   discordEmbedTimestamp,
   packEmbedsIntoMessages,
   buildTweetEmbedGroup,
-  hasQuoteTweet
+  hasQuoteTweet,
+  rebalanceEmbedsForCharBudget
 } = loadFormatContext();
 
 const sampleTweet = {
@@ -218,7 +220,7 @@ test("auto inline quote uses quoted image as the embed hero when main has no med
     }
   };
 
-  const payloads = buildDiscordPayloads(tweet, { quoteLayout: "auto", attachMedia: true });
+  const payloads = buildDiscordPayloads(tweet, { quoteLayout: "auto" });
   assert.equal(payloads.length, 1);
   assert.equal(payloads[0].embeds.length, 1);
   assert.equal(payloads[0].embeds[0].image.url, "https://pbs.twimg.com/media/q1.jpg");
@@ -291,6 +293,66 @@ test("packEmbedsIntoMessages respects the 6000 character budget", () => {
   }
 });
 
+test("rebalanceEmbedsForCharBudget splits fields when one embed exceeds 6000 chars", () => {
+  const embed = {
+    color: 1942002,
+    author: { name: "Alice" },
+    description: "Main tweet with a quoted post attached inline.",
+    fields: Array.from({ length: 8 }, (_, index) => ({
+      name: `Field ${index + 1}`,
+      value: "x".repeat(900),
+      inline: false
+    }))
+  };
+
+  const rebalanced = rebalanceEmbedsForCharBudget([embed]);
+  assert.ok(rebalanced.length >= 2);
+  for (const part of rebalanced) {
+    assert.ok(countEmbedChars(part) <= 6000);
+  }
+});
+
+test("collectMediaAttachmentUrls includes image-only posts when attach mode is enabled", () => {
+  const photoTweet = {
+    ...sampleTweet,
+    media: [
+      { type: "image", url: "https://pbs.twimg.com/media/one.jpg" },
+      { type: "image", url: "https://pbs.twimg.com/media/two.jpg" }
+    ],
+    quote: null
+  };
+
+  assert.equal(collectMediaAttachmentUrls(photoTweet).length, 0);
+  const attachmentUrls = collectMediaAttachmentUrls(photoTweet, { attachMedia: true });
+  assert.deepEqual([...attachmentUrls], [
+    "https://pbs.twimg.com/media/one.jpg",
+    "https://pbs.twimg.com/media/two.jpg"
+  ]);
+});
+
+test("buildDiscordPayloads uploads image-only media when attach mode is enabled", () => {
+  const photoTweet = {
+    ...sampleTweet,
+    media: [
+      { type: "image", url: "https://pbs.twimg.com/media/one.jpg" },
+      { type: "image", url: "https://pbs.twimg.com/media/two.jpg" }
+    ]
+  };
+  const attachmentUrls = collectMediaAttachmentUrls(photoTweet, { attachMedia: true, includeQuote: false });
+  const payloads = buildDiscordPayloads(photoTweet, {
+    includeQuote: false,
+    attachMedia: true,
+    attachmentUrls
+  });
+
+  assert.deepEqual(Array.from(attachmentUrls), [
+    "https://pbs.twimg.com/media/one.jpg",
+    "https://pbs.twimg.com/media/two.jpg"
+  ]);
+  assert.equal(payloads.length, 1);
+  assert.equal(payloads[0].embeds[0].image, undefined);
+});
+
 test("videos are sent in a separate labeled message that matches the embed field", () => {
   const videoUrl = "https://video.twimg.com/ext_tw_video/1/pu/vid/abc/1280x720/clip.mp4";
   const tweet = {
@@ -355,6 +417,24 @@ test("extra images become supplemental embeds instead of link fields", () => {
   assert.ok(embeds[0].fields?.some((field) => field.name === "More images"));
   assert.equal(embeds[0].color, 0x1da1f2);
   assert.equal(embeds[1].color, 0x1da1f2);
+});
+
+test("supplemental image embeds reject non-Twitter HTTPS image URLs", () => {
+  const tweet = {
+    ...sampleTweet,
+    media: [
+      { type: "image", url: "https://pbs.twimg.com/media/one.jpg" },
+      { type: "image", url: "https://evil.example/tracker.png" },
+      { type: "image", url: "https://pbs.twimg.com.evil.example/media/two.jpg" },
+      { type: "image", url: "https://pbs.twimg.com/media/three.jpg" }
+    ]
+  };
+
+  const embeds = buildDiscordPayloads(tweet, { includeQuote: false })[0].embeds;
+  assert.equal(embeds.length, 2);
+  assert.equal(embeds[0].image.url, "https://pbs.twimg.com/media/one.jpg");
+  assert.equal(embeds[1].image.url, "https://pbs.twimg.com/media/three.jpg");
+  assert.equal(embeds[1].title, "Image 4");
 });
 
 test("supplemental images use author prefixes and shared URL grouping when both posts have media", () => {

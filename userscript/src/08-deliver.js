@@ -16,7 +16,7 @@ async function shareToDestination(destinationId, tweet, options = {}) {
   let skippedSummary = "";
 
   if (attachMedia) {
-    const resolved = await resolveAttachmentsForTweet(tweet, options);
+    const resolved = await resolveAttachmentsForTweet(tweet, { ...options, attachMedia: true });
     attachments = resolved.attachments;
     if (attachments.length > 0) {
       skippedSummary = summarizeSkippedMedia(resolved.skipped);
