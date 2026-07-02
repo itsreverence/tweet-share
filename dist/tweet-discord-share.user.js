@@ -417,10 +417,13 @@ function cacheVideoVariants(mediaId, variants) {
 }
 
 function looksLikeTweetResult(node) {
+  const legacy = node.legacy || node;
+  const media = legacy.extended_entities?.media || legacy.entities?.media || [];
+  const userId = legacy.user_id_str || legacy.user_id || node.user_id_str || "";
   return Boolean(
     (node.rest_id || node.id_str) &&
-    (node.legacy?.full_text || node.full_text || node.text) &&
-    (node.core?.user_results?.result || node.user || node.author)
+    (legacy.full_text || legacy.text || node.text || media.length > 0) &&
+    (node.core?.user_results?.result || node.user || node.author || userId)
   );
 }
 
@@ -1334,11 +1337,13 @@ function sameTweetImage(left, right) {
 
 function sameTweetVideo(left, right) {
   const leftPoster = posterMediaId(left.posterUrl);
-  return leftPoster && leftPoster === posterMediaId(right.posterUrl);
+  if (leftPoster && leftPoster === posterMediaId(right.posterUrl)) return true;
+  const leftUrl = normalizeTweetVideoUrl(left.url || "");
+  return leftUrl && leftUrl === normalizeTweetVideoUrl(right.url || "");
 }
 
 function mergeTweetMedia(primary = [], fallback = [], options = {}) {
-  const media = uniqueMedia([...(primary || []), ...(fallback || [])]);
+  const media = [...(primary || []), ...(fallback || [])];
   const images = [];
   const videos = [];
 
@@ -1437,8 +1442,17 @@ function bestCachedTweetForQuote(quote, mainTweetId = "") {
 }
 
 async function enrichTweetMedia(tweet) {
-  const data = await fetchSyndicationTweet(tweetIdFromUrl(tweet.url));
+  const tweetId = tweetIdFromUrl(tweet.url);
+  const data = await fetchSyndicationTweet(tweetId);
+  const cachedTweet = tweetId ? TWEET_CACHE.get(tweetId) : null;
   tweet = tweetFromSyndication(data, tweet);
+  if (cachedTweet) {
+    tweet.url = tweet.url || cachedTweet.url || "";
+    tweet.author = mergeAuthor(tweet.author, cachedTweet.author);
+    tweet.text = tweet.text || cachedTweet.text || "";
+    tweet.createdAt = tweet.createdAt || cachedTweet.createdAt || "";
+    tweet.media = mergeTweetMedia(tweet.media || [], cachedTweet.media || []);
+  }
   const videoUrl = normalizeTweetVideoUrl(bestSyndicationVideoUrl(data));
   const posterUrl = syndicationPosterUrl(data);
   const cachedVideoUrl = bestCachedVideoUrlForTweet(tweet);
@@ -1503,7 +1517,10 @@ function extractText(article, excludedNodes = []) {
 }
 
 function extractMedia(article, excludedNodes = []) {
-  const images = [...article.querySelectorAll('[data-testid="tweetPhoto"] img')]
+  const images = [
+    ...article.querySelectorAll('[data-testid="tweetPhoto"] img'),
+    ...article.querySelectorAll('img[src*="pbs.twimg.com/media/"]')
+  ]
     .filter((img) => !isInsideExcludedNode(img, excludedNodes))
     .filter((img) => !isTweetVideoThumbnailUrl(img.src))
     .map((img) => ({ type: "image", url: highResolutionTweetImageUrl(img.src), alt: img.alt || "" }));
@@ -1555,7 +1572,7 @@ function extractQuote(article) {
     quote.url = cachedQuote.url || quote.url;
     quote.author = mergeAuthor(cachedQuote.author, quote.author);
     quote.text = cachedQuote.text || quote.text;
-    quote.media = cachedQuote.media?.length ? cachedQuote.media : quote.media;
+    quote.media = mergeTweetMedia(cachedQuote.media || [], quote.media || []);
     quote.createdAt = cachedQuote.createdAt || quote.createdAt;
   }
 

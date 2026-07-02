@@ -41,7 +41,10 @@ function extractText(article, excludedNodes = []) {
 }
 
 function extractMedia(article, excludedNodes = []) {
-  const images = [...article.querySelectorAll('[data-testid="tweetPhoto"] img')]
+  const images = [
+    ...article.querySelectorAll('[data-testid="tweetPhoto"] img'),
+    ...article.querySelectorAll('img[src*="pbs.twimg.com/media/"]')
+  ]
     .filter((img) => !isInsideExcludedNode(img, excludedNodes))
     .filter((img) => !isTweetVideoThumbnailUrl(img.src))
     .map((img) => ({ type: "image", url: highResolutionTweetImageUrl(img.src), alt: img.alt || "" }));
@@ -93,7 +96,7 @@ function extractQuote(article) {
     quote.url = cachedQuote.url || quote.url;
     quote.author = mergeAuthor(cachedQuote.author, quote.author);
     quote.text = cachedQuote.text || quote.text;
-    quote.media = cachedQuote.media?.length ? cachedQuote.media : quote.media;
+    quote.media = mergeTweetMedia(cachedQuote.media || [], quote.media || []);
     quote.createdAt = cachedQuote.createdAt || quote.createdAt;
   }
 

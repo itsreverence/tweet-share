@@ -9,10 +9,13 @@ function cacheVideoVariants(mediaId, variants) {
 }
 
 function looksLikeTweetResult(node) {
+  const legacy = node.legacy || node;
+  const media = legacy.extended_entities?.media || legacy.entities?.media || [];
+  const userId = legacy.user_id_str || legacy.user_id || node.user_id_str || "";
   return Boolean(
     (node.rest_id || node.id_str) &&
-    (node.legacy?.full_text || node.full_text || node.text) &&
-    (node.core?.user_results?.result || node.user || node.author)
+    (legacy.full_text || legacy.text || node.text || media.length > 0) &&
+    (node.core?.user_results?.result || node.user || node.author || userId)
   );
 }
 

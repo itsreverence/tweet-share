@@ -24,6 +24,7 @@ function loadMediaContext() {
     "02-utils.js",
     "03-network-capture.js",
     "04-video.js",
+    "05-format-discord.js",
     "06-syndication.js",
     "07-extract-dom.js"
   ];
@@ -46,6 +47,7 @@ function loadMediaContext() {
     mediaFromSyndication,
     mergeTweetMedia,
     tweetFromSyndication,
+    enrichTweetMedia,
     bestSyndicationVideoUrl,
     uniqueMedia,
     extractMedia,
@@ -72,6 +74,7 @@ const {
   mediaFromSyndication,
   mergeTweetMedia,
   tweetFromSyndication,
+  enrichTweetMedia,
   bestSyndicationVideoUrl,
   uniqueMedia,
   extractMedia,
@@ -285,6 +288,154 @@ test("extractMedia reads DOM image and video nodes while filtering thumbnails", 
   assert.equal(uniqueMedia(media).length, 2);
 });
 
+
+test("extractMedia reads pbs media images when tweetPhoto wrappers are absent", () => {
+  const image = fakeNode({
+    src: "https://pbs.twimg.com/media/dom-photo-no-wrapper.jpg?format=jpg&name=small",
+    alt: "DOM photo without wrapper"
+  });
+  const article = fakeNode({
+    querySelectorAll(selector) {
+      if (selector === '[data-testid="tweetPhoto"] img') return [];
+      if (selector === 'img[src*="pbs.twimg.com/media/"]') return [image];
+      if (selector === "video") return [];
+      return [];
+    }
+  });
+
+  const media = extractMedia(article);
+  assert.equal(media.length, 1);
+  assert.equal(media[0].type, "image");
+  assert.equal(media[0].url, "https://pbs.twimg.com/media/dom-photo-no-wrapper.jpg?format=jpg&name=orig");
+  assert.equal(media[0].alt, "DOM photo without wrapper");
+});
+
+test("network capture caches image-only tweet results with empty text", () => {
+  TWEET_CACHE.clear();
+  scanForVideoVariants({
+    data: {
+      tweetResult: {
+        result: {
+          rest_id: "300",
+          legacy: {
+            full_text: "",
+            created_at: "Tue Jun 30 12:00:00 +0000 2026",
+            extended_entities: {
+              media: [{
+                type: "photo",
+                media_url_https: "https://pbs.twimg.com/media/image-only.jpg",
+                ext_alt_text: "Image-only post"
+              }]
+            }
+          },
+          core: {
+            user_results: {
+              result: {
+                legacy: {
+                  name: "Image Author",
+                  screen_name: "image_author",
+                  profile_image_url_https: "https://pbs.twimg.com/profile_images/a_normal.jpg"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  const cached = TWEET_CACHE.get("300");
+  assert.ok(cached);
+  assert.equal(cached.text, "");
+  assert.equal(cached.media.length, 1);
+  assert.equal(cached.media[0].url, "https://pbs.twimg.com/media/image-only.jpg");
+});
+
+test("network capture caches tweet results when user data was seen separately", () => {
+  TWEET_CACHE.clear();
+  scanForVideoVariants([
+    {
+      rest_id: "42",
+      legacy: {
+        name: "Separate User",
+        screen_name: "separate_user",
+        profile_image_url_https: "https://pbs.twimg.com/profile_images/u_normal.jpg"
+      }
+    },
+    {
+      rest_id: "302",
+      legacy: {
+        full_text: "Tweet with separate user payload",
+        user_id_str: "42",
+        extended_entities: {
+          media: [{
+            type: "photo",
+            media_url_https: "https://pbs.twimg.com/media/separate-user.jpg"
+          }]
+        }
+      }
+    }
+  ]);
+
+  const cached = TWEET_CACHE.get("302");
+  assert.ok(cached);
+  assert.equal(cached.author.username, "separate_user");
+  assert.equal(cached.media.length, 1);
+  assert.equal(cached.media[0].url, "https://pbs.twimg.com/media/separate-user.jpg");
+});
+
+test("mergeTweetMedia preserves fallback video poster metadata for duplicate URLs", () => {
+  const videoUrl = "https://video.twimg.com/ext_tw_video/321/pu/vid/1280x720/shared.mp4";
+  const merged = mergeTweetMedia(
+    [{ type: "video", url: videoUrl, posterUrl: "", alt: "" }],
+    [{ type: "video", url: videoUrl, posterUrl: "https://pbs.twimg.com/ext_tw_video_thumb/321/pu/img/poster.jpg", alt: "poster alt" }]
+  );
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].url, videoUrl);
+  assert.equal(merged[0].posterUrl, "https://pbs.twimg.com/ext_tw_video_thumb/321/pu/img/poster.jpg");
+  assert.equal(merged[0].alt, "poster alt");
+});
+
+test("enrichTweetMedia merges cached image-only media when syndication is empty", async () => {
+  TWEET_CACHE.clear();
+  cacheTweetResult({
+    rest_id: "301",
+    legacy: {
+      full_text: "",
+      extended_entities: {
+        media: [{
+          type: "photo",
+          media_url_https: "https://pbs.twimg.com/media/cached-image-only.jpg",
+          ext_alt_text: "Cached image"
+        }]
+      }
+    },
+    core: {
+      user_results: {
+        result: {
+          legacy: {
+            name: "Cached Author",
+            screen_name: "cached_author",
+            profile_image_url_https: "https://pbs.twimg.com/profile_images/c_normal.jpg"
+          }
+        }
+      }
+    }
+  });
+
+  const tweet = await enrichTweetMedia({
+    url: "https://x.com/cached_author/status/301",
+    author: { displayName: "Cached Author", username: "cached_author", avatarUrl: "" },
+    text: "",
+    media: [],
+    createdAt: "",
+    quote: null
+  });
+
+  assert.equal(tweet.media.length, 1);
+  assert.equal(tweet.media[0].url, "https://pbs.twimg.com/media/cached-image-only.jpg?format=jpg&name=orig");
+});
 test("nearestPlayableVideoUrl returns a playable currentSrc URL", () => {
   const url = "https://video.twimg.com/ext_tw_video/999/pu/vid/1280x720/current.mp4";
   const result = nearestPlayableVideoUrl(fakeNode({ currentSrc: url, src: "", poster: "" }));
@@ -319,6 +470,7 @@ test("nearestPlayableVideoUrl does not borrow unrelated page videos when poster 
     "02-utils.js",
     "03-network-capture.js",
     "04-video.js",
+    "05-format-discord.js",
     "06-syndication.js",
     "07-extract-dom.js"
   ];
@@ -393,6 +545,72 @@ test("extractTweet excludes quoted text and media from the main tweet", () => {
   assert.equal(tweet.quote.text, "Quoted body");
 });
 
+test("extractQuote merges cached media with DOM media instead of replacing it", () => {
+  TWEET_CACHE.clear();
+  cacheTweetResult({
+    rest_id: "2",
+    legacy: {
+      full_text: "Cached quoted body",
+      extended_entities: {
+        media: [{
+          type: "video",
+          media_url_https: "https://pbs.twimg.com/ext_tw_video_thumb/2/pu/img/poster.jpg",
+          video_info: {
+            variants: [{
+              content_type: "video/mp4",
+              url: "https://video.twimg.com/ext_tw_video/2/pu/vid/1280x720/quote.mp4",
+              bitrate: 2176000
+            }]
+          }
+        }]
+      }
+    },
+    core: {
+      user_results: {
+        result: {
+          legacy: { name: "Bob", screen_name: "bob", profile_image_url_https: "https://pbs.twimg.com/profile_images/b.jpg" }
+        }
+      }
+    }
+  });
+
+  const quoteImage = fakeNode({ src: "https://pbs.twimg.com/media/dom-quote.jpg", alt: "DOM quote image" });
+  const quoteContainer = fakeNode({
+    contains(node) {
+      return node === quoteContainer || node === quoteImage;
+    },
+    querySelector(selector) {
+      if (selector === '[data-testid="tweetText"]') return null;
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === 'a[href*="/status/"]') return [{ href: "https://x.com/bob/status/2", getAttribute: () => "/bob/status/2" }];
+      if (selector === '[data-testid="tweetPhoto"] img') return [quoteImage];
+      if (selector === 'img[src*="pbs.twimg.com/media/"]') return [];
+      if (selector === "video") return [];
+      return [];
+    }
+  });
+  const article = fakeNode({
+    querySelectorAll(selector) {
+      if (selector === 'a[href*="/status/"]') {
+        return [
+          { href: "https://x.com/alice/status/1", getAttribute: () => "/alice/status/1" },
+          { href: "https://x.com/bob/status/2", getAttribute: () => "/bob/status/2" }
+        ];
+      }
+      if (selector === '[role="link"]') return [quoteContainer];
+      if (selector === '[data-testid="card.wrapper"]') return [];
+      return [];
+    }
+  });
+
+  const quote = extractQuote(article);
+  assert.ok(quote);
+  assert.equal(quote.media.some((item) => item.url === "https://pbs.twimg.com/media/dom-quote.jpg?format=jpg&name=orig"), true);
+  assert.equal(quote.media.some((item) => item.url === "https://video.twimg.com/ext_tw_video/2/pu/vid/1280x720/quote.mp4"), true);
+});
+
 test("extractQuote returns null when only the main status link is present", () => {
   const article = fakeNode({
     querySelectorAll(selector) {
@@ -408,6 +626,7 @@ test("extractQuote returns null when only the main status link is present", () =
 });
 
 test("extractQuote with link only does not borrow main tweet author metadata", () => {
+  TWEET_CACHE.clear();
   const mainAuthorBlock = fakeNode({
     querySelectorAll(selector) {
       if (selector === "span") {
