@@ -40,15 +40,33 @@ function extractText(article, excludedNodes = []) {
     .join("\n\n");
 }
 
-function extractMedia(article, excludedNodes = []) {
-  const images = [
-    ...article.querySelectorAll('[data-testid="tweetPhoto"] img'),
-    ...article.querySelectorAll('img[src*="pbs.twimg.com/media/"]')
-  ]
-    .filter((img) => !isInsideExcludedNode(img, excludedNodes))
-    .filter((img) => !isTweetVideoThumbnailUrl(img.src))
-    .map((img) => ({ type: "image", url: highResolutionTweetImageUrl(img.src), alt: img.alt || "" }));
+function imageNodePixelSize(img) {
+  return Math.max(
+    Number(img.naturalWidth || 0),
+    Number(img.naturalHeight || 0),
+    Number(img.width || 0),
+    Number(img.height || 0),
+    Number(img.clientWidth || 0),
+    Number(img.clientHeight || 0)
+  );
+}
 
+function isLikelyTweetMediaImageNode(img) {
+  if (!isTweetImageMediaUrl(img.src) || isTweetVideoThumbnailUrl(img.src)) return false;
+  const size = imageNodePixelSize(img);
+  return size === 0 || size >= 96;
+}
+
+function extractMedia(article, excludedNodes = []) {
+  const photoImages = [...article.querySelectorAll('[data-testid="tweetPhoto"] img')]
+    .filter((img) => !isInsideExcludedNode(img, excludedNodes))
+    .filter((img) => isTweetImageMediaUrl(img.src) && !isTweetVideoThumbnailUrl(img.src));
+  const fallbackImages = [...article.querySelectorAll('img[src*="pbs.twimg.com/media/"]')]
+    .filter((img) => !isInsideExcludedNode(img, excludedNodes))
+    .filter((img) => !img.closest?.('[data-testid="tweetPhoto"]'))
+    .filter(isLikelyTweetMediaImageNode);
+  const images = [...photoImages, ...fallbackImages]
+    .map((img) => ({ type: "image", url: highResolutionTweetImageUrl(img.src), alt: img.alt || "" }));
   const videos = [...article.querySelectorAll("video")]
     .filter((video) => !isInsideExcludedNode(video, excludedNodes))
     .map((video) => ({

@@ -288,7 +288,6 @@ test("extractMedia reads DOM image and video nodes while filtering thumbnails", 
   assert.equal(uniqueMedia(media).length, 2);
 });
 
-
 test("extractMedia reads pbs media images when tweetPhoto wrappers are absent", () => {
   const image = fakeNode({
     src: "https://pbs.twimg.com/media/dom-photo-no-wrapper.jpg?format=jpg&name=small",
@@ -308,6 +307,45 @@ test("extractMedia reads pbs media images when tweetPhoto wrappers are absent", 
   assert.equal(media[0].type, "image");
   assert.equal(media[0].url, "https://pbs.twimg.com/media/dom-photo-no-wrapper.jpg?format=jpg&name=orig");
   assert.equal(media[0].alt, "DOM photo without wrapper");
+});
+
+test("extractMedia ignores small and SVG fallback media images", () => {
+  const smallInlineImage = fakeNode({
+    src: "https://pbs.twimg.com/media/tiny-inline.jpg?format=jpg&name=small",
+    alt: "inline icon",
+    naturalWidth: 48,
+    naturalHeight: 48
+  });
+  const svgInlineImage = fakeNode({
+    src: "https://pbs.twimg.com/media/inline-badge.svg",
+    alt: "inline svg",
+    naturalWidth: 120,
+    naturalHeight: 120
+  });
+  const realFallbackImage = fakeNode({
+    src: "https://pbs.twimg.com/media/real-fallback.jpg?format=jpg&name=small",
+    alt: "real fallback image",
+    naturalWidth: 640,
+    naturalHeight: 360
+  });
+  const video = fakeNode({
+    currentSrc: "https://video.twimg.com/ext_tw_video/790/pu/vid/1280x720/dom-video.mp4",
+    src: "",
+    poster: "https://pbs.twimg.com/ext_tw_video_thumb/790/pu/img/poster.jpg"
+  });
+  const article = fakeNode({
+    querySelectorAll(selector) {
+      if (selector === '[data-testid="tweetPhoto"] img') return [];
+      if (selector === 'img[src*="pbs.twimg.com/media/"]') return [smallInlineImage, svgInlineImage, realFallbackImage];
+      if (selector === "video") return [video];
+      return [];
+    }
+  });
+
+  const media = extractMedia(article);
+  assert.equal(media.some((item) => /tiny-inline|inline-badge/.test(item.url)), false);
+  assert.equal(media.some((item) => item.url === "https://pbs.twimg.com/media/real-fallback.jpg?format=jpg&name=orig"), true);
+  assert.equal(media.some((item) => item.url === "https://video.twimg.com/ext_tw_video/790/pu/vid/1280x720/dom-video.mp4"), true);
 });
 
 test("network capture caches image-only tweet results with empty text", () => {
@@ -436,6 +474,7 @@ test("enrichTweetMedia merges cached image-only media when syndication is empty"
   assert.equal(tweet.media.length, 1);
   assert.equal(tweet.media[0].url, "https://pbs.twimg.com/media/cached-image-only.jpg?format=jpg&name=orig");
 });
+
 test("nearestPlayableVideoUrl returns a playable currentSrc URL", () => {
   const url = "https://video.twimg.com/ext_tw_video/999/pu/vid/1280x720/current.mp4";
   const result = nearestPlayableVideoUrl(fakeNode({ currentSrc: url, src: "", poster: "" }));

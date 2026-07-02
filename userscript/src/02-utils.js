@@ -37,8 +37,14 @@ function highResolutionProfileImageUrl(url) {
   return (url || "").replace(/_normal(\.(?:jpg|jpeg|png|webp))(?:\?|$)/i, "$1");
 }
 
+function isTweetImageMediaUrl(url) {
+  const value = String(url || "");
+  return /^https:\/\/pbs\.twimg\.com\/media\//i.test(value)
+    && !/(?:\.svg(?:[?:]|$)|[?&]format=svg\b|:svg(?:\?|$))/i.test(value);
+}
+
 function highResolutionTweetImageUrl(url) {
-  if (!url || !/pbs\.twimg\.com\/media\//.test(url)) return url;
+  if (!isTweetImageMediaUrl(url)) return url;
   const base = url.split("?")[0].replace(/:(?:small|medium|large|orig|thumb)$/i, "");
   return `${base}?format=jpg&name=orig`;
 }

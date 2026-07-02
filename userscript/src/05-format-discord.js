@@ -91,7 +91,7 @@ function collectMediaAttachmentUrls(tweet, shareOptions = {}) {
       if (item.type === "video") {
         const url = normalizeTweetVideoUrl(item.url);
         if (isPlayableTweetVideoUrl(url)) urls.push(url);
-      } else if (attachImages && item.type === "image" && item.url && !isTweetVideoThumbnailUrl(item.url)) {
+      } else if (attachImages && item.type === "image" && isTweetImageMediaUrl(item.url) && !isTweetVideoThumbnailUrl(item.url)) {
         urls.push(item.url);
       }
     }

@@ -330,6 +330,23 @@ test("collectMediaAttachmentUrls includes image-only posts when attach mode is e
   ]);
 });
 
+test("collectMediaAttachmentUrls skips SVG image artifacts even with video media", () => {
+  const videoUrl = "https://video.twimg.com/ext_tw_video/1/pu/vid/1280x720/main.mp4";
+  const tweet = {
+    ...sampleTweet,
+    media: [
+      { type: "image", url: "https://pbs.twimg.com/media/inline-badge.svg" },
+      { type: "image", url: "https://pbs.twimg.com/media/real-photo.jpg?format=jpg&name=orig" },
+      { type: "video", url: videoUrl }
+    ]
+  };
+
+  assert.deepEqual(Array.from(collectMediaAttachmentUrls(tweet)), [
+    "https://pbs.twimg.com/media/real-photo.jpg?format=jpg&name=orig",
+    videoUrl
+  ]);
+});
+
 test("buildDiscordPayloads uploads image-only media when attach mode is enabled", () => {
   const photoTweet = {
     ...sampleTweet,
