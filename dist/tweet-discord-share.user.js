@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweet Discord Share
 // @namespace    https://github.com/itsreverence/tweet-share
-// @version      0.6.22
+// @version      0.6.23
 // @description  Share X/Twitter posts to Discord channels via webhooks (no server required).
 // @homepageURL  https://github.com/itsreverence/tweet-share
 // @supportURL   https://github.com/itsreverence/tweet-share/issues
@@ -20,8 +20,6 @@
 // @grant        GM_xmlhttpRequest
 // @connect      discord.com
 // @connect      cdn.syndication.twimg.com
-// @connect      pbs.twimg.com
-// @connect      video.twimg.com
 // @license      MIT
 // ==/UserScript==
 
@@ -226,33 +224,6 @@ function request(method, url, body) {
       url,
       headers: { "content-type": "application/json" },
       data: body ? JSON.stringify(body) : undefined,
-      onload(response) {
-        try {
-          resolve(parseDiscordResponse(response));
-        } catch (error) {
-          reject(error);
-        }
-      },
-      onerror() {
-        reject(new Error("Could not reach Discord. Check your network and webhook URL."));
-      }
-    });
-  });
-}
-
-function requestMultipart(url, payloadJson, files = []) {
-  return new Promise((resolve, reject) => {
-    const formData = new FormData();
-    formData.append("payload_json", JSON.stringify(payloadJson || {}));
-    files.forEach((file, index) => {
-      const blob = file.blob || new Blob([file.bytes], { type: file.contentType || "application/octet-stream" });
-      formData.append(file.name || `files[${index}]`, blob, file.filename || `media_${index}`);
-    });
-
-    xhrClient()({
-      method: "POST",
-      url,
-      data: formData,
       onload(response) {
         try {
           resolve(parseDiscordResponse(response));
@@ -713,30 +684,6 @@ function mediaLinks(tweet, shareOptions = {}) {
   return uniqueMediaLinks([...videos, ...images]);
 }
 
-function collectMediaAttachmentUrls(tweet, shareOptions = {}) {
-  const { includeQuote = true } = shareOptions;
-  const posts = [tweet];
-  if (includeQuote && hasQuoteTweet(tweet)) posts.push(tweet.quote);
-
-  const hasPlayableVideo = posts.some((post) => directPlayableVideoUrls(post).length > 0);
-  const attachImages = shareOptions.attachMedia === true || hasPlayableVideo;
-  const urls = [];
-
-  function appendPostMedia(post) {
-    for (const item of post.media || []) {
-      if (item.type === "video") {
-        const url = normalizeTweetVideoUrl(item.url);
-        if (isPlayableTweetVideoUrl(url)) urls.push(url);
-      } else if (attachImages && item.type === "image" && isTweetImageMediaUrl(item.url) && !isTweetVideoThumbnailUrl(item.url)) {
-        urls.push(item.url);
-      }
-    }
-  }
-
-  posts.forEach(appendPostMedia);
-  return unique(urls);
-}
-
 function isHttpsUrl(url) {
   return /^https:\/\//i.test(String(url || ""));
 }
@@ -963,17 +910,15 @@ function appendMediaHintToLastContentEmbed(embeds, imageSupplementCount, videosB
   return embeds;
 }
 
-function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind, shareOptions = {}) {
+function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind) {
   const color = kind === "quote" ? EMBED_COLOR_QUOTE : EMBED_COLOR_MAIN;
   const permalink = tweet.url || "";
-  const attachmentUrls = shareOptions.attachmentUrls || [];
 
   return mediaItems
     .filter((item) =>
       item.kind === "image"
       && item.url
       && item.url !== heroUrl
-      && !attachmentUrls.includes(item.url)
       && isValidEmbedImageUrl(item.url)
     )
     .map((item) =>
@@ -987,7 +932,7 @@ function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind, shareOptio
 }
 
 function assembleTweetEmbedGroup(tweet, kind, shareOptions, contentEmbeds, media, heroImageUrl) {
-  const supplements = buildImageSupplementEmbeds(tweet, media, heroImageUrl, kind, shareOptions);
+  const supplements = buildImageSupplementEmbeds(tweet, media, heroImageUrl, kind);
   const withHints = appendMediaHintToLastContentEmbed(
     contentEmbeds,
     supplements.length,
@@ -1003,14 +948,10 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
   const inlineQuote = kind === "main" && shareOptions.quoteLayout === "inline" ? shareOptions.rootTweet?.quote : null;
   const inlineQuoteMedia = inlineQuote ? mediaLinks(inlineQuote, shareOptions).filter((item) => item.kind === "image") : [];
   const media = [...mediaLinks(tweet, shareOptions), ...inlineQuoteMedia];
-  const attachmentUrls = shareOptions.attachmentUrls || [];
-  const candidateHeroUrl = pickEmbedHeroUrl(tweet, media) || (inlineQuote ? pickEmbedHeroUrl(inlineQuote, inlineQuoteMedia) : "");
-  const heroImageUrl = shareOptions.attachMedia === true && attachmentUrls.length > 0 ? "" : candidateHeroUrl;
-  const mediaFields = shareOptions.attachMedia === true
-    ? []
-    : buildMediaFields(media.filter((item) => item.kind === "video"), {
-      videosBelow: shareOptions.videosBelow === true
-    });
+  const heroImageUrl = pickEmbedHeroUrl(tweet, media) || (inlineQuote ? pickEmbedHeroUrl(inlineQuote, inlineQuoteMedia) : "");
+  const mediaFields = buildMediaFields(media.filter((item) => item.kind === "video"), {
+    videosBelow: shareOptions.videosBelow === true
+  });
   const inlineQuoteFields = kind === "main" ? (shareOptions.inlineQuoteFields || []) : [];
   const permalinkFields = kind === "quote" ? [permalinkField("Quoted post", permalink)].filter(Boolean) : [];
   const footer = embedFooterForTweet(tweet, kind);
@@ -1152,17 +1093,13 @@ function buildVideoFollowUpContent(entries, context = {}) {
 function buildEmbedDiscordPayloads(tweet, options = {}) {
   const { includeQuote = true } = options;
   const videoEntries = collectShareVideoEntries(tweet, options);
-  const attachMedia = options.attachMedia === true;
-  const attachmentUrls = options.attachmentUrls || (attachMedia ? collectMediaAttachmentUrls(tweet, { ...options, attachMedia: true }) : []);
   const quoteLayout = resolveQuoteLayout(tweet, options);
   const shareOptions = {
     ...options,
-    attachmentUrls,
-    attachMedia,
     quoteLayout,
     inlineQuoteFields: quoteLayout === "inline" ? buildInlineQuoteFields(tweet) : [],
     rootTweet: tweet,
-    videosBelow: !attachMedia && videoEntries.length > 0
+    videosBelow: videoEntries.length > 0
   };
   const embeds = [...buildTweetEmbedGroup(tweet, "main", shareOptions)];
 
@@ -1181,7 +1118,7 @@ function buildEmbedDiscordPayloads(tweet, options = {}) {
     })
   );
 
-  const videoContent = attachMedia ? undefined : buildVideoFollowUpContent(videoEntries, { imageSupplementCount });
+  const videoContent = buildVideoFollowUpContent(videoEntries, { imageSupplementCount });
   if (videoContent) {
     // Discord unfurls MP4 links in content, but not when custom embeds are on the same message.
     messages.push(
@@ -1514,10 +1451,33 @@ function extractAuthor(article) {
   };
 }
 
+function normalizeTweetBodyText(value) {
+  return String(value || "")
+    // X often splits "https://" into its own span; innerText inserts a newline.
+    .replace(/(https?:\/\/)\s*\n\s*/gi, "$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function readTweetTextNode(node) {
+  if (typeof node.cloneNode === "function") {
+    const clone = node.cloneNode(true);
+    for (const anchor of clone.querySelectorAll("a")) {
+      const compact = String(anchor.textContent || "").replace(/\s+/g, "");
+      if (/^https?:\/\//i.test(compact) || /^[\w.-]+\.[a-z]{2,}\//i.test(compact)) {
+        anchor.replaceWith(compact);
+      }
+    }
+    return normalizeTweetBodyText(clone.innerText || clone.textContent || "");
+  }
+
+  return normalizeTweetBodyText(node.innerText || node.textContent || "");
+}
+
 function extractText(article, excludedNodes = []) {
   return [...article.querySelectorAll('[data-testid="tweetText"]')]
     .filter((node) => !isInsideExcludedNode(node, excludedNodes))
-    .map((node) => node.innerText.trim())
+    .map(readTweetTextNode)
     .filter(Boolean)
     .join("\n\n");
 }
@@ -1642,61 +1602,35 @@ function sanitizeWebhookPayload(payload) {
   return discordPayload;
 }
 
+function buildWebhookTestPayload() {
+  return {
+    username: webhookSenderName(),
+    avatar_url: webhookSenderAvatarUrl(),
+    content: "Tweet Share connected — this channel is ready to receive shares."
+  };
+}
+
+async function sendWebhookTest(webhookUrl) {
+  const url = String(webhookUrl || "").trim();
+  if (!isValidWebhookUrl(url)) {
+    throw new Error("Enter a valid Discord webhook URL.");
+  }
+  await request("POST", url, buildWebhookTestPayload());
+}
+
 async function shareToDestination(destinationId, tweet, options = {}) {
   const destination = await getDestinationById(destinationId);
   if (!destination?.webhookUrl) {
     throw new Error("That destination is missing a webhook URL.");
   }
 
-  const preferences = options.preferences || DEFAULT_PREFERENCES;
-  const attachMedia = preferences.attachMedia === true || options.attachMedia === true;
-  let payloads;
-  let attachments = [];
-  let skippedSummary = "";
-
-  if (attachMedia) {
-    const resolved = await resolveAttachmentsForTweet(tweet, { ...options, attachMedia: true });
-    attachments = resolved.attachments;
-    if (attachments.length > 0) {
-      skippedSummary = summarizeSkippedMedia(resolved.skipped);
-      payloads = buildDiscordPayloads(tweet, {
-        ...options,
-        attachMedia: true,
-        attachmentUrls: resolved.urls
-      });
-    } else {
-      payloads = buildDiscordPayloads(tweet, { ...options, attachMedia: false });
-      if (resolved.skipped.length > 0) {
-        showToast("Media upload failed; sent links instead.", "info");
-      }
-    }
-  } else {
-    payloads = buildDiscordPayloads(tweet, options);
-  }
+  const payloads = buildDiscordPayloads(tweet, options);
 
   for (let index = 0; index < payloads.length; index += 1) {
-    const payload = sanitizeWebhookPayload(payloads[index]);
-    if (index === 0 && attachments.length > 0) {
-      await requestMultipart(
-        destination.webhookUrl,
-        payload,
-        attachments.map((attachment, fileIndex) => ({
-          name: `files[${fileIndex}]`,
-          filename: attachment.filename,
-          bytes: attachment.bytes,
-          contentType: attachment.contentType
-        }))
-      );
-    } else {
-      await request("POST", destination.webhookUrl, payload);
-    }
+    await request("POST", destination.webhookUrl, sanitizeWebhookPayload(payloads[index]));
     if (index < payloads.length - 1) {
       await delay(WEBHOOK_SEND_DELAY_MS);
     }
-  }
-
-  if (attachMedia && attachments.length > 0 && skippedSummary) {
-    showToast(`Uploaded ${attachments.length} file${attachments.length === 1 ? "" : "s"}; ${skippedSummary}.`, "info");
   }
 }
 
@@ -1948,19 +1882,13 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
   function shareOptions() {
     return {
       includeQuote: showQuoteOption ? includeQuote : true,
-      preferences,
-      attachMedia: preferences.attachMedia !== false
+      preferences
     };
   }
 
   function refreshPreview() {
     if (!preparedTweet) return;
-    const options = shareOptions();
-    previewBody.replaceChildren(renderDiscordPreview(buildDiscordPayloads(preparedTweet, options), {
-      attachmentCount: options.attachMedia
-        ? Math.min(collectMediaAttachmentUrls(preparedTweet, options).length, ATTACHMENT_MAX_COUNT)
-        : 0
-    }));
+    previewBody.replaceChildren(renderDiscordPreview(buildDiscordPayloads(preparedTweet, shareOptions())));
     positionPopover(menu, anchor);
   }
 
@@ -1974,12 +1902,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     try {
       preparedTweet = await prepareShareTweet(article);
       if (generation !== loadGeneration) return;
-      const options = shareOptions();
-      previewBody.replaceChildren(renderDiscordPreview(buildDiscordPayloads(preparedTweet, options), {
-        attachmentCount: options.attachMedia
-          ? Math.min(collectMediaAttachmentUrls(preparedTweet, options).length, ATTACHMENT_MAX_COUNT)
-          : 0
-      }));
+      previewBody.replaceChildren(renderDiscordPreview(buildDiscordPayloads(preparedTweet, shareOptions())));
       setDestinationItemsDisabled(destinationItems, false);
       positionPopover(menu, anchor);
     } catch (error) {
@@ -2135,8 +2058,7 @@ async function startDiscordShare(article, anchor) {
     closeXOverlay();
     await runShare(article, destinations[0].id, {
       includeQuote: true,
-      preferences,
-      attachMedia: preferences.attachMedia !== false
+      preferences
     }, null);
     return;
   }
@@ -2461,15 +2383,13 @@ function createDestinationId(label, existingIds) {
 const PREFERENCES_STORAGE_KEY = "tds-preferences";
 
 const DEFAULT_PREFERENCES = {
-  alwaysShowPreview: true,
-  attachMedia: true
+  alwaysShowPreview: true
 };
 
 function sanitizePreferences(value) {
   const input = value && typeof value === "object" ? value : {};
   return {
-    alwaysShowPreview: input.alwaysShowPreview !== false,
-    attachMedia: input.attachMedia !== false
+    alwaysShowPreview: input.alwaysShowPreview !== false
   };
 }
 
@@ -2588,6 +2508,32 @@ function injectSettingsStyles() {
       padding: 12px;
       width: 100%;
     }
+    .${SETTINGS_CLASS}__secret {
+      align-items: stretch;
+      display: flex;
+      gap: 8px;
+    }
+    .${SETTINGS_CLASS}__secret input {
+      flex: 1;
+      min-width: 0;
+    }
+    .${SETTINGS_CLASS}__reveal {
+      background: transparent;
+      border: 1px solid rgb(var(--tds-border, 47 51 54));
+      border-radius: var(--border-radius-medium, 8px);
+      color: inherit;
+      cursor: pointer;
+      flex-shrink: 0;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      min-height: 44px;
+      padding: 0 12px;
+    }
+    .${SETTINGS_CLASS}__reveal:hover {
+      background: rgb(var(--tds-blue, 29 155 240) / 0.1);
+      border-color: rgb(var(--tds-blue, 29 155 240));
+    }
     .${SETTINGS_CLASS}__remove {
       background: transparent;
       border: 0;
@@ -2622,7 +2568,34 @@ function injectSettingsStyles() {
     }
     .${SETTINGS_CLASS}__empty {
       font-size: 15px;
-      padding: 8px 0;
+      line-height: 1.45;
+      padding: 4px 0 0;
+    }
+    .${SETTINGS_CLASS}__empty-title {
+      color: rgb(var(--tds-text, 231 233 234));
+      font-weight: 700;
+      margin: 0 0 8px;
+    }
+    .${SETTINGS_CLASS}__empty-steps {
+      margin: 0;
+      padding-left: 1.25em;
+    }
+    .${SETTINGS_CLASS}__empty-steps li {
+      margin: 0 0 6px;
+    }
+    .${SETTINGS_CLASS}__empty-steps li:last-child {
+      margin-bottom: 0;
+    }
+    .${SETTINGS_CLASS}__card-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-start;
+      margin-top: 4px;
+    }
+    .${SETTINGS_CLASS}__btn:disabled {
+      cursor: wait;
+      opacity: 0.55;
     }
     .${SETTINGS_CLASS}__section-title {
       font-size: 17px;
@@ -2700,6 +2673,88 @@ function createSettingsField(labelText, input) {
   return fieldEl;
 }
 
+function createWebhookUrlField(input) {
+  input.type = "password";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.setAttribute("autocapitalize", "off");
+
+  const row = document.createElement("div");
+  row.className = `${SETTINGS_CLASS}__secret`;
+
+  const revealBtn = document.createElement("button");
+  revealBtn.type = "button";
+  revealBtn.className = `${SETTINGS_CLASS}__reveal`;
+  revealBtn.textContent = "Show";
+  revealBtn.setAttribute("aria-label", "Show webhook URL");
+  revealBtn.setAttribute("aria-pressed", "false");
+  revealBtn.addEventListener("click", () => {
+    const showing = input.type !== "password";
+    if (showing) {
+      input.type = "password";
+      revealBtn.textContent = "Show";
+      revealBtn.setAttribute("aria-label", "Show webhook URL");
+      revealBtn.setAttribute("aria-pressed", "false");
+    } else {
+      input.type = "text";
+      revealBtn.textContent = "Hide";
+      revealBtn.setAttribute("aria-label", "Hide webhook URL");
+      revealBtn.setAttribute("aria-pressed", "true");
+    }
+  });
+
+  row.append(input, revealBtn);
+  return createSettingsField("Webhook URL", row);
+}
+
+function createSettingsEmptyState() {
+  const emptyEl = document.createElement("div");
+  emptyEl.className = `${SETTINGS_CLASS}__empty`;
+
+  const title = document.createElement("p");
+  title.className = `${SETTINGS_CLASS}__empty-title`;
+  title.textContent = "No channels yet";
+
+  const steps = document.createElement("ol");
+  steps.className = `${SETTINGS_CLASS}__empty-steps`;
+  for (const text of [
+    "In Discord: Edit Channel → Integrations → Webhooks → New Webhook.",
+    "Copy the webhook URL.",
+    "Add a display name and paste the URL below, then Test webhook.",
+    "Save — then use Share → Share to Discord on X."
+  ]) {
+    const item = document.createElement("li");
+    item.textContent = text;
+    steps.append(item);
+  }
+
+  emptyEl.append(title, steps);
+  return emptyEl;
+}
+
+function createTestWebhookButton(getWebhookUrl) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `${SETTINGS_CLASS}__btn ${SETTINGS_CLASS}__btn--ghost`;
+  button.textContent = "Test webhook";
+  button.addEventListener("click", async () => {
+    if (button.disabled) return;
+    button.disabled = true;
+    const previousLabel = button.textContent;
+    button.textContent = "Testing…";
+    try {
+      await sendWebhookTest(getWebhookUrl());
+      showToast("Test message sent. Check that Discord channel.", "success");
+    } catch (error) {
+      showToast(error.message || "Webhook test failed.", "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = previousLabel;
+    }
+  });
+  return button;
+}
+
   // --- 11-settings.js ---
 async function openSettingsModal() {
   closeDestinationMenu();
@@ -2737,15 +2792,6 @@ async function openSettingsModal() {
   sharingTitle.className = `${SETTINGS_CLASS}__section-title`;
   sharingTitle.textContent = "Sharing";
 
-  const attachMediaOption = createSettingsOption(
-    "Upload media to Discord",
-    "Best playback. Files over 8 MB are sent as links instead.",
-    preferences.attachMedia
-  );
-  attachMediaOption.input.addEventListener("change", () => {
-    preferences.attachMedia = attachMediaOption.input.checked;
-  });
-
   const previewOption = createSettingsOption(
     "Always show preview before sending",
     "Turn off to send instantly when you have one channel and the post has no quote.",
@@ -2757,11 +2803,7 @@ async function openSettingsModal() {
 
   const sharingCard = document.createElement("div");
   sharingCard.className = `${SETTINGS_CLASS}__card`;
-  sharingCard.append(
-    sharingTitle,
-    attachMediaOption.option,
-    previewOption.option
-  );
+  sharingCard.append(sharingTitle, previewOption.option);
   body.append(sharingCard);
 
   const channelsTitle = document.createElement("h3");
@@ -2770,7 +2812,7 @@ async function openSettingsModal() {
 
   const hint = document.createElement("p");
   hint.className = `${SETTINGS_CLASS}__hint`;
-  hint.textContent = "Create webhooks in Discord: Channel settings → Integrations → Webhooks. Channels and preferences are saved in Violentmonkey (or Tampermonkey) and persist across script updates — do not put webhook URLs in the script source.";
+  hint.textContent = "Channels and preferences are saved in Violentmonkey (or Tampermonkey) and persist across script updates — do not put webhook URLs in the script source. Treat webhook URLs like passwords.";
   body.append(channelsTitle, hint);
 
   const listEl = document.createElement("div");
@@ -2780,10 +2822,7 @@ async function openSettingsModal() {
   function renderList() {
     listEl.replaceChildren();
     if (destinations.length === 0) {
-      const emptyEl = document.createElement("div");
-      emptyEl.className = `${SETTINGS_CLASS}__empty`;
-      emptyEl.textContent = "No channels yet. Add one below.";
-      listEl.append(emptyEl);
+      listEl.append(createSettingsEmptyState());
       return;
     }
 
@@ -2821,14 +2860,22 @@ async function openSettingsModal() {
       });
 
       const urlInput = document.createElement("input");
-      urlInput.type = "url";
       urlInput.placeholder = "https://discord.com/api/webhooks/...";
       urlInput.value = destination.webhookUrl;
       urlInput.addEventListener("input", () => {
         destinations[index].webhookUrl = urlInput.value.trim();
       });
 
-      card.append(head, createSettingsField("Display name", labelInput), createSettingsField("Webhook URL", urlInput));
+      const actions = document.createElement("div");
+      actions.className = `${SETTINGS_CLASS}__card-actions`;
+      actions.append(createTestWebhookButton(() => destinations[index]?.webhookUrl || urlInput.value));
+
+      card.append(
+        head,
+        createSettingsField("Display name", labelInput),
+        createWebhookUrlField(urlInput),
+        actions
+      );
       listEl.append(card);
     });
   }
@@ -2844,7 +2891,6 @@ async function openSettingsModal() {
   newLabelInput.placeholder = "Friends server";
 
   const newUrlInput = document.createElement("input");
-  newUrlInput.type = "url";
   newUrlInput.placeholder = "https://discord.com/api/webhooks/...";
 
   const addBtn = document.createElement("button");
@@ -2873,11 +2919,15 @@ async function openSettingsModal() {
     renderList();
   });
 
+  const addActions = document.createElement("div");
+  addActions.className = `${SETTINGS_CLASS}__card-actions`;
+  addActions.append(addBtn, createTestWebhookButton(() => newUrlInput.value));
+
   addSection.append(
     addTitleEl,
     createSettingsField("Display name", newLabelInput),
-    createSettingsField("Webhook URL", newUrlInput),
-    addBtn
+    createWebhookUrlField(newUrlInput),
+    addActions
   );
   body.append(addSection);
 
@@ -3159,7 +3209,7 @@ function createPreviewMessage(payload, index, total) {
   return message;
 }
 
-function renderDiscordPreview(payloads, options = {}) {
+function renderDiscordPreview(payloads) {
   const host = document.createElement("div");
   host.className = PREVIEW_CLASS;
   const list = Array.isArray(payloads) ? payloads : [];
@@ -3175,13 +3225,6 @@ function renderDiscordPreview(payloads, options = {}) {
   list.forEach((payload, index) => {
     host.append(createPreviewMessage(payload, index, list.length));
   });
-
-  if (options.attachmentCount > 0) {
-    const hint = document.createElement("div");
-    hint.className = `${PREVIEW_CLASS}__attachment-hint`;
-    hint.textContent = `Media will upload as ${options.attachmentCount} attachment${options.attachmentCount === 1 ? "" : "s"}.`;
-    host.append(hint);
-  }
 
   return host;
 }
@@ -3333,11 +3376,6 @@ function previewStylesCss() {
       color: rgb(var(--tds-subtle, 113 118 123));
       font-size: 12px;
     }
-    .${PREVIEW_CLASS}__attachment-hint {
-      color: rgb(var(--tds-subtle, 113 118 123));
-      font-size: 12px;
-      line-height: 1.35;
-    }
     .${PREVIEW_CLASS}__link {
       color: rgb(var(--tds-blue, 29 155 240));
       text-decoration: none;
@@ -3347,120 +3385,5 @@ function previewStylesCss() {
       text-decoration: underline;
     }
   `;
-}
-
-  // --- 13-media-fetch.js ---
-const ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
-const ATTACHMENT_MAX_COUNT = 10;
-
-function mediaUrlExtension(url, fallback = "bin") {
-  const match = String(url || "").split("?")[0].match(/\.([a-z0-9]+)(?::[a-z]+)?$/i);
-  return (match?.[1] || fallback).toLowerCase().replace("jpeg", "jpg");
-}
-
-function mediaContentType(media, url = media?.url || "") {
-  if (media?.type === "video" || /\.mp4(?:\?|$)/i.test(url)) return "video/mp4";
-  const extension = mediaUrlExtension(url, "jpg");
-  if (extension === "png") return "image/png";
-  if (extension === "webp") return "image/webp";
-  if (extension === "gif") return "image/gif";
-  return "image/jpeg";
-}
-
-function attachmentFilename(media, index) {
-  const extension = media?.type === "video" ? "mp4" : mediaUrlExtension(media?.url, "jpg");
-  return `media_${index}.${extension}`;
-}
-
-function fetchMediaBytes(url) {
-  return new Promise((resolve, reject) => {
-    xhrClient()({
-      method: "GET",
-      url,
-      responseType: "arraybuffer",
-      onload(response) {
-        if (response.status >= 200 && response.status < 300 && response.response) {
-          resolve(response.response);
-          return;
-        }
-        reject(new Error(`Media fetch returned ${response.status}`));
-      },
-      onerror() {
-        reject(new Error("Could not fetch media for upload."));
-      }
-    });
-  });
-}
-
-function attachmentBytesLength(bytes) {
-  return bytes?.byteLength ?? bytes?.size ?? bytes?.length ?? 0;
-}
-
-function summarizeSkippedMedia(skipped = []) {
-  if (!skipped.length) return "";
-  const byReason = { fetch: 0, size: 0, count: 0 };
-  for (const item of skipped) {
-    byReason[item.reason] = (byReason[item.reason] || 0) + 1;
-  }
-
-  const parts = [];
-  if (byReason.size) parts.push(`${byReason.size} too large`);
-  if (byReason.fetch) parts.push(`${byReason.fetch} failed to download`);
-  if (byReason.count) parts.push(`${byReason.count} over limit`);
-  return parts.join(", ");
-}
-
-function collectMediaAttachmentItems(tweet, shareOptions = {}) {
-  const urls = collectMediaAttachmentUrls(tweet, shareOptions);
-  const mediaByUrl = new Map();
-
-  function addMedia(post) {
-    for (const item of videoMedia(post)) {
-      if (item.url) mediaByUrl.set(item.url, item);
-    }
-    for (const item of imageMedia(post)) {
-      if (item.url) mediaByUrl.set(item.url, item);
-    }
-  }
-
-  addMedia(tweet);
-  if (shareOptions.includeQuote !== false && hasQuoteTweet(tweet)) addMedia(tweet.quote);
-
-  return urls.map((url) => mediaByUrl.get(url) || { type: /\.mp4(?:\?|$)/i.test(url) ? "video" : "image", url });
-}
-
-async function resolveAttachmentsForTweet(tweet, shareOptions = {}) {
-  const attachments = [];
-  const skipped = [];
-  const fetcher = shareOptions.fetchMediaBytes || fetchMediaBytes;
-  const candidates = collectMediaAttachmentItems(tweet, shareOptions);
-
-  for (const media of candidates) {
-    if (attachments.length >= ATTACHMENT_MAX_COUNT) {
-      skipped.push({ sourceUrl: media.url, reason: "count" });
-      continue;
-    }
-    if (!media.url) continue;
-
-    try {
-      const bytes = await fetcher(media.url, media);
-      const size = attachmentBytesLength(bytes);
-      if (size > ATTACHMENT_MAX_BYTES) {
-        skipped.push({ sourceUrl: media.url, reason: "size", size });
-        continue;
-      }
-      const index = attachments.length;
-      attachments.push({
-        filename: attachmentFilename(media, index),
-        bytes,
-        contentType: mediaContentType(media, media.url),
-        sourceUrl: media.url
-      });
-    } catch (error) {
-      skipped.push({ sourceUrl: media.url, reason: "fetch", error });
-    }
-  }
-
-  return { attachments, skipped, urls: attachments.map((item) => item.sourceUrl) };
 }
 })();

@@ -10,24 +10,22 @@ This is an unofficial personal sharing helper. It is not affiliated with, endors
 2. Open the latest userscript release asset:
    [`tweet-discord-share.user.js`](https://github.com/itsreverence/tweet-share/releases/latest/download/tweet-discord-share.user.js)
 3. Your userscript manager should open an install/update screen. Review the script, then install it.
-4. On X, open **Share** on a post → **Share to Discord**.
 
 If the direct install link does not open your userscript manager, download the same `.user.js` file from the [latest release](https://github.com/itsreverence/tweet-share/releases/latest), then paste it into a new userscript manually.
 
-## Discord channels
+## First share
 
-1. Tampermonkey/Violentmonkey menu → **Tweet Discord Share** → **Discord channels…**, or
-   **Share** → **Manage channels…** on a post.
-2. Add a name and webhook URL, then **Save**.
+1. In Discord: **Edit Channel** → **Integrations** → **Webhooks** → **New Webhook** → copy the URL.
+2. On X, open the userscript manager menu → **Tweet Share settings…** (or **Share** on a post → **Share to Discord**, which opens settings when no channels exist yet).
+3. Add a display name, paste the webhook URL, click **Test webhook**, then **Save**.
+4. On a post: **Share** → **Share to Discord** → pick your channel.
 
-Create a webhook in Discord: **Edit Channel** → **Integrations** → **Webhooks** → **New Webhook** → copy the URL.
-
-Channels live in userscript-manager storage on your machine, not in this repo. **Treat webhook URLs like passwords** — anyone with the URL can post to that Discord channel.
+Channels live in userscript-manager storage on your machine, not in this repo. **Treat webhook URLs like passwords** — anyone with the URL can post to that Discord channel. Settings masks webhook URLs by default (Show / Hide).
 
 ## What it does
 
 - Adds **Share to Discord** to X’s native **Share** menu
-- Sends post text, permalink, timestamps, images, and video links/attachments where available
+- Sends post text, permalink, timestamps, images, and video links where available
 - Supports quoted posts and lets you choose whether to include the quote when sharing
 - Scrapes what’s visible on the page; private/protected posts only work while you can see them
 

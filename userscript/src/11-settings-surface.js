@@ -101,6 +101,32 @@ function injectSettingsStyles() {
       padding: 12px;
       width: 100%;
     }
+    .${SETTINGS_CLASS}__secret {
+      align-items: stretch;
+      display: flex;
+      gap: 8px;
+    }
+    .${SETTINGS_CLASS}__secret input {
+      flex: 1;
+      min-width: 0;
+    }
+    .${SETTINGS_CLASS}__reveal {
+      background: transparent;
+      border: 1px solid rgb(var(--tds-border, 47 51 54));
+      border-radius: var(--border-radius-medium, 8px);
+      color: inherit;
+      cursor: pointer;
+      flex-shrink: 0;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      min-height: 44px;
+      padding: 0 12px;
+    }
+    .${SETTINGS_CLASS}__reveal:hover {
+      background: rgb(var(--tds-blue, 29 155 240) / 0.1);
+      border-color: rgb(var(--tds-blue, 29 155 240));
+    }
     .${SETTINGS_CLASS}__remove {
       background: transparent;
       border: 0;
@@ -135,7 +161,34 @@ function injectSettingsStyles() {
     }
     .${SETTINGS_CLASS}__empty {
       font-size: 15px;
-      padding: 8px 0;
+      line-height: 1.45;
+      padding: 4px 0 0;
+    }
+    .${SETTINGS_CLASS}__empty-title {
+      color: rgb(var(--tds-text, 231 233 234));
+      font-weight: 700;
+      margin: 0 0 8px;
+    }
+    .${SETTINGS_CLASS}__empty-steps {
+      margin: 0;
+      padding-left: 1.25em;
+    }
+    .${SETTINGS_CLASS}__empty-steps li {
+      margin: 0 0 6px;
+    }
+    .${SETTINGS_CLASS}__empty-steps li:last-child {
+      margin-bottom: 0;
+    }
+    .${SETTINGS_CLASS}__card-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-start;
+      margin-top: 4px;
+    }
+    .${SETTINGS_CLASS}__btn:disabled {
+      cursor: wait;
+      opacity: 0.55;
     }
     .${SETTINGS_CLASS}__section-title {
       font-size: 17px;
@@ -211,4 +264,86 @@ function createSettingsField(labelText, input) {
   label.textContent = labelText;
   fieldEl.append(label, input);
   return fieldEl;
+}
+
+function createWebhookUrlField(input) {
+  input.type = "password";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.setAttribute("autocapitalize", "off");
+
+  const row = document.createElement("div");
+  row.className = `${SETTINGS_CLASS}__secret`;
+
+  const revealBtn = document.createElement("button");
+  revealBtn.type = "button";
+  revealBtn.className = `${SETTINGS_CLASS}__reveal`;
+  revealBtn.textContent = "Show";
+  revealBtn.setAttribute("aria-label", "Show webhook URL");
+  revealBtn.setAttribute("aria-pressed", "false");
+  revealBtn.addEventListener("click", () => {
+    const showing = input.type !== "password";
+    if (showing) {
+      input.type = "password";
+      revealBtn.textContent = "Show";
+      revealBtn.setAttribute("aria-label", "Show webhook URL");
+      revealBtn.setAttribute("aria-pressed", "false");
+    } else {
+      input.type = "text";
+      revealBtn.textContent = "Hide";
+      revealBtn.setAttribute("aria-label", "Hide webhook URL");
+      revealBtn.setAttribute("aria-pressed", "true");
+    }
+  });
+
+  row.append(input, revealBtn);
+  return createSettingsField("Webhook URL", row);
+}
+
+function createSettingsEmptyState() {
+  const emptyEl = document.createElement("div");
+  emptyEl.className = `${SETTINGS_CLASS}__empty`;
+
+  const title = document.createElement("p");
+  title.className = `${SETTINGS_CLASS}__empty-title`;
+  title.textContent = "No channels yet";
+
+  const steps = document.createElement("ol");
+  steps.className = `${SETTINGS_CLASS}__empty-steps`;
+  for (const text of [
+    "In Discord: Edit Channel → Integrations → Webhooks → New Webhook.",
+    "Copy the webhook URL.",
+    "Add a display name and paste the URL below, then Test webhook.",
+    "Save — then use Share → Share to Discord on X."
+  ]) {
+    const item = document.createElement("li");
+    item.textContent = text;
+    steps.append(item);
+  }
+
+  emptyEl.append(title, steps);
+  return emptyEl;
+}
+
+function createTestWebhookButton(getWebhookUrl) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `${SETTINGS_CLASS}__btn ${SETTINGS_CLASS}__btn--ghost`;
+  button.textContent = "Test webhook";
+  button.addEventListener("click", async () => {
+    if (button.disabled) return;
+    button.disabled = true;
+    const previousLabel = button.textContent;
+    button.textContent = "Testing…";
+    try {
+      await sendWebhookTest(getWebhookUrl());
+      showToast("Test message sent. Check that Discord channel.", "success");
+    } catch (error) {
+      showToast(error.message || "Webhook test failed.", "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = previousLabel;
+    }
+  });
+  return button;
 }

@@ -15,14 +15,13 @@ function loadDeliverContext() {
     "02-utils.js",
     "04-video.js",
     "05-format-discord.js",
-    "13-media-fetch.js",
     "10-destinations.js",
     "10-preferences.js",
     "08-deliver.js"
   ];
   const code = files.map((name) => readFileSync(path.join(srcDir, name), "utf8")).join("\n");
   const storage = new Map();
-  const calls = { requests: [], multipart: [], toasts: [], delays: 0 };
+  const calls = { requests: [], toasts: [], delays: 0 };
 
   const context = createContext({
     console,
@@ -56,18 +55,12 @@ request = async (method, url, body) => {
   __calls.requests.push({ method, url, body, kind: "json" });
   return {};
 };
-requestMultipart = async (url, payload, files) => {
-  __calls.multipart.push({
-    url,
-    payload,
-    files: files.map((file) => ({ filename: file.filename, contentType: file.contentType }))
-  });
-  return {};
-};
-const __calls = { requests: [], multipart: [], toasts: [], delays: 0 };
+const __calls = { requests: [], toasts: [], delays: 0 };
 this.exports = {
   shareToDestination,
   sanitizeWebhookPayload,
+  buildWebhookTestPayload,
+  sendWebhookTest,
   saveAllDestinations,
   __calls
 };`,
@@ -85,21 +78,40 @@ const sampleTweet = {
   media: [{ type: "image", url: "https://pbs.twimg.com/media/photo.jpg" }]
 };
 
-const videoTweet = {
-  url: "https://x.com/alice/status/2",
-  author: { displayName: "Alice", username: "alice" },
-  text: "Clip",
-  media: [
-    { type: "video", url: "https://video.twimg.com/ext_tw_video/1/pu/vid/1280x720/main.mp4" },
-    { type: "image", url: "https://pbs.twimg.com/media/one.jpg" }
-  ]
-};
-
 test("sanitizeWebhookPayload removes internal message labels", () => {
   const { sanitizeWebhookPayload } = loadDeliverContext();
   const cleaned = sanitizeWebhookPayload({ content: "hi", _messageLabel: "Videos" });
   assert.equal(cleaned.content, "hi");
   assert.equal(Object.hasOwn(cleaned, "_messageLabel"), false);
+});
+
+test("buildWebhookTestPayload uses Tweet Share branding", () => {
+  const { buildWebhookTestPayload } = loadDeliverContext();
+  const payload = buildWebhookTestPayload();
+
+  assert.equal(payload.username, "Tweet Share");
+  assert.match(payload.avatar_url, /webhook-avatar\.png$/);
+  assert.match(payload.content, /connected/i);
+  assert.equal(Object.hasOwn(payload, "embeds"), false);
+});
+
+test("sendWebhookTest rejects invalid webhook URLs", async () => {
+  const { sendWebhookTest, calls } = loadDeliverContext();
+
+  await assert.rejects(() => sendWebhookTest("https://example.com/not-a-webhook"), /valid Discord webhook/i);
+  assert.equal(calls.requests.length, 0);
+});
+
+test("sendWebhookTest posts a connection check to the webhook", async () => {
+  const { sendWebhookTest, calls } = loadDeliverContext();
+
+  await sendWebhookTest(` ${validWebhook} `);
+
+  assert.equal(calls.requests.length, 1);
+  assert.equal(calls.requests[0].method, "POST");
+  assert.equal(calls.requests[0].url, validWebhook);
+  assert.equal(calls.requests[0].body.username, "Tweet Share");
+  assert.match(calls.requests[0].body.content, /connected/i);
 });
 
 test("shareToDestination throws when destination is missing a webhook URL", async () => {
@@ -112,71 +124,18 @@ test("shareToDestination throws when destination is missing a webhook URL", asyn
   );
 });
 
-test("shareToDestination posts JSON payloads for link-only shares", async () => {
+test("shareToDestination posts JSON payloads for link shares", async () => {
   const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
   await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
 
-  await shareToDestination("main", sampleTweet, { attachMedia: false, includeQuote: false });
+  await shareToDestination("main", sampleTweet, { includeQuote: false });
 
   assert.equal(calls.requests.length, 1);
-  assert.equal(calls.multipart.length, 0);
   assert.equal(calls.requests[0].method, "POST");
   assert.equal(calls.requests[0].url, validWebhook);
   assert.match(calls.requests[0].body.content, /alice\/status\/1/);
   assert.ok(Array.isArray(calls.requests[0].body.embeds));
-});
-
-test("shareToDestination uses multipart for the first payload when attachments resolve", async () => {
-  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
-  await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
-
-  await shareToDestination("main", videoTweet, {
-    includeQuote: false,
-    preferences: { alwaysShowPreview: true, attachMedia: true },
-    fetchMediaBytes() {
-      return { byteLength: 128 };
-    }
-  });
-
-  assert.equal(calls.multipart.length, 1);
-  assert.equal(calls.multipart[0].url, validWebhook);
-  assert.ok(calls.multipart[0].files.length >= 1);
-  assert.equal(calls.requests.length, 0);
-});
-
-test("shareToDestination uploads image-only media when enabled by preferences", async () => {
-  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
-  await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
-
-  await shareToDestination("main", sampleTweet, {
-    includeQuote: false,
-    preferences: { alwaysShowPreview: true, attachMedia: true },
-    fetchMediaBytes() {
-      return { byteLength: 128 };
-    }
-  });
-
-  assert.equal(calls.multipart.length, 1);
-  assert.equal(calls.multipart[0].files.length, 1);
-  assert.equal(calls.multipart[0].files[0].contentType, "image/jpeg");
-  assert.equal(calls.requests.length, 0);
-});
-
-test("shareToDestination falls back to links and shows info toast when all attachments fail", async () => {
-  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
-  await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
-
-  await shareToDestination("main", videoTweet, {
-    includeQuote: false,
-    preferences: { alwaysShowPreview: true, attachMedia: true },
-    fetchMediaBytes() {
-      throw new Error("network down");
-    }
-  });
-
-  assert.equal(calls.multipart.length, 0);
-  assert.ok(calls.requests.length >= 1);
-  assert.ok(calls.toasts.some((toast) => /sent links instead/i.test(toast.message)));
+  assert.equal(calls.requests[0].body.embeds[0].image.url, "https://pbs.twimg.com/media/photo.jpg");
 });
 
 test("shareToDestination delays between multi-message shares", async () => {
@@ -193,7 +152,7 @@ test("shareToDestination delays between multi-message shares", async () => {
     ]
   };
 
-  await shareToDestination("main", tweet, { includeQuote: false, attachMedia: false });
+  await shareToDestination("main", tweet, { includeQuote: false });
 
   assert.ok(calls.requests.length >= 2);
   assert.equal(calls.delays, calls.requests.length - 1);

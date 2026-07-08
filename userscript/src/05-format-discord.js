@@ -77,30 +77,6 @@ function mediaLinks(tweet, shareOptions = {}) {
   return uniqueMediaLinks([...videos, ...images]);
 }
 
-function collectMediaAttachmentUrls(tweet, shareOptions = {}) {
-  const { includeQuote = true } = shareOptions;
-  const posts = [tweet];
-  if (includeQuote && hasQuoteTweet(tweet)) posts.push(tweet.quote);
-
-  const hasPlayableVideo = posts.some((post) => directPlayableVideoUrls(post).length > 0);
-  const attachImages = shareOptions.attachMedia === true || hasPlayableVideo;
-  const urls = [];
-
-  function appendPostMedia(post) {
-    for (const item of post.media || []) {
-      if (item.type === "video") {
-        const url = normalizeTweetVideoUrl(item.url);
-        if (isPlayableTweetVideoUrl(url)) urls.push(url);
-      } else if (attachImages && item.type === "image" && isTweetImageMediaUrl(item.url) && !isTweetVideoThumbnailUrl(item.url)) {
-        urls.push(item.url);
-      }
-    }
-  }
-
-  posts.forEach(appendPostMedia);
-  return unique(urls);
-}
-
 function isHttpsUrl(url) {
   return /^https:\/\//i.test(String(url || ""));
 }
@@ -327,17 +303,15 @@ function appendMediaHintToLastContentEmbed(embeds, imageSupplementCount, videosB
   return embeds;
 }
 
-function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind, shareOptions = {}) {
+function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind) {
   const color = kind === "quote" ? EMBED_COLOR_QUOTE : EMBED_COLOR_MAIN;
   const permalink = tweet.url || "";
-  const attachmentUrls = shareOptions.attachmentUrls || [];
 
   return mediaItems
     .filter((item) =>
       item.kind === "image"
       && item.url
       && item.url !== heroUrl
-      && !attachmentUrls.includes(item.url)
       && isValidEmbedImageUrl(item.url)
     )
     .map((item) =>
@@ -351,7 +325,7 @@ function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind, shareOptio
 }
 
 function assembleTweetEmbedGroup(tweet, kind, shareOptions, contentEmbeds, media, heroImageUrl) {
-  const supplements = buildImageSupplementEmbeds(tweet, media, heroImageUrl, kind, shareOptions);
+  const supplements = buildImageSupplementEmbeds(tweet, media, heroImageUrl, kind);
   const withHints = appendMediaHintToLastContentEmbed(
     contentEmbeds,
     supplements.length,
@@ -367,14 +341,10 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
   const inlineQuote = kind === "main" && shareOptions.quoteLayout === "inline" ? shareOptions.rootTweet?.quote : null;
   const inlineQuoteMedia = inlineQuote ? mediaLinks(inlineQuote, shareOptions).filter((item) => item.kind === "image") : [];
   const media = [...mediaLinks(tweet, shareOptions), ...inlineQuoteMedia];
-  const attachmentUrls = shareOptions.attachmentUrls || [];
-  const candidateHeroUrl = pickEmbedHeroUrl(tweet, media) || (inlineQuote ? pickEmbedHeroUrl(inlineQuote, inlineQuoteMedia) : "");
-  const heroImageUrl = shareOptions.attachMedia === true && attachmentUrls.length > 0 ? "" : candidateHeroUrl;
-  const mediaFields = shareOptions.attachMedia === true
-    ? []
-    : buildMediaFields(media.filter((item) => item.kind === "video"), {
-      videosBelow: shareOptions.videosBelow === true
-    });
+  const heroImageUrl = pickEmbedHeroUrl(tweet, media) || (inlineQuote ? pickEmbedHeroUrl(inlineQuote, inlineQuoteMedia) : "");
+  const mediaFields = buildMediaFields(media.filter((item) => item.kind === "video"), {
+    videosBelow: shareOptions.videosBelow === true
+  });
   const inlineQuoteFields = kind === "main" ? (shareOptions.inlineQuoteFields || []) : [];
   const permalinkFields = kind === "quote" ? [permalinkField("Quoted post", permalink)].filter(Boolean) : [];
   const footer = embedFooterForTweet(tweet, kind);
@@ -516,17 +486,13 @@ function buildVideoFollowUpContent(entries, context = {}) {
 function buildEmbedDiscordPayloads(tweet, options = {}) {
   const { includeQuote = true } = options;
   const videoEntries = collectShareVideoEntries(tweet, options);
-  const attachMedia = options.attachMedia === true;
-  const attachmentUrls = options.attachmentUrls || (attachMedia ? collectMediaAttachmentUrls(tweet, { ...options, attachMedia: true }) : []);
   const quoteLayout = resolveQuoteLayout(tweet, options);
   const shareOptions = {
     ...options,
-    attachmentUrls,
-    attachMedia,
     quoteLayout,
     inlineQuoteFields: quoteLayout === "inline" ? buildInlineQuoteFields(tweet) : [],
     rootTweet: tweet,
-    videosBelow: !attachMedia && videoEntries.length > 0
+    videosBelow: videoEntries.length > 0
   };
   const embeds = [...buildTweetEmbedGroup(tweet, "main", shareOptions)];
 
@@ -545,7 +511,7 @@ function buildEmbedDiscordPayloads(tweet, options = {}) {
     })
   );
 
-  const videoContent = attachMedia ? undefined : buildVideoFollowUpContent(videoEntries, { imageSupplementCount });
+  const videoContent = buildVideoFollowUpContent(videoEntries, { imageSupplementCount });
   if (videoContent) {
     // Discord unfurls MP4 links in content, but not when custom embeds are on the same message.
     messages.push(

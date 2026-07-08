@@ -53,6 +53,8 @@ function loadMediaContext() {
     extractMedia,
     extractTweet,
     extractQuote,
+    extractText,
+    normalizeTweetBodyText,
     tweetUrlFromArticle,
     nearestPlayableVideoUrl,
     isPlayableTweetVideoUrl,
@@ -80,6 +82,8 @@ const {
   extractMedia,
   extractTweet,
   extractQuote,
+  extractText,
+  normalizeTweetBodyText,
   tweetUrlFromArticle,
   nearestPlayableVideoUrl,
   isPlayableTweetVideoUrl,
@@ -780,4 +784,46 @@ test("highResolutionTweetImageUrl upgrades media URLs and leaves other URLs alon
     highResolutionTweetImageUrl("https://pbs.twimg.com/ext_tw_video_thumb/123/pu/img/thumb.jpg"),
     "https://pbs.twimg.com/ext_tw_video_thumb/123/pu/img/thumb.jpg"
   );
+});
+
+test("normalizeTweetBodyText rejoins https:// split across newlines", () => {
+  assert.equal(
+    normalizeTweetBodyText("Announcing Grok 4.5\nhttps://\nx.ai/news/grok-4-5"),
+    "Announcing Grok 4.5\nhttps://x.ai/news/grok-4-5"
+  );
+  assert.equal(
+    normalizeTweetBodyText("See https://\nexample.com/path and more"),
+    "See https://example.com/path and more"
+  );
+});
+
+test("extractText keeps expanded URLs on one line when X splits the protocol", () => {
+  const textRoot = {
+    cloneNode() {
+      const clone = {
+        innerText: "Announcing Grok 4.5 https://\nx.ai/news/grok-4-5",
+        textContent: "Announcing Grok 4.5 https://\nx.ai/news/grok-4-5",
+        querySelectorAll(selector) {
+          if (selector !== "a") return [];
+          return [{
+            textContent: "https://\nx.ai/news/grok-4-5",
+            replaceWith(value) {
+              clone.innerText = `Announcing Grok 4.5 ${value}`;
+              clone.textContent = clone.innerText;
+            }
+          }];
+        }
+      };
+      return clone;
+    }
+  };
+
+  const article = fakeNode({
+    querySelectorAll(selector) {
+      if (selector === '[data-testid="tweetText"]') return [textRoot];
+      return [];
+    }
+  });
+
+  assert.equal(extractText(article), "Announcing Grok 4.5 https://x.ai/news/grok-4-5");
 });

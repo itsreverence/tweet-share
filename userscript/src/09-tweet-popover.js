@@ -51,19 +51,13 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
   function shareOptions() {
     return {
       includeQuote: showQuoteOption ? includeQuote : true,
-      preferences,
-      attachMedia: preferences.attachMedia !== false
+      preferences
     };
   }
 
   function refreshPreview() {
     if (!preparedTweet) return;
-    const options = shareOptions();
-    previewBody.replaceChildren(renderDiscordPreview(buildDiscordPayloads(preparedTweet, options), {
-      attachmentCount: options.attachMedia
-        ? Math.min(collectMediaAttachmentUrls(preparedTweet, options).length, ATTACHMENT_MAX_COUNT)
-        : 0
-    }));
+    previewBody.replaceChildren(renderDiscordPreview(buildDiscordPayloads(preparedTweet, shareOptions())));
     positionPopover(menu, anchor);
   }
 
@@ -77,12 +71,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     try {
       preparedTweet = await prepareShareTweet(article);
       if (generation !== loadGeneration) return;
-      const options = shareOptions();
-      previewBody.replaceChildren(renderDiscordPreview(buildDiscordPayloads(preparedTweet, options), {
-        attachmentCount: options.attachMedia
-          ? Math.min(collectMediaAttachmentUrls(preparedTweet, options).length, ATTACHMENT_MAX_COUNT)
-          : 0
-      }));
+      previewBody.replaceChildren(renderDiscordPreview(buildDiscordPayloads(preparedTweet, shareOptions())));
       setDestinationItemsDisabled(destinationItems, false);
       positionPopover(menu, anchor);
     } catch (error) {

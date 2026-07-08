@@ -34,15 +34,6 @@ async function openSettingsModal() {
   sharingTitle.className = `${SETTINGS_CLASS}__section-title`;
   sharingTitle.textContent = "Sharing";
 
-  const attachMediaOption = createSettingsOption(
-    "Upload media to Discord",
-    "Best playback. Files over 8 MB are sent as links instead.",
-    preferences.attachMedia
-  );
-  attachMediaOption.input.addEventListener("change", () => {
-    preferences.attachMedia = attachMediaOption.input.checked;
-  });
-
   const previewOption = createSettingsOption(
     "Always show preview before sending",
     "Turn off to send instantly when you have one channel and the post has no quote.",
@@ -54,11 +45,7 @@ async function openSettingsModal() {
 
   const sharingCard = document.createElement("div");
   sharingCard.className = `${SETTINGS_CLASS}__card`;
-  sharingCard.append(
-    sharingTitle,
-    attachMediaOption.option,
-    previewOption.option
-  );
+  sharingCard.append(sharingTitle, previewOption.option);
   body.append(sharingCard);
 
   const channelsTitle = document.createElement("h3");
@@ -67,7 +54,7 @@ async function openSettingsModal() {
 
   const hint = document.createElement("p");
   hint.className = `${SETTINGS_CLASS}__hint`;
-  hint.textContent = "Create webhooks in Discord: Channel settings → Integrations → Webhooks. Channels and preferences are saved in Violentmonkey (or Tampermonkey) and persist across script updates — do not put webhook URLs in the script source.";
+  hint.textContent = "Channels and preferences are saved in Violentmonkey (or Tampermonkey) and persist across script updates — do not put webhook URLs in the script source. Treat webhook URLs like passwords.";
   body.append(channelsTitle, hint);
 
   const listEl = document.createElement("div");
@@ -77,10 +64,7 @@ async function openSettingsModal() {
   function renderList() {
     listEl.replaceChildren();
     if (destinations.length === 0) {
-      const emptyEl = document.createElement("div");
-      emptyEl.className = `${SETTINGS_CLASS}__empty`;
-      emptyEl.textContent = "No channels yet. Add one below.";
-      listEl.append(emptyEl);
+      listEl.append(createSettingsEmptyState());
       return;
     }
 
@@ -118,14 +102,22 @@ async function openSettingsModal() {
       });
 
       const urlInput = document.createElement("input");
-      urlInput.type = "url";
       urlInput.placeholder = "https://discord.com/api/webhooks/...";
       urlInput.value = destination.webhookUrl;
       urlInput.addEventListener("input", () => {
         destinations[index].webhookUrl = urlInput.value.trim();
       });
 
-      card.append(head, createSettingsField("Display name", labelInput), createSettingsField("Webhook URL", urlInput));
+      const actions = document.createElement("div");
+      actions.className = `${SETTINGS_CLASS}__card-actions`;
+      actions.append(createTestWebhookButton(() => destinations[index]?.webhookUrl || urlInput.value));
+
+      card.append(
+        head,
+        createSettingsField("Display name", labelInput),
+        createWebhookUrlField(urlInput),
+        actions
+      );
       listEl.append(card);
     });
   }
@@ -141,7 +133,6 @@ async function openSettingsModal() {
   newLabelInput.placeholder = "Friends server";
 
   const newUrlInput = document.createElement("input");
-  newUrlInput.type = "url";
   newUrlInput.placeholder = "https://discord.com/api/webhooks/...";
 
   const addBtn = document.createElement("button");
@@ -170,11 +161,15 @@ async function openSettingsModal() {
     renderList();
   });
 
+  const addActions = document.createElement("div");
+  addActions.className = `${SETTINGS_CLASS}__card-actions`;
+  addActions.append(addBtn, createTestWebhookButton(() => newUrlInput.value));
+
   addSection.append(
     addTitleEl,
     createSettingsField("Display name", newLabelInput),
-    createSettingsField("Webhook URL", newUrlInput),
-    addBtn
+    createWebhookUrlField(newUrlInput),
+    addActions
   );
   body.append(addSection);
 

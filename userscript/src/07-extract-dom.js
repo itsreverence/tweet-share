@@ -32,10 +32,33 @@ function extractAuthor(article) {
   };
 }
 
+function normalizeTweetBodyText(value) {
+  return String(value || "")
+    // X often splits "https://" into its own span; innerText inserts a newline.
+    .replace(/(https?:\/\/)\s*\n\s*/gi, "$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function readTweetTextNode(node) {
+  if (typeof node.cloneNode === "function") {
+    const clone = node.cloneNode(true);
+    for (const anchor of clone.querySelectorAll("a")) {
+      const compact = String(anchor.textContent || "").replace(/\s+/g, "");
+      if (/^https?:\/\//i.test(compact) || /^[\w.-]+\.[a-z]{2,}\//i.test(compact)) {
+        anchor.replaceWith(compact);
+      }
+    }
+    return normalizeTweetBodyText(clone.innerText || clone.textContent || "");
+  }
+
+  return normalizeTweetBodyText(node.innerText || node.textContent || "");
+}
+
 function extractText(article, excludedNodes = []) {
   return [...article.querySelectorAll('[data-testid="tweetText"]')]
     .filter((node) => !isInsideExcludedNode(node, excludedNodes))
-    .map((node) => node.innerText.trim())
+    .map(readTweetTextNode)
     .filter(Boolean)
     .join("\n\n");
 }

@@ -80,9 +80,9 @@ test("destination storage only exposes labels to menu callers", async () => {
 test("preferences default to safe enabled behavior and persist sanitized booleans", async () => {
   const { loadPreferences, savePreferences, store } = loadDestinationContext();
 
-  assert.deepEqual(plain(await loadPreferences()), { alwaysShowPreview: true, attachMedia: true });
+  assert.deepEqual(plain(await loadPreferences()), { alwaysShowPreview: true });
 
   await savePreferences({ alwaysShowPreview: false, attachMedia: false, extra: "ignored" });
-  assert.deepEqual(plain(store.get("tds-preferences")), { alwaysShowPreview: false, attachMedia: false });
-  assert.deepEqual(plain(await loadPreferences()), { alwaysShowPreview: false, attachMedia: false });
+  assert.deepEqual(plain(store.get("tds-preferences")), { alwaysShowPreview: false });
+  assert.deepEqual(plain(await loadPreferences()), { alwaysShowPreview: false });
 });

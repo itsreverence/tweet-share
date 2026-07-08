@@ -1,15 +1,13 @@
 const PREFERENCES_STORAGE_KEY = "tds-preferences";
 
 const DEFAULT_PREFERENCES = {
-  alwaysShowPreview: true,
-  attachMedia: true
+  alwaysShowPreview: true
 };
 
 function sanitizePreferences(value) {
   const input = value && typeof value === "object" ? value : {};
   return {
-    alwaysShowPreview: input.alwaysShowPreview !== false,
-    attachMedia: input.attachMedia !== false
+    alwaysShowPreview: input.alwaysShowPreview !== false
   };
 }
 

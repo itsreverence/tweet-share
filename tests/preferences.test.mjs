@@ -37,19 +37,13 @@ function loadPreferencesContext() {
 const { sanitizePreferences, loadPreferences, savePreferences, DEFAULT_PREFERENCES, storage } =
   loadPreferencesContext();
 
-test("sanitizePreferences applies defaults", () => {
+test("sanitizePreferences applies defaults and drops removed keys", () => {
   assert.deepEqual({ ...sanitizePreferences(null) }, { ...DEFAULT_PREFERENCES });
-  assert.deepEqual({ ...sanitizePreferences({ includeQuote: false, quoteLayout: "card", includeContentPermalink: false }) }, {
-    alwaysShowPreview: true,
-    attachMedia: true
+  assert.deepEqual({ ...sanitizePreferences({ includeQuote: false, attachMedia: true, quoteLayout: "card" }) }, {
+    alwaysShowPreview: true
   });
-  assert.deepEqual({ ...sanitizePreferences({ alwaysShowPreview: false }) }, {
-    alwaysShowPreview: false,
-    attachMedia: true
-  });
-  assert.deepEqual({ ...sanitizePreferences({ attachMedia: false }) }, {
-    alwaysShowPreview: true,
-    attachMedia: false
+  assert.deepEqual({ ...sanitizePreferences({ alwaysShowPreview: false, attachMedia: false }) }, {
+    alwaysShowPreview: false
   });
 });
 
@@ -57,16 +51,13 @@ test("preferences persist through storage", async () => {
   await savePreferences({
     includeQuote: false,
     alwaysShowPreview: false,
-    attachMedia: false,
-    quoteLayout: "card",
-    includeContentPermalink: false
+    attachMedia: true,
+    quoteLayout: "card"
   });
   const loaded = await loadPreferences();
   assert.equal(loaded.alwaysShowPreview, false);
-  assert.equal(loaded.attachMedia, false);
+  assert.equal(Object.hasOwn(loaded, "attachMedia"), false);
   assert.deepEqual({ ...storage.get("tds-preferences") }, {
-    alwaysShowPreview: false,
-    attachMedia: false
+    alwaysShowPreview: false
   });
-  assert.equal(storage.has("tds-preferences"), true);
 });

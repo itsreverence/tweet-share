@@ -52,8 +52,7 @@ async function startDiscordShare(article, anchor) {
     closeXOverlay();
     await runShare(article, destinations[0].id, {
       includeQuote: true,
-      preferences,
-      attachMedia: preferences.attachMedia !== false
+      preferences
     }, null);
     return;
   }

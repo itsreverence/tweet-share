@@ -20,7 +20,5 @@
 // @grant        GM_xmlhttpRequest
 // @connect      discord.com
 // @connect      cdn.syndication.twimg.com
-// @connect      pbs.twimg.com
-// @connect      video.twimg.com
 // @license      MIT
 // ==/UserScript==
