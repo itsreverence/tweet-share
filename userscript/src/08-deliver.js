@@ -7,7 +7,7 @@ function buildWebhookTestPayload() {
   return {
     username: webhookSenderName(),
     avatar_url: webhookSenderAvatarUrl(),
-    content: "Tweet Share connected — this channel is ready to receive shares."
+    content: "Tweet Discord Share connected — this channel is ready to receive shares."
   };
 }
 

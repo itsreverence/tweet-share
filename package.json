@@ -6,7 +6,7 @@
   "license": "MIT",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "check": "npm run build && node --check dist/tweet-discord-share.user.js",
+    "check": "node scripts/check-dist.mjs && node --check dist/tweet-discord-share.user.js",
     "test": "node --test tests/*.test.mjs"
   }
 }

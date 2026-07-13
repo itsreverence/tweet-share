@@ -1606,7 +1606,7 @@ function buildWebhookTestPayload() {
   return {
     username: webhookSenderName(),
     avatar_url: webhookSenderAvatarUrl(),
-    content: "Tweet Share connected — this channel is ready to receive shares."
+    content: "Tweet Discord Share connected — this channel is ready to receive shares."
   };
 }
 
@@ -2771,12 +2771,12 @@ async function openSettingsModal() {
   applyXThemeVars(dialog);
   dialog.setAttribute("role", "dialog");
   dialog.setAttribute("aria-modal", "true");
-  dialog.setAttribute("aria-label", "Tweet Share settings");
+  dialog.setAttribute("aria-label", "Tweet Discord Share settings");
 
   const header = document.createElement("div");
   header.className = `${SETTINGS_CLASS}__header`;
   const heading = document.createElement("h2");
-  heading.textContent = "Tweet Share settings";
+  heading.textContent = "Tweet Discord Share settings";
   const closeBtn = document.createElement("button");
   closeBtn.type = "button";
   closeBtn.className = `${SETTINGS_CLASS}__close`;
@@ -2998,7 +2998,7 @@ function registerSettingsMenuCommand() {
       : null;
 
   if (!register) return;
-  register("Tweet Share settings…", () => openSettingsModal());
+  register("Tweet Discord Share settings…", () => openSettingsModal());
 }
 
 registerSettingsMenuCommand();

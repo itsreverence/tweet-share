@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest a focused improvement to manual sharing
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Keep requests within the project's manual-share, local-first boundaries. Bulk scraping, access-control bypass, spam, account automation, and hosted collection services are out of scope.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or limitation
+      description: What user problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful behavior change.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Project boundaries
+      options:
+        - label: This remains a manual sharing workflow for content the user can already view.
+          required: true
+        - label: This does not require publishing credentials or private content.
+          required: true
