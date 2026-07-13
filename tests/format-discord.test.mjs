@@ -302,7 +302,7 @@ test("videos are sent in a separate labeled message that matches the embed field
   assert.doesNotMatch(String(payloads[1].content || ""), /\/status\/1/);
   assert.match(payloads[1].content, /Video for the post above/);
   assert.match(payloads[1].content, /\*\*Video 1\*\*/);
-  assert.match(payloads[1].content, new RegExp(videoUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.ok(payloads[1].content.includes(videoUrl));
 
   const fields = payloads[0].embeds.at(-1)?.fields || [];
   assert.ok(fields.some((field) => field.name === "Video 1" && field.value === "Plays below ↓"));
