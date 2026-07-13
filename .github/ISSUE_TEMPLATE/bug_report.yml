@@ -1,0 +1,80 @@
+name: Bug report
+description: Report a reproducible Tweet Discord Share problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Remove all webhook URLs, cookies, session details, private/protected post content, account names, and channel names before submitting.
+  - type: input
+    id: version
+    attributes:
+      label: Tweet Discord Share version
+      description: Shown in your userscript manager (for example, 0.6.23).
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+      placeholder: Firefox 140
+    validations:
+      required: true
+  - type: input
+    id: manager
+    attributes:
+      label: Userscript manager and version
+      placeholder: Violentmonkey 2.x or Tampermonkey 5.x
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where did the problem occur?
+      options:
+        - Installation or update
+        - Settings or webhook test
+        - X share menu or destination picker
+        - Post extraction or preview
+        - Discord delivery or formatting
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Use a public example if one is necessary. Do not paste private post content or a webhook URL.
+      placeholder: |
+        1. Open a public post directly
+        2. Select Share → Share to Discord
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Sanitized logs or additional context
+      description: Redact identifying and credential data. Screenshots are optional.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Sensitive-data check
+      options:
+        - label: I removed webhook URLs, cookies, tokens, session details, private/protected post content, account names, and channel names.
+          required: true
+        - label: This is not a confidential security vulnerability; I will use the private process in SECURITY.md for those.
+          required: true

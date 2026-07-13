@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/itsreverence/tweet-share/security/advisories/new
+    about: Report security issues privately. Do not open a public issue.
+  - name: Support guide
+    url: https://github.com/itsreverence/tweet-share/blob/master/SUPPORT.md
+    about: Check first steps and reporting boundaries before opening an issue.

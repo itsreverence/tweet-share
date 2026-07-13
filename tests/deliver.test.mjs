@@ -85,7 +85,7 @@ test("sanitizeWebhookPayload removes internal message labels", () => {
   assert.equal(Object.hasOwn(cleaned, "_messageLabel"), false);
 });
 
-test("buildWebhookTestPayload uses Tweet Share branding", () => {
+test("buildWebhookTestPayload uses Tweet Discord Share branding", () => {
   const { buildWebhookTestPayload } = loadDeliverContext();
   const payload = buildWebhookTestPayload();
 
