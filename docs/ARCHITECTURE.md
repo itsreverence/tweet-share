@@ -19,6 +19,8 @@ Tweet Discord Share is a dependency-free userscript assembled from ordered JavaS
 4. The X share-menu integration opens a destination picker and optional preview.
 5. Delivery sends the chosen payload directly from the browser to the selected Discord webhook.
 
+Share-menu observation is scoped to newly added DOM neighborhoods after the initial page scan. Delivery applies bounded request and media-download timeouts, retries only explicit short Discord rate limits, and reports when a multi-message share stops after partial delivery. Ambiguous network failures are not retried automatically because Discord may have accepted the request before the client lost the response.
+
 There is no project-operated server, X API credential, analytics service, or remote settings store.
 
 ## Local state and trust boundaries

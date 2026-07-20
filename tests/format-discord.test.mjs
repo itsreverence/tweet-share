@@ -18,7 +18,7 @@ function loadFormatContext() {
     performance: { getEntriesByType: () => [] },
     document: { querySelectorAll: () => [] }
   };
-  runInNewContext(`${code}\nthis.exports = {\n  buildDiscordPayloads,\n  countEmbedChars,\n  discordEmbedTimestamp,\n  packEmbedsIntoMessages,\n  buildTweetEmbedGroup,\n  hasQuoteTweet,\n  rebalanceEmbedsForCharBudget\n};`, context);
+  runInNewContext(`${code}\nthis.exports = {\n  buildDiscordPayloads,\n  countEmbedChars,\n  discordEmbedTimestamp,\n  packEmbedsIntoMessages,\n  buildTweetEmbedGroup,\n  hasQuoteTweet,\n  rebalanceEmbedsForCharBudget,\n  truncate\n};`, context);
   return context.exports;
 }
 
@@ -29,7 +29,8 @@ const {
   packEmbedsIntoMessages,
   buildTweetEmbedGroup,
   hasQuoteTweet,
-  rebalanceEmbedsForCharBudget
+  rebalanceEmbedsForCharBudget,
+  truncate
 } = loadFormatContext();
 
 const sampleTweet = {
@@ -61,6 +62,15 @@ test("discordEmbedTimestamp parses ISO and Twitter date strings", () => {
   assert.equal(discordEmbedTimestamp("Tue May 26 12:00:00 +0000 2026"), "2026-05-26T12:00:00.000Z");
   assert.equal(discordEmbedTimestamp("not a date"), undefined);
   assert.equal(discordEmbedTimestamp(""), undefined);
+});
+
+test("truncate never exceeds Discord field and message limits", () => {
+  for (const limit of [0, 1, 2, 3, 256, 1024, 2000, 4096]) {
+    const result = truncate("x".repeat(limit + 10), limit);
+    assert.ok(result.length <= limit, `${result.length} exceeded ${limit}`);
+  }
+  assert.equal(truncate("abcdef", 5), "ab...");
+  assert.equal(truncate("abc", 3), "abc");
 });
 
 test("buildDiscordPayloads returns a single embed message for a simple tweet", () => {

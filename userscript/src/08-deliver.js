@@ -43,19 +43,27 @@ async function shareToDestination(destinationId, tweet, options = {}) {
 
   for (let index = 0; index < payloads.length; index += 1) {
     const payload = sanitizeWebhookPayload(payloads[index]);
-    if (index === 0 && attachments.length > 0) {
-      await requestMultipart(
-        destination.webhookUrl,
-        payload,
-        attachments.map((attachment, fileIndex) => ({
-          name: `files[${fileIndex}]`,
-          filename: attachment.filename,
-          bytes: attachment.bytes,
-          contentType: attachment.contentType
-        }))
+    try {
+      if (index === 0 && attachments.length > 0) {
+        await requestMultipart(
+          destination.webhookUrl,
+          payload,
+          attachments.map((attachment, fileIndex) => ({
+            name: `files[${fileIndex}]`,
+            filename: attachment.filename,
+            bytes: attachment.bytes,
+            contentType: attachment.contentType
+          }))
+        );
+      } else {
+        await request("POST", destination.webhookUrl, payload);
+      }
+    } catch (error) {
+      if (index === 0) throw error;
+      throw new Error(
+        `Sent ${index} of ${payloads.length} Discord messages before delivery failed: ${error.message}`,
+        { cause: error }
       );
-    } else {
-      await request("POST", destination.webhookUrl, payload);
     }
     if (index < payloads.length - 1) {
       await delay(WEBHOOK_SEND_DELAY_MS);
