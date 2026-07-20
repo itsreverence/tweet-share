@@ -203,7 +203,7 @@ function createPreviewMessage(payload, index, total) {
   return message;
 }
 
-function renderDiscordPreview(payloads) {
+function renderDiscordPreview(payloads, options = {}) {
   const host = document.createElement("div");
   host.className = PREVIEW_CLASS;
   const list = Array.isArray(payloads) ? payloads : [];
@@ -219,6 +219,13 @@ function renderDiscordPreview(payloads) {
   list.forEach((payload, index) => {
     host.append(createPreviewMessage(payload, index, list.length));
   });
+
+  if (options.hasMediaCandidates) {
+    const hint = document.createElement("div");
+    hint.className = `${PREVIEW_CLASS}__attachment-hint`;
+    hint.textContent = "Media uploads when eligible; unavailable or oversized video is sent as a playable link.";
+    host.append(hint);
+  }
 
   return host;
 }
@@ -369,6 +376,11 @@ function previewStylesCss() {
     .${PREVIEW_CLASS}__footer {
       color: rgb(var(--tds-subtle, 113 118 123));
       font-size: 12px;
+    }
+    .${PREVIEW_CLASS}__attachment-hint {
+      color: rgb(var(--tds-subtle, 113 118 123));
+      font-size: 12px;
+      line-height: 1.35;
     }
     .${PREVIEW_CLASS}__link {
       color: rgb(var(--tds-blue, 29 155 240));

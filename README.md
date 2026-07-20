@@ -27,9 +27,11 @@ Destinations live in userscript-manager storage on your machine, not in this rep
 ## What it shares
 
 - Post text, permalink, author, and timestamp
-- Images and video links when available
+- Images and native video attachments when eligible
 - Quoted posts, with a choice to include or omit the quote
 - Only content available to the signed-in browser session
+
+Media upload is automatic and bounded. If a video is unavailable or too large to upload, the share includes one direct playable video link instead.
 
 ## Compatibility
 

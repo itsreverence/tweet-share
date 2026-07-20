@@ -117,7 +117,7 @@ test("webhook sender is branded while the embed shows the tweet author once", ()
   assert.match(payloads[0].avatar_url, /^https:\/\//);
   assert.equal(payloads[0].embeds[0].author.name, "Alice");
   assert.equal(payloads[0].embeds[0].author.url, "https://x.com/alice");
-  assert.equal(payloads[0].embeds[0].footer.text, "@alice · x.com");
+  assert.equal(payloads[0].embeds[0].footer.text, "x.com");
   assert.match(payloads[0].embeds[0].author.icon_url, /profile_images/);
   assert.doesNotMatch(payloads[0].embeds[0].author.name, /@alice/);
 });
@@ -138,7 +138,7 @@ test("quoteLayout card adds a second embed in the same message", () => {
   assert.equal(payloads.length, 1);
   assert.equal(payloads[0].embeds.length, 2);
   assert.equal(payloads[0].embeds[1].color, 0x536471);
-  assert.equal(payloads[0].embeds[1].footer.text, "Quoted post · @bob · x.com");
+  assert.equal(payloads[0].embeds[1].footer.text, "Quoted post · x.com");
   assert.ok(payloads[0].embeds[1].fields.some((field) => field.name === "Quoted post" && field.value === tweet.quote.url));
 });
 
@@ -232,7 +232,8 @@ test("auto quote layout inlines main and quoted videos as follow-up links", () =
   const payloads = buildDiscordPayloads(tweet);
   assert.equal(payloads.length, 2);
   assert.equal(payloads[0].embeds.length, 1);
-  assert.equal(payloads[0].embeds[0].image.url, "https://pbs.twimg.com/ext_tw_video_thumb/1/pu/img/poster.jpg");
+  assert.equal(payloads[0].embeds[0].image, undefined);
+  assert.doesNotMatch(JSON.stringify(payloads), /poster\.jpg|Plays below/);
   assert.match(payloads[0].content, /↳ 📑 Quoted post: https:\/\/x\.com\/bob\/status\/2/);
   assert.ok(payloads[0].embeds[0].fields.some((field) => field.name === "Quoted post from @bob"));
   assert.match(payloads[1].content, /main\.mp4/);
@@ -288,7 +289,7 @@ test("image-only posts use embed heroes and supplemental image embeds", () => {
   assert.equal(payloads[0].embeds[1].image.url, "https://pbs.twimg.com/media/two.jpg");
 });
 
-test("videos are sent in a separate labeled message that matches the embed field", () => {
+test("single skipped video uses one playable URL and a minimal label", () => {
   const videoUrl = "https://video.twimg.com/ext_tw_video/1/pu/vid/abc/1280x720/clip.mp4";
   const tweet = {
     ...sampleTweet,
@@ -300,15 +301,65 @@ test("videos are sent in a separate labeled message that matches the embed field
   assert.equal(payloads.length, 2);
   assert.equal(payloads[0].content, tweet.url);
   assert.doesNotMatch(String(payloads[1].content || ""), /\/status\/1/);
-  assert.match(payloads[1].content, /Video for the post above/);
-  assert.match(payloads[1].content, /\*\*Video 1\*\*/);
-  assert.ok(payloads[1].content.includes(videoUrl));
+  assert.equal(payloads[0].embeds[0].image, undefined);
+  assert.equal(payloads[1].content, `_Video:_\n${videoUrl}`);
+  assert.equal(payloads[1].content.split(videoUrl).length - 1, 1);
+  assert.doesNotMatch(payloads[1].content, /Video 1|post above/);
 
   const fields = payloads[0].embeds.at(-1)?.fields || [];
-  assert.ok(fields.some((field) => field.name === "Video 1" && field.value === "Plays below ↓"));
+  assert.equal(fields.some((field) => /Video|Plays below/.test(`${field.name} ${field.value}`)), false);
 });
 
-test("videos label each post when both the main and quoted tweets have video", () => {
+test("successful video attachment uses one payload without poster, fields, or follow-up", () => {
+  const videoUrl = "https://video.twimg.com/ext_tw_video/1/pu/vid/abc/1280x720/clip.mp4";
+  const tweet = {
+    ...sampleTweet,
+    text: "Clip",
+    media: [{
+      type: "video",
+      url: videoUrl,
+      posterUrl: "https://pbs.twimg.com/ext_tw_video_thumb/1/pu/img/poster.jpg"
+    }]
+  };
+
+  const payloads = buildDiscordPayloads(tweet, {
+    includeQuote: false,
+    attachMedia: true,
+    attachmentUrls: [videoUrl],
+    fallbackVideoUrls: []
+  });
+
+  assert.equal(payloads.length, 1);
+  assert.equal(payloads[0].content, tweet.url);
+  assert.equal(payloads[0].embeds[0].image, undefined);
+  assert.equal(payloads[0].embeds[0].fields, undefined);
+  assert.doesNotMatch(JSON.stringify(payloads), /poster\.jpg|Plays below|Video 1|clip\.mp4/);
+});
+
+test("attached video does not hide an unresolved real tweet image", () => {
+  const videoUrl = "https://video.twimg.com/ext_tw_video/1/pu/vid/abc/1280x720/clip.mp4";
+  const imageUrl = "https://pbs.twimg.com/media/photo.jpg";
+  const tweet = {
+    ...sampleTweet,
+    media: [
+      { type: "video", url: videoUrl, posterUrl: "https://pbs.twimg.com/ext_tw_video_thumb/1/pu/img/poster.jpg" },
+      { type: "image", url: imageUrl }
+    ]
+  };
+
+  const payloads = buildDiscordPayloads(tweet, {
+    includeQuote: false,
+    attachMedia: true,
+    attachmentUrls: [videoUrl],
+    fallbackVideoUrls: []
+  });
+
+  assert.equal(payloads.length, 1);
+  assert.equal(payloads[0].embeds[0].image.url, imageUrl);
+  assert.doesNotMatch(JSON.stringify(payloads), /poster\.jpg|clip\.mp4|Plays below/);
+});
+
+test("main and quoted fallback videos identify ownership once", () => {
   const mainVideo = "https://video.twimg.com/ext_tw_video/1/pu/vid/abc/1280x720/main.mp4";
   const quoteVideo = "https://video.twimg.com/ext_tw_video/2/pu/vid/abc/1280x720/quote.mp4";
   const tweet = {
@@ -324,11 +375,13 @@ test("videos label each post when both the main and quoted tweets have video", (
 
   const payloads = buildDiscordPayloads(tweet);
   assert.equal(payloads.length, 2);
-  assert.match(payloads[1].content, /\*\*Alice · Video 1\*\*/);
-  assert.match(payloads[1].content, /\*\*Bob · Video 1\*\*/);
+  assert.match(payloads[1].content, /_Alice · Video 1:_/);
+  assert.match(payloads[1].content, /_Bob · Video 1:_/);
+  assert.equal(payloads[1].content.split(mainVideo).length - 1, 1);
+  assert.equal(payloads[1].content.split(quoteVideo).length - 1, 1);
 
   const mainFields = payloads[0].embeds[0]?.fields || [];
-  assert.ok(mainFields.some((field) => field.name === "Alice · Video 1"));
+  assert.equal(mainFields.some((field) => /Video/.test(field.name)), false);
   assert.ok(mainFields.some((field) => field.name === "Quoted post from @bob"));
 });
 
@@ -427,15 +480,14 @@ test("video, images, and quote media share labels and stay in order", () => {
   assert.equal(payloads[0].embeds.length, 3);
 
   const mainFields = payloads[0].embeds[0].fields || [];
-  assert.ok(mainFields.some((field) => field.name === "Alice · Video 1" && field.value === "Plays below ↓"));
+  assert.equal(mainFields.some((field) => /Video|Plays below/.test(`${field.name} ${field.value}`)), false);
   assert.ok(mainFields.some((field) => field.name === "More images" && /2 more images below/.test(field.value)));
 
   assert.equal(payloads[0].embeds[1].title, "Alice · Image 2");
   assert.equal(payloads[0].embeds[2].title, "Bob · Image 1");
   assert.equal(payloads[0].embeds[2].color, 0x1da1f2);
   assert.equal(payloads[0].embeds[2].url, tweet.url);
-  assert.match(payloads[1].content, /after the extra images/);
-  assert.match(payloads[1].content, /\*\*Alice · Video 1\*\*/);
+  assert.equal(payloads[1].content, `_Video:_\n${videoUrl}`);
 });
 
 test("long tweet text splits across continuation embeds without duplicate url", () => {

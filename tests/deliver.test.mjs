@@ -9,19 +9,20 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const srcDir = path.join(root, "userscript", "src");
 const validWebhook = "https://discord.com/api/webhooks/1234567890/abc_DEF-123";
 
-function loadDeliverContext() {
+function loadDeliverContext({ multipartError = null } = {}) {
   const files = [
     "00-config.js",
     "02-utils.js",
     "04-video.js",
     "05-format-discord.js",
+    "13-media-fetch.js",
     "10-destinations.js",
     "10-preferences.js",
     "08-deliver.js"
   ];
   const code = files.map((name) => readFileSync(path.join(srcDir, name), "utf8")).join("\n");
   const storage = new Map();
-  const calls = { requests: [], toasts: [], delays: 0 };
+  const calls = { requests: [], multipart: [], toasts: [], delays: 0 };
 
   const context = createContext({
     console,
@@ -44,6 +45,7 @@ function loadDeliverContext() {
     showToast(message, state) {
       calls.toasts.push({ message, state });
     },
+    __multipartError: multipartError,
     xhrClient() {
       throw new Error("xhrClient should not run in deliver tests");
     }
@@ -55,7 +57,16 @@ request = async (method, url, body) => {
   __calls.requests.push({ method, url, body, kind: "json" });
   return {};
 };
-const __calls = { requests: [], toasts: [], delays: 0 };
+requestMultipart = async (url, payload, files) => {
+  if (__multipartError) throw __multipartError;
+  __calls.multipart.push({
+    url,
+    payload,
+    files: files.map((file) => ({ filename: file.filename, contentType: file.contentType }))
+  });
+  return {};
+};
+const __calls = { requests: [], multipart: [], toasts: [], delays: 0 };
 this.exports = {
   shareToDestination,
   sanitizeWebhookPayload,
@@ -76,6 +87,18 @@ const sampleTweet = {
   author: { displayName: "Alice", username: "alice" },
   text: "Hello",
   media: [{ type: "image", url: "https://pbs.twimg.com/media/photo.jpg" }]
+};
+
+const mainVideoUrl = "https://video.twimg.com/ext_tw_video/1/pu/vid/1280x720/main.mp4";
+const skippedVideoUrl = "https://video.twimg.com/ext_tw_video/2/pu/vid/1280x720/skipped.mp4";
+const videoTweet = {
+  url: "https://x.com/alice/status/2",
+  author: { displayName: "Alice", username: "alice" },
+  text: "Clips",
+  media: [
+    { type: "video", url: mainVideoUrl },
+    { type: "video", url: skippedVideoUrl }
+  ]
 };
 
 test("sanitizeWebhookPayload removes internal message labels", () => {
@@ -124,18 +147,98 @@ test("shareToDestination throws when destination is missing a webhook URL", asyn
   );
 });
 
-test("shareToDestination posts JSON payloads for link shares", async () => {
+test("shareToDestination posts JSON image layout when upload eligibility fails", async () => {
   const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
   await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
 
-  await shareToDestination("main", sampleTweet, { includeQuote: false });
+  await shareToDestination("main", sampleTweet, {
+    includeQuote: false,
+    fetchMediaBytes() {
+      throw new Error("unavailable");
+    }
+  });
 
   assert.equal(calls.requests.length, 1);
+  assert.equal(calls.multipart.length, 0);
   assert.equal(calls.requests[0].method, "POST");
   assert.equal(calls.requests[0].url, validWebhook);
   assert.match(calls.requests[0].body.content, /alice\/status\/1/);
   assert.ok(Array.isArray(calls.requests[0].body.embeds));
   assert.equal(calls.requests[0].body.embeds[0].image.url, "https://pbs.twimg.com/media/photo.jpg");
+});
+
+test("successful resolution sends one compact multipart request", async () => {
+  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
+  await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
+
+  await shareToDestination("main", { ...videoTweet, media: [videoTweet.media[0]] }, {
+    includeQuote: false,
+    fetchMediaBytes() {
+      return { byteLength: 128 };
+    }
+  });
+
+  assert.equal(calls.multipart.length, 1);
+  assert.equal(calls.requests.length, 0);
+  assert.equal(calls.multipart[0].files.length, 1);
+  assert.equal(calls.multipart[0].files[0].contentType, "video/mp4");
+  assert.equal(calls.multipart[0].payload.embeds[0].image, undefined);
+  assert.doesNotMatch(JSON.stringify(calls.multipart[0].payload), /Video 1|Plays below|main\.mp4/);
+});
+
+test("all skipped video media sends one playable fallback URL", async () => {
+  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
+  await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
+
+  await shareToDestination("main", { ...videoTweet, media: [videoTweet.media[0]] }, {
+    includeQuote: false,
+    fetchMediaBytes() {
+      throw new Error("unavailable");
+    }
+  });
+
+  assert.equal(calls.multipart.length, 0);
+  assert.equal(calls.requests.length, 2);
+  assert.equal(calls.requests[1].body.content, `_Video:_\n${mainVideoUrl}`);
+  assert.equal(calls.requests[1].body.content.split(mainVideoUrl).length - 1, 1);
+  assert.doesNotMatch(JSON.stringify(calls.requests), /Plays below|poster/);
+  assert.ok(calls.toasts.some((toast) => /fallback content/i.test(toast.message)));
+});
+
+test("partial video success uploads resolved media and retains skipped link once", async () => {
+  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
+  await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
+
+  await shareToDestination("main", videoTweet, {
+    includeQuote: false,
+    fetchMediaBytes(url) {
+      if (url === skippedVideoUrl) throw new Error("unavailable");
+      return { byteLength: 128 };
+    }
+  });
+
+  assert.equal(calls.multipart.length, 1);
+  assert.equal(calls.multipart[0].files.length, 1);
+  assert.equal(calls.requests.length, 1);
+  assert.ok(calls.requests[0].body.content.includes(skippedVideoUrl));
+  assert.equal(calls.requests[0].body.content.split(skippedVideoUrl).length - 1, 1);
+  assert.doesNotMatch(JSON.stringify(calls.multipart[0].payload), /main\.mp4|skipped\.mp4|Plays below/);
+});
+
+test("multipart network failure is surfaced without an automatic JSON retry", async () => {
+  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext({
+    multipartError: new Error("ambiguous network failure")
+  });
+  await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
+
+  await assert.rejects(() => shareToDestination("main", { ...videoTweet, media: [videoTweet.media[0]] }, {
+    includeQuote: false,
+    fetchMediaBytes() {
+      return { byteLength: 128 };
+    }
+  }), /ambiguous network failure/);
+  assert.equal(calls.requests.length, 0);
+  assert.equal(calls.multipart.length, 0);
 });
 
 test("shareToDestination delays between multi-message shares", async () => {
@@ -152,7 +255,12 @@ test("shareToDestination delays between multi-message shares", async () => {
     ]
   };
 
-  await shareToDestination("main", tweet, { includeQuote: false });
+  await shareToDestination("main", tweet, {
+    includeQuote: false,
+    fetchMediaBytes() {
+      throw new Error("unavailable");
+    }
+  });
 
   assert.ok(calls.requests.length >= 2);
   assert.equal(calls.delays, calls.requests.length - 1);

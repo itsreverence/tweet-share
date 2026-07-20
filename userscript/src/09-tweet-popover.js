@@ -55,9 +55,24 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     };
   }
 
+  function previewOptions() {
+    const options = shareOptions();
+    const attachmentUrls = collectMediaAttachmentUrls(preparedTweet, options);
+    return {
+      ...options,
+      attachMedia: attachmentUrls.length > 0,
+      attachmentUrls,
+      fallbackVideoUrls: []
+    };
+  }
+
   function refreshPreview() {
     if (!preparedTweet) return;
-    previewBody.replaceChildren(renderDiscordPreview(buildDiscordPayloads(preparedTweet, shareOptions())));
+    const attachmentUrls = collectMediaAttachmentUrls(preparedTweet, shareOptions());
+    previewBody.replaceChildren(renderDiscordPreview(
+      buildDiscordPayloads(preparedTweet, previewOptions()),
+      { hasMediaCandidates: attachmentUrls.length > 0 }
+    ));
     positionPopover(menu, anchor);
   }
 
@@ -71,7 +86,11 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     try {
       preparedTweet = await prepareShareTweet(article);
       if (generation !== loadGeneration) return;
-      previewBody.replaceChildren(renderDiscordPreview(buildDiscordPayloads(preparedTweet, shareOptions())));
+      const attachmentUrls = collectMediaAttachmentUrls(preparedTweet, shareOptions());
+      previewBody.replaceChildren(renderDiscordPreview(
+        buildDiscordPayloads(preparedTweet, previewOptions()),
+        { hasMediaCandidates: attachmentUrls.length > 0 }
+      ));
       setDestinationItemsDisabled(destinationItems, false);
       positionPopover(menu, anchor);
     } catch (error) {
