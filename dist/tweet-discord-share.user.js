@@ -202,6 +202,11 @@ function xhrClient() {
   return typeof GM !== "undefined" && GM.xmlHttpRequest ? GM.xmlHttpRequest : GM_xmlhttpRequest;
 }
 
+const HTTP_TIMEOUT_MS = 15_000;
+const HTTP_MAX_RATE_LIMIT_RETRIES = 2;
+const HTTP_DEFAULT_RETRY_DELAY_MS = 1_000;
+const HTTP_MAX_RETRY_DELAY_MS = 10_000;
+
 function parseDiscordResponse(response) {
   const text = response.responseText || "{}";
   let json;
@@ -216,14 +221,40 @@ function parseDiscordResponse(response) {
   }
 
   const detail = json.message || json.error || text.slice(0, 200);
-  throw new Error(detail || `Discord webhook returned ${response.status}`);
+  const error = new Error(detail || `Request returned ${response.status}`);
+  error.status = response.status;
+  const retryAfterSeconds = Number(json.retry_after);
+  if (response.status === 429 && Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0) {
+    error.retryAfterMs = Math.ceil(retryAfterSeconds * 1000);
+  }
+  throw error;
 }
 
-function request(method, url, body) {
+function boundedRetryDelay(error) {
+  const requested = Number(error?.retryAfterMs);
+  const delayMs = Number.isFinite(requested) && requested >= 0 ? requested : HTTP_DEFAULT_RETRY_DELAY_MS;
+  return delayMs <= HTTP_MAX_RETRY_DELAY_MS ? delayMs : null;
+}
+
+async function retryRateLimitedRequest(send, maxRetries = HTTP_MAX_RATE_LIMIT_RETRIES) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await send();
+    } catch (error) {
+      if (error?.status !== 429 || attempt >= maxRetries) throw error;
+      const retryDelayMs = boundedRetryDelay(error);
+      if (retryDelayMs === null) throw error;
+      await delay(retryDelayMs);
+    }
+  }
+}
+
+function requestOnce(method, url, body) {
   return new Promise((resolve, reject) => {
     xhrClient()({
       method,
       url,
+      timeout: HTTP_TIMEOUT_MS,
       headers: { "content-type": "application/json" },
       data: body ? JSON.stringify(body) : undefined,
       onload(response) {
@@ -235,12 +266,19 @@ function request(method, url, body) {
       },
       onerror() {
         reject(new Error("Could not reach Discord. Check your network and webhook URL."));
+      },
+      ontimeout() {
+        reject(new Error("The request timed out. Check your network and try again."));
       }
     });
   });
 }
 
-function requestMultipart(url, payloadJson, files = []) {
+function request(method, url, body) {
+  return retryRateLimitedRequest(() => requestOnce(method, url, body));
+}
+
+function requestMultipartOnce(url, payloadJson, files = []) {
   return new Promise((resolve, reject) => {
     const formData = new FormData();
     formData.append("payload_json", JSON.stringify(payloadJson || {}));
@@ -252,6 +290,7 @@ function requestMultipart(url, payloadJson, files = []) {
     xhrClient()({
       method: "POST",
       url,
+      timeout: HTTP_TIMEOUT_MS,
       data: formData,
       onload(response) {
         try {
@@ -262,9 +301,16 @@ function requestMultipart(url, payloadJson, files = []) {
       },
       onerror() {
         reject(new Error("Could not reach Discord. Check your network and webhook URL."));
+      },
+      ontimeout() {
+        reject(new Error("The request timed out. Check your network and try again."));
       }
     });
   });
+}
+
+function requestMultipart(url, payloadJson, files = []) {
+  return retryRateLimitedRequest(() => requestMultipartOnce(url, payloadJson, files));
 }
 
 function delay(ms) {
@@ -275,7 +321,9 @@ function delay(ms) {
 function truncate(value, limit) {
   const textValue = String(value || "").trim();
   if (textValue.length <= limit) return textValue;
-  return `${textValue.slice(0, Math.max(0, limit - 1)).trimEnd()}...`;
+  const suffix = "...";
+  if (limit <= suffix.length) return suffix.slice(0, Math.max(0, limit));
+  return `${textValue.slice(0, limit - suffix.length).trimEnd()}${suffix}`;
 }
 
 function unique(values) {
@@ -1643,19 +1691,27 @@ async function shareToDestination(destinationId, tweet, options = {}) {
 
   for (let index = 0; index < payloads.length; index += 1) {
     const payload = sanitizeWebhookPayload(payloads[index]);
-    if (index === 0 && attachments.length > 0) {
-      await requestMultipart(
-        destination.webhookUrl,
-        payload,
-        attachments.map((attachment, fileIndex) => ({
-          name: `files[${fileIndex}]`,
-          filename: attachment.filename,
-          bytes: attachment.bytes,
-          contentType: attachment.contentType
-        }))
+    try {
+      if (index === 0 && attachments.length > 0) {
+        await requestMultipart(
+          destination.webhookUrl,
+          payload,
+          attachments.map((attachment, fileIndex) => ({
+            name: `files[${fileIndex}]`,
+            filename: attachment.filename,
+            bytes: attachment.bytes,
+            contentType: attachment.contentType
+          }))
+        );
+      } else {
+        await request("POST", destination.webhookUrl, payload);
+      }
+    } catch (error) {
+      if (index === 0) throw error;
+      throw new Error(
+        `Sent ${index} of ${payloads.length} Discord messages before delivery failed: ${error.message}`,
+        { cause: error }
       );
-    } else {
-      await request("POST", destination.webhookUrl, payload);
     }
     if (index < payloads.length - 1) {
       await delay(WEBHOOK_SEND_DELAY_MS);
@@ -2290,8 +2346,23 @@ function injectDiscordShareMenuItem(menu) {
   menu.append(item);
 }
 
-function scanShareMenus() {
-  document.querySelectorAll('[role="menu"]').forEach((menu) => {
+function shareMenusNearNode(node) {
+  if (!node || node.nodeType !== Node.ELEMENT_NODE) return [];
+
+  const menus = [];
+  if (node.matches?.('[role="menu"]')) menus.push(node);
+  node.querySelectorAll?.('[role="menu"]').forEach((menu) => menus.push(menu));
+  const parentMenu = node.closest?.('[role="menu"]');
+  if (parentMenu) menus.push(parentMenu);
+  return [...new Set(menus)];
+}
+
+function scanShareMenus(root = document) {
+  const menus = root === document
+    ? [...document.querySelectorAll('[role="menu"]')]
+    : shareMenusNearNode(root);
+
+  menus.forEach((menu) => {
     if (isXShareMenu(menu)) {
       injectDiscordShareMenuItem(menu);
     }
@@ -2305,7 +2376,26 @@ function removeLegacyDiscordButtons() {
 function installShareMenuIntegration() {
   document.addEventListener("click", captureShareArticle, true);
 
-  const observer = new MutationObserver(() => scanShareMenus());
+  const pendingNodes = new Set();
+  let scanScheduled = false;
+  const flushAddedNodes = () => {
+    scanScheduled = false;
+    const nodes = [...pendingNodes];
+    pendingNodes.clear();
+    nodes.forEach((node) => scanShareMenus(node));
+  };
+
+  const observer = new MutationObserver((records) => {
+    for (const record of records) {
+      for (const node of record.addedNodes || []) {
+        if (node.nodeType === Node.ELEMENT_NODE) pendingNodes.add(node);
+      }
+    }
+    if (pendingNodes.size > 0 && !scanScheduled) {
+      scanScheduled = true;
+      queueMicrotask(flushAddedNodes);
+    }
+  });
   observer.observe(document.documentElement, { childList: true, subtree: true });
   scanShareMenus();
 }
@@ -3455,6 +3545,7 @@ function previewStylesCss() {
   // --- 13-media-fetch.js ---
 const ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
 const ATTACHMENT_MAX_COUNT = 10;
+const MEDIA_FETCH_TIMEOUT_MS = 20_000;
 
 function mediaUrlExtension(url, fallback = "bin") {
   const match = String(url || "").split("?")[0].match(/\.([a-z0-9]+)(?::[a-z]+)?$/i);
@@ -3480,6 +3571,7 @@ function fetchMediaBytes(url) {
     xhrClient()({
       method: "GET",
       url,
+      timeout: MEDIA_FETCH_TIMEOUT_MS,
       responseType: "arraybuffer",
       onload(response) {
         if (response.status >= 200 && response.status < 300 && response.response) {
@@ -3490,6 +3582,9 @@ function fetchMediaBytes(url) {
       },
       onerror() {
         reject(new Error("Could not fetch media for upload."));
+      },
+      ontimeout() {
+        reject(new Error("Media download timed out."));
       }
     });
   });

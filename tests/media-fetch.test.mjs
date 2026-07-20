@@ -8,7 +8,9 @@ import path from "node:path";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const srcDir = path.join(root, "userscript", "src");
 
-function loadMediaFetchContext() {
+function loadMediaFetchContext(xhrHandler = () => {
+  throw new Error("Unexpected media request");
+}) {
   const files = ["00-config.js", "02-utils.js", "04-video.js", "05-format-discord.js", "13-media-fetch.js"];
   const code = files.map((name) => readFileSync(path.join(srcDir, name), "utf8")).join("\n");
   const context = createContext({
@@ -16,13 +18,16 @@ function loadMediaFetchContext() {
     URL,
     location: { href: "https://x.com/" },
     performance: { getEntriesByType: () => [] },
-    document: { querySelectorAll: () => [] }
+    document: { querySelectorAll: () => [] },
+    xhrClient: () => xhrHandler
   });
   runInNewContext(`${code}\nthis.exports = {
     ATTACHMENT_MAX_BYTES,
     ATTACHMENT_MAX_COUNT,
     attachmentFilename,
     collectMediaAttachmentUrls,
+    fetchMediaBytes,
+    MEDIA_FETCH_TIMEOUT_MS,
     resolveAttachmentsForTweet,
     summarizeSkippedMedia
   };`, context);
@@ -137,4 +142,15 @@ test("attachment helpers keep stable names and summarize reasons", () => {
     { reason: "count" },
     { reason: "fetch" }
   ]), "1 too large, 2 failed to download, 1 over limit");
+});
+
+test("media downloads apply a timeout and surface timeout failures", async () => {
+  let requestOptions;
+  const { fetchMediaBytes, MEDIA_FETCH_TIMEOUT_MS } = loadMediaFetchContext((options) => {
+    requestOptions = options;
+    queueMicrotask(() => options.ontimeout());
+  });
+
+  await assert.rejects(() => fetchMediaBytes(videoUrl), /timed out/i);
+  assert.equal(requestOptions.timeout, MEDIA_FETCH_TIMEOUT_MS);
 });

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const distPath = path.join(root, "dist", "tweet-discord-share.user.js");
 const before = fs.existsSync(distPath) ? fs.readFileSync(distPath, "utf8") : null;
+const normalizeLineEndings = (value) => value?.replace(/\r\n/g, "\n");
 const result = spawnSync(process.execPath, [path.join(root, "scripts", "build.mjs")], {
   cwd: root,
   stdio: "inherit"
@@ -14,7 +15,7 @@ const result = spawnSync(process.execPath, [path.join(root, "scripts", "build.mj
 if (result.status !== 0) process.exit(result.status ?? 1);
 
 const after = fs.readFileSync(distPath, "utf8");
-if (before !== after) {
+if (normalizeLineEndings(before) !== normalizeLineEndings(after)) {
   console.error("dist/tweet-discord-share.user.js was stale and has been regenerated. Review and commit it.");
   process.exit(1);
 }

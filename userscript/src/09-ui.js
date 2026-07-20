@@ -231,8 +231,23 @@ function injectDiscordShareMenuItem(menu) {
   menu.append(item);
 }
 
-function scanShareMenus() {
-  document.querySelectorAll('[role="menu"]').forEach((menu) => {
+function shareMenusNearNode(node) {
+  if (!node || node.nodeType !== Node.ELEMENT_NODE) return [];
+
+  const menus = [];
+  if (node.matches?.('[role="menu"]')) menus.push(node);
+  node.querySelectorAll?.('[role="menu"]').forEach((menu) => menus.push(menu));
+  const parentMenu = node.closest?.('[role="menu"]');
+  if (parentMenu) menus.push(parentMenu);
+  return [...new Set(menus)];
+}
+
+function scanShareMenus(root = document) {
+  const menus = root === document
+    ? [...document.querySelectorAll('[role="menu"]')]
+    : shareMenusNearNode(root);
+
+  menus.forEach((menu) => {
     if (isXShareMenu(menu)) {
       injectDiscordShareMenuItem(menu);
     }
@@ -246,7 +261,26 @@ function removeLegacyDiscordButtons() {
 function installShareMenuIntegration() {
   document.addEventListener("click", captureShareArticle, true);
 
-  const observer = new MutationObserver(() => scanShareMenus());
+  const pendingNodes = new Set();
+  let scanScheduled = false;
+  const flushAddedNodes = () => {
+    scanScheduled = false;
+    const nodes = [...pendingNodes];
+    pendingNodes.clear();
+    nodes.forEach((node) => scanShareMenus(node));
+  };
+
+  const observer = new MutationObserver((records) => {
+    for (const record of records) {
+      for (const node of record.addedNodes || []) {
+        if (node.nodeType === Node.ELEMENT_NODE) pendingNodes.add(node);
+      }
+    }
+    if (pendingNodes.size > 0 && !scanScheduled) {
+      scanScheduled = true;
+      queueMicrotask(flushAddedNodes);
+    }
+  });
   observer.observe(document.documentElement, { childList: true, subtree: true });
   scanShareMenus();
 }

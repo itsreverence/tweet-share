@@ -9,7 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const srcDir = path.join(root, "userscript", "src");
 const validWebhook = "https://discord.com/api/webhooks/1234567890/abc_DEF-123";
 
-function loadDeliverContext({ multipartError = null } = {}) {
+function loadDeliverContext({ multipartError = null, requestErrorAt = null } = {}) {
   const files = [
     "00-config.js",
     "02-utils.js",
@@ -46,6 +46,7 @@ function loadDeliverContext({ multipartError = null } = {}) {
       calls.toasts.push({ message, state });
     },
     __multipartError: multipartError,
+    __requestErrorAt: requestErrorAt,
     xhrClient() {
       throw new Error("xhrClient should not run in deliver tests");
     }
@@ -55,6 +56,7 @@ function loadDeliverContext({ multipartError = null } = {}) {
     `${code}
 request = async (method, url, body) => {
   __calls.requests.push({ method, url, body, kind: "json" });
+  if (__requestErrorAt === __calls.requests.length) throw new Error("follow-up failed");
   return {};
 };
 requestMultipart = async (url, payload, files) => {
@@ -264,4 +266,19 @@ test("shareToDestination delays between multi-message shares", async () => {
 
   assert.ok(calls.requests.length >= 2);
   assert.equal(calls.delays, calls.requests.length - 1);
+});
+
+test("shareToDestination reports how many messages were sent before a follow-up failure", async () => {
+  const { shareToDestination, saveAllDestinations } = loadDeliverContext({ requestErrorAt: 2 });
+  await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
+
+  await assert.rejects(
+    () => shareToDestination("main", videoTweet, {
+      includeQuote: false,
+      fetchMediaBytes() {
+        throw new Error("unavailable");
+      }
+    }),
+    /Sent 1 of 2 Discord messages before delivery failed: follow-up failed/
+  );
 });

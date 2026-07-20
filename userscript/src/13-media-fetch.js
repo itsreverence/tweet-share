@@ -1,5 +1,6 @@
 const ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
 const ATTACHMENT_MAX_COUNT = 10;
+const MEDIA_FETCH_TIMEOUT_MS = 20_000;
 
 function mediaUrlExtension(url, fallback = "bin") {
   const match = String(url || "").split("?")[0].match(/\.([a-z0-9]+)(?::[a-z]+)?$/i);
@@ -25,6 +26,7 @@ function fetchMediaBytes(url) {
     xhrClient()({
       method: "GET",
       url,
+      timeout: MEDIA_FETCH_TIMEOUT_MS,
       responseType: "arraybuffer",
       onload(response) {
         if (response.status >= 200 && response.status < 300 && response.response) {
@@ -35,6 +37,9 @@ function fetchMediaBytes(url) {
       },
       onerror() {
         reject(new Error("Could not fetch media for upload."));
+      },
+      ontimeout() {
+        reject(new Error("Media download timed out."));
       }
     });
   });

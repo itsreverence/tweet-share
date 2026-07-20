@@ -1,7 +1,9 @@
 function truncate(value, limit) {
   const textValue = String(value || "").trim();
   if (textValue.length <= limit) return textValue;
-  return `${textValue.slice(0, Math.max(0, limit - 1)).trimEnd()}...`;
+  const suffix = "...";
+  if (limit <= suffix.length) return suffix.slice(0, Math.max(0, limit));
+  return `${textValue.slice(0, limit - suffix.length).trimEnd()}${suffix}`;
 }
 
 function unique(values) {
