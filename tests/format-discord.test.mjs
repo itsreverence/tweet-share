@@ -224,6 +224,32 @@ test("auto inline quote uses quoted image as the embed hero when main has no med
   assert.ok(payloads[0].embeds[0].fields.some((field) => field.name === "Quoted post from @bob"));
 });
 
+test("inline quote images are deduplicated when extraction also assigns them to the main post", () => {
+  const duplicatedImages = ["one", "two", "three"].map((name) => ({
+    type: "image",
+    url: `https://pbs.twimg.com/media/${name}.jpg`
+  }));
+  const tweet = {
+    ...sampleTweet,
+    media: duplicatedImages,
+    quote: {
+      url: "https://x.com/bob/status/2",
+      author: { displayName: "Bob", username: "bob" },
+      text: "Distinct quoted post text",
+      media: duplicatedImages
+    }
+  };
+
+  const embeds = buildDiscordPayloads(tweet, { quoteLayout: "auto" })[0].embeds;
+  const imageUrls = embeds.flatMap((embed) => embed.image?.url ? [embed.image.url] : []);
+
+  assert.deepEqual(Array.from(imageUrls), [
+    "https://pbs.twimg.com/media/one.jpg",
+    "https://pbs.twimg.com/media/two.jpg",
+    "https://pbs.twimg.com/media/three.jpg"
+  ]);
+});
+
 test("auto quote layout inlines main and quoted videos as follow-up links", () => {
   const mainVideo = "https://video.twimg.com/ext_tw_video/1/pu/vid/abc/1280x720/main.mp4";
   const quoteVideo = "https://video.twimg.com/ext_tw_video/2/pu/vid/abc/1280x720/quote.mp4";

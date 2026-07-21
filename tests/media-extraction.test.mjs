@@ -588,6 +588,79 @@ test("extractTweet excludes quoted text and media from the main tweet", () => {
   assert.equal(tweet.quote.text, "Quoted body");
 });
 
+test("extractTweet identifies the timestamp permalink when the quoted link appears first", () => {
+  const quoteUrl = "https://x.com/tenobrus/status/2079661246580973865";
+  const mainUrl = "https://x.com/theo/status/2079662956628127954";
+  const quoteLink = fakeNode({ href: quoteUrl, getAttribute: () => "/tenobrus/status/2079661246580973865" });
+  const mainLink = fakeNode({
+    href: mainUrl,
+    getAttribute: () => "/theo/status/2079662956628127954",
+    querySelector(selector) {
+      return selector === "time" ? fakeNode() : null;
+    }
+  });
+  const mainTextNode = fakeNode({ innerText: "Main post text" });
+  const quoteTextNode = fakeNode({ innerText: "Distinct quoted post text" });
+  const quoteImages = ["one", "two", "three"].map((name) =>
+    fakeNode({ src: `https://pbs.twimg.com/media/${name}.jpg`, alt: name })
+  );
+  const quoteContainer = fakeNode({
+    contains(node) {
+      return node === quoteContainer || node === quoteTextNode || quoteImages.includes(node);
+    },
+    querySelector(selector) {
+      return selector === '[data-testid="tweetText"]' ? quoteTextNode : null;
+    },
+    querySelectorAll(selector) {
+      if (selector === 'a[href*="/status/"]') return [quoteLink];
+      if (selector === '[data-testid="tweetText"]') return [quoteTextNode];
+      if (selector === '[data-testid="tweetPhoto"] img') return quoteImages;
+      if (selector === 'img[src*="pbs.twimg.com/media/"]' || selector === "video") return [];
+      return [];
+    }
+  });
+  const broadClickableContainer = fakeNode({
+    contains(node) {
+      return node === broadClickableContainer || node === mainTextNode || quoteContainer.contains(node);
+    },
+    querySelector(selector) {
+      return selector === '[data-testid="tweetText"]' ? mainTextNode : null;
+    },
+    querySelectorAll(selector) {
+      if (selector === 'a[href*="/status/"]') return [quoteLink, mainLink];
+      if (selector === '[data-testid="tweetText"]') return [mainTextNode, quoteTextNode];
+      return [];
+    }
+  });
+  const article = fakeNode({
+    contains(node) {
+      return node === article || broadClickableContainer.contains(node);
+    },
+    querySelector(selector) {
+      if (selector === "time") return fakeNode({ getAttribute: () => "2026-07-21T00:00:00.000Z" });
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector === 'a[href*="/status/"]') return [quoteLink, mainLink];
+      if (selector === '[role="link"]') return [broadClickableContainer, quoteContainer];
+      if (selector === '[data-testid="card.wrapper"]') return [];
+      if (selector === '[data-testid="tweetText"]') return [mainTextNode, quoteTextNode];
+      if (selector === '[data-testid="tweetPhoto"] img') return quoteImages;
+      if (selector === 'img[src*="pbs.twimg.com/media/"]' || selector === "video") return [];
+      return [];
+    }
+  });
+
+  const tweet = extractTweet(article);
+
+  assert.equal(tweet.url, mainUrl);
+  assert.equal(tweet.text, "Main post text");
+  assert.equal(tweet.media.length, 0);
+  assert.equal(tweet.quote.url, quoteUrl);
+  assert.equal(tweet.quote.text, "Distinct quoted post text");
+  assert.equal(tweet.quote.media.length, 3);
+});
+
 test("extractQuote merges cached media with DOM media instead of replacing it", () => {
   TWEET_CACHE.clear();
   cacheTweetResult({
