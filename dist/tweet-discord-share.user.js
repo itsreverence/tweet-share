@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweet Discord Share
 // @namespace    https://github.com/itsreverence/tweet-share
-// @version      0.6.26
+// @version      0.6.27
 // @description  Share X/Twitter posts to Discord channels via webhooks (no server required).
 // @homepageURL  https://github.com/itsreverence/tweet-share
 // @supportURL   https://github.com/itsreverence/tweet-share/issues
@@ -785,7 +785,13 @@ function collectMediaAttachmentUrls(tweet, shareOptions = {}) {
     }
   }
 
-  return unique(urls);
+  return urls.filter((url, index, all) => {
+    const key = isTweetImageMediaUrl(url) ? (tweetImageMediaKey(url) || url) : url;
+    return all.findIndex((candidate) => {
+      const candidateKey = isTweetImageMediaUrl(candidate) ? (tweetImageMediaKey(candidate) || candidate) : candidate;
+      return candidateKey === key;
+    }) === index;
+  });
 }
 
 function isHttpsUrl(url) {
@@ -1587,10 +1593,28 @@ function extractTimestamp(article) {
   return article.querySelector("time")?.getAttribute("datetime") || "";
 }
 
+function quoteCandidateHasContent(node) {
+  return [
+    '[data-testid="tweetText"]',
+    '[data-testid="tweetPhoto"] img',
+    'img[src*="pbs.twimg.com/media/"]',
+    "video"
+  ].some((selector) => node.querySelector?.(selector));
+}
+
+function innermostQuoteCandidate(candidates) {
+  return candidates.find((candidate) =>
+    !candidates.some((other) =>
+      other !== candidate && typeof candidate.contains === "function" && candidate.contains(other)
+    )
+  );
+}
+
 function extractQuote(article) {
   const mainUrl = tweetUrlFromArticle(article);
+  const mainTweetId = tweetIdFromUrl(mainUrl);
   const statusLinks = statusLinksFromArticle(article);
-  const quotedLink = statusLinks.find((href) => href !== mainUrl && tweetIdFromUrl(href) !== tweetIdFromUrl(mainUrl));
+  const quotedLink = statusLinks.find((href) => href !== mainUrl && tweetIdFromUrl(href) !== mainTweetId);
   const quotedTweetId = tweetIdFromUrl(quotedLink);
 
   const quoteCandidates = [
@@ -1602,11 +1626,14 @@ function extractQuote(article) {
       statusLinksFromArticle(node).some((href) => tweetIdFromUrl(href) === quotedTweetId)
     )
     : [];
-  const quotedContainer = linkedQuoteCandidates.find((candidate) =>
-    !linkedQuoteCandidates.some((other) =>
-      other !== candidate && typeof candidate.contains === "function" && candidate.contains(other)
-    )
-  ) || quoteCandidates.find((node) => node !== article && node.querySelector('[data-testid="tweetText"]'));
+  const quoteOnlyCandidates = linkedQuoteCandidates.filter((node) =>
+    !statusLinksFromArticle(node).some((href) => tweetIdFromUrl(href) === mainTweetId)
+  );
+  const scopedQuoteCandidates = quoteOnlyCandidates.length ? quoteOnlyCandidates : linkedQuoteCandidates;
+  const contentQuoteCandidates = scopedQuoteCandidates.filter(quoteCandidateHasContent);
+  const quotedContainer = innermostQuoteCandidate(contentQuoteCandidates)
+    || innermostQuoteCandidate(scopedQuoteCandidates)
+    || quoteCandidates.find((node) => node !== article && node.querySelector('[data-testid="tweetText"]'));
 
   if (!quotedContainer && !quotedLink) return null;
 
