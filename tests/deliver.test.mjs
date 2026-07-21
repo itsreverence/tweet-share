@@ -115,7 +115,7 @@ test("buildWebhookTestPayload uses Tweet Discord Share branding", () => {
   const payload = buildWebhookTestPayload();
 
   assert.equal(payload.username, "Tweet Share");
-  assert.match(payload.avatar_url, /webhook-avatar\.png$/);
+  assert.match(payload.avatar_url, /webhook-avatar-v2\.png$/);
   assert.match(payload.content, /connected/i);
   assert.equal(Object.hasOwn(payload, "embeds"), false);
 });
