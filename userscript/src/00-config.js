@@ -31,7 +31,7 @@ const EMBED_COLOR_QUOTE = 0x536471;
 const WEBHOOK_SENDER_NAME = "Tweet Share";
 // Self-hosted in repo so Discord's servers can fetch it reliably (Wikimedia often fails).
 const WEBHOOK_SENDER_AVATAR_URL =
-  "https://raw.githubusercontent.com/itsreverence/tweet-share/master/assets/webhook-avatar.png";
+  "https://raw.githubusercontent.com/itsreverence/tweet-share/master/assets/webhook-avatar-v2.png";
 const WEBHOOK_SEND_DELAY_MS = 750;
 const CACHE_MAX_ENTRIES = 300;
 
