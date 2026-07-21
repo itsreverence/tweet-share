@@ -612,12 +612,29 @@ test("extractTweet identifies the timestamp permalink when the quoted link appea
       return null;
     }
   });
+  const mediaOnlyQuoteContainer = fakeNode({
+    contains(node) {
+      return node === mediaOnlyQuoteContainer
+        || node === narrowQuoteLinkContainer
+        || quoteImages.includes(node);
+    },
+    querySelector(selector) {
+      return selector === '[data-testid="tweetPhoto"] img'
+        || selector === 'img[src*="pbs.twimg.com/media/"]'
+        ? quoteImages[0]
+        : null;
+    },
+    querySelectorAll(selector) {
+      if (selector === 'a[href*="/status/"]') return [quoteLink];
+      if (selector === '[data-testid="tweetPhoto"] img') return quoteImages;
+      return [];
+    }
+  });
   const quoteContainer = fakeNode({
     contains(node) {
       return node === quoteContainer
-        || node === narrowQuoteLinkContainer
         || node === quoteTextNode
-        || quoteImages.includes(node);
+        || mediaOnlyQuoteContainer.contains(node);
     },
     querySelector(selector) {
       return selector === '[data-testid="tweetText"]' ? quoteTextNode : null;
@@ -653,7 +670,9 @@ test("extractTweet identifies the timestamp permalink when the quoted link appea
     },
     querySelectorAll(selector) {
       if (selector === 'a[href*="/status/"]') return [quoteLink, mainLink];
-      if (selector === '[role="link"]') return [broadClickableContainer, quoteContainer, narrowQuoteLinkContainer];
+      if (selector === '[role="link"]') {
+        return [broadClickableContainer, quoteContainer, mediaOnlyQuoteContainer, narrowQuoteLinkContainer];
+      }
       if (selector === '[data-testid="card.wrapper"]') return [];
       if (selector === '[data-testid="tweetText"]') return [mainTextNode, quoteTextNode];
       if (selector === '[data-testid="tweetPhoto"] img') return quoteImages;

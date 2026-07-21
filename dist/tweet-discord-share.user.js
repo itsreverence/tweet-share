@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweet Discord Share
 // @namespace    https://github.com/itsreverence/tweet-share
-// @version      0.6.27
+// @version      0.6.28
 // @description  Share X/Twitter posts to Discord channels via webhooks (no server required).
 // @homepageURL  https://github.com/itsreverence/tweet-share
 // @supportURL   https://github.com/itsreverence/tweet-share/issues
@@ -720,6 +720,15 @@ function uniqueMediaLinks(items) {
   });
 }
 
+function mediaUrlIdentity(url) {
+  return isTweetImageMediaUrl(url) ? (tweetImageMediaKey(url) || url) : url;
+}
+
+function attachmentIncludesMediaUrl(attachmentUrls, url) {
+  const identity = mediaUrlIdentity(url);
+  return attachmentUrls.some((candidate) => mediaUrlIdentity(candidate) === identity);
+}
+
 function tweetHasEmbedImageMedia(tweet) {
   return imageMedia(tweet).length > 0;
 }
@@ -986,7 +995,7 @@ function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind, shareOptio
       item.kind === "image"
       && item.url
       && item.url !== heroUrl
-      && !attachmentUrls.includes(item.url)
+      && !attachmentIncludesMediaUrl(attachmentUrls, item.url)
       && isValidEmbedImageUrl(item.url)
     )
     .map((item) =>
@@ -1013,8 +1022,8 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
   const inlineQuoteMedia = inlineQuote ? mediaLinks(inlineQuote, shareOptions).filter((item) => item.kind === "image") : [];
   const media = uniqueMediaLinks([...mediaLinks(tweet, shareOptions), ...inlineQuoteMedia]);
   const attachmentUrls = shareOptions.attachmentUrls || [];
-  const visibleMedia = media.filter((item) => !attachmentUrls.includes(item.url));
-  const visibleInlineQuoteMedia = inlineQuoteMedia.filter((item) => !attachmentUrls.includes(item.url));
+  const visibleMedia = media.filter((item) => !attachmentIncludesMediaUrl(attachmentUrls, item.url));
+  const visibleInlineQuoteMedia = inlineQuoteMedia.filter((item) => !attachmentIncludesMediaUrl(attachmentUrls, item.url));
   const heroImageUrl = pickEmbedHeroUrl(visibleMedia)
     || (inlineQuote ? pickEmbedHeroUrl(visibleInlineQuoteMedia) : "");
   const mediaFields = [];
@@ -1602,10 +1611,10 @@ function quoteCandidateHasContent(node) {
   ].some((selector) => node.querySelector?.(selector));
 }
 
-function innermostQuoteCandidate(candidates) {
+function outermostQuoteCandidate(candidates) {
   return candidates.find((candidate) =>
     !candidates.some((other) =>
-      other !== candidate && typeof candidate.contains === "function" && candidate.contains(other)
+      other !== candidate && typeof other.contains === "function" && other.contains(candidate)
     )
   );
 }
@@ -1631,8 +1640,8 @@ function extractQuote(article) {
   );
   const scopedQuoteCandidates = quoteOnlyCandidates.length ? quoteOnlyCandidates : linkedQuoteCandidates;
   const contentQuoteCandidates = scopedQuoteCandidates.filter(quoteCandidateHasContent);
-  const quotedContainer = innermostQuoteCandidate(contentQuoteCandidates)
-    || innermostQuoteCandidate(scopedQuoteCandidates)
+  const quotedContainer = outermostQuoteCandidate(contentQuoteCandidates)
+    || outermostQuoteCandidate(scopedQuoteCandidates)
     || quoteCandidates.find((node) => node !== article && node.querySelector('[data-testid="tweetText"]'));
 
   if (!quotedContainer && !quotedLink) return null;
