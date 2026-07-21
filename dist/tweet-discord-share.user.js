@@ -710,7 +710,14 @@ function webhookSenderAvatarUrl() {
 }
 
 function uniqueMediaLinks(items) {
-  return items.filter((item, index, all) => item.url && all.findIndex((candidate) => candidate.url === item.url) === index);
+  return items.filter((item, index, all) => {
+    if (!item.url) return false;
+    const key = item.kind === "image" ? (tweetImageMediaKey(item.url) || item.url) : item.url;
+    return all.findIndex((candidate) => {
+      const candidateKey = candidate.kind === "image" ? (tweetImageMediaKey(candidate.url) || candidate.url) : candidate.url;
+      return candidateKey === key;
+    }) === index;
+  });
 }
 
 function tweetHasEmbedImageMedia(tweet) {
@@ -998,7 +1005,7 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
   const text = String(tweet.text || "").trim();
   const inlineQuote = kind === "main" && shareOptions.quoteLayout === "inline" ? shareOptions.rootTweet?.quote : null;
   const inlineQuoteMedia = inlineQuote ? mediaLinks(inlineQuote, shareOptions).filter((item) => item.kind === "image") : [];
-  const media = [...mediaLinks(tweet, shareOptions), ...inlineQuoteMedia];
+  const media = uniqueMediaLinks([...mediaLinks(tweet, shareOptions), ...inlineQuoteMedia]);
   const attachmentUrls = shareOptions.attachmentUrls || [];
   const visibleMedia = media.filter((item) => !attachmentUrls.includes(item.url));
   const visibleInlineQuoteMedia = inlineQuoteMedia.filter((item) => !attachmentUrls.includes(item.url));
@@ -1468,13 +1475,19 @@ async function enrichTweetMedia(tweet) {
   // --- 07-extract-dom.js ---
 function tweetUrlFromArticle(article) {
   const links = [...article.querySelectorAll('a[href*="/status/"]')];
-  const statusLink = links.find((link) => /\/[^/]+\/status\/\d+/.test(link.getAttribute("href") || ""));
+  const statusLinks = links.filter((link) => /\/[^/]+\/status\/\d+/.test(link.getAttribute("href") || ""));
+  const pageTweetId = tweetIdFromUrl(location.href);
+  const statusLink = statusLinks.find((link) => link.querySelector?.("time"))
+    || statusLinks.find((link) => pageTweetId && tweetIdFromUrl(link.href) === pageTweetId)
+    || statusLinks[0];
   return statusLink ? normalizeTweetUrl(statusLink.href) : normalizeTweetUrl(location.href);
 }
 
 function statusLinksFromArticle(article) {
-  return [...article.querySelectorAll('a[href*="/status/"]')]
-    .map((link) => normalizeTweetUrl(link.href))
+  const selfHref = article.getAttribute?.("href") || "";
+  return [selfHref, ...[...article.querySelectorAll('a[href*="/status/"]')].map((link) => link.href)]
+    .filter(Boolean)
+    .map((href) => normalizeTweetUrl(href))
     .filter((url, index, all) => /\/status\/\d+/.test(url) && all.indexOf(url) === index);
 }
 
@@ -1578,16 +1591,22 @@ function extractQuote(article) {
   const mainUrl = tweetUrlFromArticle(article);
   const statusLinks = statusLinksFromArticle(article);
   const quotedLink = statusLinks.find((href) => href !== mainUrl && tweetIdFromUrl(href) !== tweetIdFromUrl(mainUrl));
+  const quotedTweetId = tweetIdFromUrl(quotedLink);
 
   const quoteCandidates = [
     ...article.querySelectorAll('[role="link"]'),
     ...article.querySelectorAll('[data-testid="card.wrapper"]')
   ];
-  const quotedContainer = quoteCandidates.find((node) => {
-    const links = statusLinksFromArticle(node);
-    const hasDistinctStatus = links.some((href) => href !== mainUrl && tweetIdFromUrl(href) !== tweetIdFromUrl(mainUrl));
-    return hasDistinctStatus || (node.querySelector('[data-testid="tweetText"]') && node !== article);
-  });
+  const linkedQuoteCandidates = quotedTweetId
+    ? quoteCandidates.filter((node) =>
+      statusLinksFromArticle(node).some((href) => tweetIdFromUrl(href) === quotedTweetId)
+    )
+    : [];
+  const quotedContainer = linkedQuoteCandidates.find((candidate) =>
+    !linkedQuoteCandidates.some((other) =>
+      other !== candidate && typeof candidate.contains === "function" && candidate.contains(other)
+    )
+  ) || quoteCandidates.find((node) => node !== article && node.querySelector('[data-testid="tweetText"]'));
 
   if (!quotedContainer && !quotedLink) return null;
 

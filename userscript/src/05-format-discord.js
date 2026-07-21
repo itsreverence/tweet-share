@@ -26,7 +26,14 @@ function webhookSenderAvatarUrl() {
 }
 
 function uniqueMediaLinks(items) {
-  return items.filter((item, index, all) => item.url && all.findIndex((candidate) => candidate.url === item.url) === index);
+  return items.filter((item, index, all) => {
+    if (!item.url) return false;
+    const key = item.kind === "image" ? (tweetImageMediaKey(item.url) || item.url) : item.url;
+    return all.findIndex((candidate) => {
+      const candidateKey = candidate.kind === "image" ? (tweetImageMediaKey(candidate.url) || candidate.url) : candidate.url;
+      return candidateKey === key;
+    }) === index;
+  });
 }
 
 function tweetHasEmbedImageMedia(tweet) {
@@ -314,7 +321,7 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
   const text = String(tweet.text || "").trim();
   const inlineQuote = kind === "main" && shareOptions.quoteLayout === "inline" ? shareOptions.rootTweet?.quote : null;
   const inlineQuoteMedia = inlineQuote ? mediaLinks(inlineQuote, shareOptions).filter((item) => item.kind === "image") : [];
-  const media = [...mediaLinks(tweet, shareOptions), ...inlineQuoteMedia];
+  const media = uniqueMediaLinks([...mediaLinks(tweet, shareOptions), ...inlineQuoteMedia]);
   const attachmentUrls = shareOptions.attachmentUrls || [];
   const visibleMedia = media.filter((item) => !attachmentUrls.includes(item.url));
   const visibleInlineQuoteMedia = inlineQuoteMedia.filter((item) => !attachmentUrls.includes(item.url));
