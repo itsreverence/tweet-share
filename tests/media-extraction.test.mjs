@@ -604,9 +604,20 @@ test("extractTweet identifies the timestamp permalink when the quoted link appea
   const quoteImages = ["one", "two", "three"].map((name) =>
     fakeNode({ src: `https://pbs.twimg.com/media/${name}.jpg`, alt: name })
   );
+  const narrowQuoteLinkContainer = fakeNode({
+    getAttribute(name) {
+      return name === "href" ? "/tenobrus/status/2079661246580973865" : "";
+    },
+    querySelector() {
+      return null;
+    }
+  });
   const quoteContainer = fakeNode({
     contains(node) {
-      return node === quoteContainer || node === quoteTextNode || quoteImages.includes(node);
+      return node === quoteContainer
+        || node === narrowQuoteLinkContainer
+        || node === quoteTextNode
+        || quoteImages.includes(node);
     },
     querySelector(selector) {
       return selector === '[data-testid="tweetText"]' ? quoteTextNode : null;
@@ -642,7 +653,7 @@ test("extractTweet identifies the timestamp permalink when the quoted link appea
     },
     querySelectorAll(selector) {
       if (selector === 'a[href*="/status/"]') return [quoteLink, mainLink];
-      if (selector === '[role="link"]') return [broadClickableContainer, quoteContainer];
+      if (selector === '[role="link"]') return [broadClickableContainer, quoteContainer, narrowQuoteLinkContainer];
       if (selector === '[data-testid="card.wrapper"]') return [];
       if (selector === '[data-testid="tweetText"]') return [mainTextNode, quoteTextNode];
       if (selector === '[data-testid="tweetPhoto"] img') return quoteImages;

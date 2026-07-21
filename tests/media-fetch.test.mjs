@@ -59,6 +59,30 @@ test("collectMediaAttachmentUrls keeps media order", () => {
   assert.deepEqual(Array.from(collectMediaAttachmentUrls(tweet)), [videoUrl, imageUrl]);
 });
 
+test("collectMediaAttachmentUrls deduplicates responsive variants shared by main and quoted posts", () => {
+  const duplicatedImage = "https://pbs.twimg.com/media/quote-one.jpg?format=jpg&name=small";
+  const quotedVariant = "https://pbs.twimg.com/media/quote-one?format=png&name=orig";
+  const quoteOnlyImages = [
+    "https://pbs.twimg.com/media/quote-two.jpg?format=jpg&name=orig",
+    "https://pbs.twimg.com/media/quote-three.jpg?format=jpg&name=orig"
+  ];
+  const urls = collectMediaAttachmentUrls({
+    ...tweet,
+    media: [{ type: "image", url: duplicatedImage }],
+    quote: {
+      url: "https://x.com/bob/status/2",
+      author: { displayName: "Bob", username: "bob" },
+      text: "Quoted post",
+      media: [
+        { type: "image", url: quotedVariant },
+        ...quoteOnlyImages.map((url) => ({ type: "image", url }))
+      ]
+    }
+  });
+
+  assert.deepEqual(Array.from(urls), [duplicatedImage, ...quoteOnlyImages]);
+});
+
 test("successful video fetch creates one MP4 attachment", async () => {
   const resolved = await resolveAttachmentsForTweet({ ...tweet, media: [tweet.media[0]] }, {
     fetchMediaBytes() {

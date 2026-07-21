@@ -1,6 +1,6 @@
 {
   "name": "tweet-discord-share",
-  "version": "0.6.26",
+  "version": "0.6.27",
   "private": true,
   "description": "Share X/Twitter posts to Discord via webhooks (Tampermonkey / Violentmonkey userscript).",
   "license": "MIT",

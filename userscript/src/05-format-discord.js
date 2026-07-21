@@ -101,7 +101,13 @@ function collectMediaAttachmentUrls(tweet, shareOptions = {}) {
     }
   }
 
-  return unique(urls);
+  return urls.filter((url, index, all) => {
+    const key = isTweetImageMediaUrl(url) ? (tweetImageMediaKey(url) || url) : url;
+    return all.findIndex((candidate) => {
+      const candidateKey = isTweetImageMediaUrl(candidate) ? (tweetImageMediaKey(candidate) || candidate) : candidate;
+      return candidateKey === key;
+    }) === index;
+  });
 }
 
 function isHttpsUrl(url) {
