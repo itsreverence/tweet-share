@@ -169,7 +169,7 @@ function extractQuote(article) {
   if (cachedQuote) {
     quote.url = cachedQuote.url || quote.url;
     quote.author = mergeAuthor(cachedQuote.author, quote.author);
-    quote.text = cachedQuote.text || quote.text;
+    quote.text = quote.text || cachedQuote.text || "";
     quote.media = mergeTweetMedia(cachedQuote.media || [], quote.media || []);
     quote.createdAt = cachedQuote.createdAt || quote.createdAt;
   }

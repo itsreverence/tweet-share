@@ -757,6 +757,57 @@ test("extractQuote merges cached media with DOM media instead of replacing it", 
   assert.equal(quote.media.some((item) => item.url === "https://video.twimg.com/ext_tw_video/2/pu/vid/1280x720/quote.mp4"), true);
 });
 
+test("extractQuote keeps visible text instead of cached hidden card URLs", () => {
+  TWEET_CACHE.clear();
+  cacheTweetResult({
+    rest_id: "2",
+    legacy: {
+      full_text: "Visible quoted body https://t.co/hidden-card"
+    },
+    core: {
+      user_results: {
+        result: {
+          legacy: { name: "Bob", screen_name: "bob" }
+        }
+      }
+    }
+  });
+
+  const quoteText = fakeNode({ innerText: "Visible quoted body" });
+  const quoteContainer = fakeNode({
+    contains(node) {
+      return node === quoteContainer || node === quoteText;
+    },
+    querySelector(selector) {
+      return selector === '[data-testid="tweetText"]' ? quoteText : null;
+    },
+    querySelectorAll(selector) {
+      if (selector === 'a[href*="/status/"]') {
+        return [{ href: "https://x.com/bob/status/2", getAttribute: () => "/bob/status/2" }];
+      }
+      if (selector === '[data-testid="tweetText"]') return [quoteText];
+      return [];
+    }
+  });
+  const article = fakeNode({
+    querySelectorAll(selector) {
+      if (selector === 'a[href*="/status/"]') {
+        return [
+          { href: "https://x.com/alice/status/1", getAttribute: () => "/alice/status/1" },
+          { href: "https://x.com/bob/status/2", getAttribute: () => "/bob/status/2" }
+        ];
+      }
+      if (selector === '[role="link"]') return [quoteContainer];
+      if (selector === '[data-testid="card.wrapper"]') return [];
+      return [];
+    }
+  });
+
+  const quote = extractQuote(article);
+
+  assert.equal(quote.text, "Visible quoted body");
+});
+
 test("extractQuote returns null when only the main status link is present", () => {
   const article = fakeNode({
     querySelectorAll(selector) {
