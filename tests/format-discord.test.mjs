@@ -224,6 +224,35 @@ test("auto inline quote uses quoted image as the embed hero when main has no med
   assert.ok(payloads[0].embeds[0].fields.some((field) => field.name === "Quoted post from @bob"));
 });
 
+test("attached quoted image variants are not repeated inside embeds", () => {
+  const quoteImages = ["one", "two", "three"].map((name) => ({
+    type: "image",
+    url: `https://pbs.twimg.com/media/${name}?format=jpg&name=orig`
+  }));
+  const attachmentUrls = quoteImages.map((item) => item.url.replace("name=orig", "name=small"));
+  const tweet = {
+    ...sampleTweet,
+    media: [],
+    quote: {
+      url: "https://x.com/bob/status/2",
+      author: { displayName: "Bob", username: "bob" },
+      text: "Quoted post text",
+      media: quoteImages
+    }
+  };
+
+  const payloads = buildDiscordPayloads(tweet, {
+    quoteLayout: "auto",
+    attachMedia: true,
+    attachmentUrls
+  });
+  const embeddedImageUrls = payloads.flatMap((payload) =>
+    (payload.embeds || []).flatMap((embed) => embed.image?.url ? [embed.image.url] : [])
+  );
+
+  assert.deepEqual(Array.from(embeddedImageUrls), []);
+});
+
 test("inline quote images are deduplicated when extraction also assigns them to the main post", () => {
   const duplicatedImages = ["one", "two", "three"].map((name) => ({
     type: "image",

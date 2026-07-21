@@ -36,6 +36,15 @@ function uniqueMediaLinks(items) {
   });
 }
 
+function mediaUrlIdentity(url) {
+  return isTweetImageMediaUrl(url) ? (tweetImageMediaKey(url) || url) : url;
+}
+
+function attachmentIncludesMediaUrl(attachmentUrls, url) {
+  const identity = mediaUrlIdentity(url);
+  return attachmentUrls.some((candidate) => mediaUrlIdentity(candidate) === identity);
+}
+
 function tweetHasEmbedImageMedia(tweet) {
   return imageMedia(tweet).length > 0;
 }
@@ -302,7 +311,7 @@ function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind, shareOptio
       item.kind === "image"
       && item.url
       && item.url !== heroUrl
-      && !attachmentUrls.includes(item.url)
+      && !attachmentIncludesMediaUrl(attachmentUrls, item.url)
       && isValidEmbedImageUrl(item.url)
     )
     .map((item) =>
@@ -329,8 +338,8 @@ function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
   const inlineQuoteMedia = inlineQuote ? mediaLinks(inlineQuote, shareOptions).filter((item) => item.kind === "image") : [];
   const media = uniqueMediaLinks([...mediaLinks(tweet, shareOptions), ...inlineQuoteMedia]);
   const attachmentUrls = shareOptions.attachmentUrls || [];
-  const visibleMedia = media.filter((item) => !attachmentUrls.includes(item.url));
-  const visibleInlineQuoteMedia = inlineQuoteMedia.filter((item) => !attachmentUrls.includes(item.url));
+  const visibleMedia = media.filter((item) => !attachmentIncludesMediaUrl(attachmentUrls, item.url));
+  const visibleInlineQuoteMedia = inlineQuoteMedia.filter((item) => !attachmentIncludesMediaUrl(attachmentUrls, item.url));
   const heroImageUrl = pickEmbedHeroUrl(visibleMedia)
     || (inlineQuote ? pickEmbedHeroUrl(visibleInlineQuoteMedia) : "");
   const mediaFields = [];

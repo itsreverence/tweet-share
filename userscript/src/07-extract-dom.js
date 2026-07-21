@@ -121,10 +121,10 @@ function quoteCandidateHasContent(node) {
   ].some((selector) => node.querySelector?.(selector));
 }
 
-function innermostQuoteCandidate(candidates) {
+function outermostQuoteCandidate(candidates) {
   return candidates.find((candidate) =>
     !candidates.some((other) =>
-      other !== candidate && typeof candidate.contains === "function" && candidate.contains(other)
+      other !== candidate && typeof other.contains === "function" && other.contains(candidate)
     )
   );
 }
@@ -150,8 +150,8 @@ function extractQuote(article) {
   );
   const scopedQuoteCandidates = quoteOnlyCandidates.length ? quoteOnlyCandidates : linkedQuoteCandidates;
   const contentQuoteCandidates = scopedQuoteCandidates.filter(quoteCandidateHasContent);
-  const quotedContainer = innermostQuoteCandidate(contentQuoteCandidates)
-    || innermostQuoteCandidate(scopedQuoteCandidates)
+  const quotedContainer = outermostQuoteCandidate(contentQuoteCandidates)
+    || outermostQuoteCandidate(scopedQuoteCandidates)
     || quoteCandidates.find((node) => node !== article && node.querySelector('[data-testid="tweetText"]'));
 
   if (!quotedContainer && !quotedLink) return null;
