@@ -24,6 +24,7 @@ function loadMediaFetchContext(xhrHandler = () => {
   runInNewContext(`${code}\nthis.exports = {
     ATTACHMENT_MAX_BYTES,
     ATTACHMENT_MAX_COUNT,
+    ATTACHMENT_REQUEST_MAX_BYTES,
     attachmentFilename,
     collectMediaAttachmentUrls,
     fetchMediaSize,
@@ -39,6 +40,7 @@ function loadMediaFetchContext(xhrHandler = () => {
 const {
   ATTACHMENT_MAX_BYTES,
   ATTACHMENT_MAX_COUNT,
+  ATTACHMENT_REQUEST_MAX_BYTES,
   attachmentFilename,
   collectMediaAttachmentUrls,
   resolveAttachmentsForTweet,
@@ -100,7 +102,7 @@ test("successful video fetch creates one MP4 attachment", async () => {
   assert.equal(resolved.skipped.length, 0);
 });
 
-test("Buzz Patterson video uploads its 15.3 MB highest-quality variant", async () => {
+test("Buzz Patterson video skips its 15.3 MB variant and uploads the best default-limit variant", async () => {
   const highUrl = "https://video.twimg.com/amplify_video/2079786897140772864/vid/avc1/1288x2230/high.mp4";
   const mediumUrl = "https://video.twimg.com/amplify_video/2079786897140772864/vid/avc1/720x1246/medium.mp4";
   const sizes = new Map([
@@ -127,8 +129,8 @@ test("Buzz Patterson video uploads its 15.3 MB highest-quality variant", async (
   });
 
   assert.equal(resolved.attachments.length, 1);
-  assert.equal(resolved.attachments[0].sourceUrl, highUrl);
-  assert.equal(resolved.attachments[0].bytes.byteLength, 15_319_401);
+  assert.equal(resolved.attachments[0].sourceUrl, mediumUrl);
+  assert.equal(resolved.attachments[0].bytes.byteLength, 3_744_793);
   assert.equal(resolved.skipped.length, 0);
 });
 
@@ -261,22 +263,25 @@ test("partial success returns attachments and skipped source details", async () 
 test("attachments share one bounded multipart request budget", async () => {
   const firstImage = "https://pbs.twimg.com/media/first.jpg";
   const secondImage = "https://pbs.twimg.com/media/second.jpg";
+  const thirdImage = "https://pbs.twimg.com/media/third.jpg";
   const resolved = await resolveAttachmentsForTweet({
     ...tweet,
     media: [
       { type: "image", url: firstImage },
-      { type: "image", url: secondImage }
+      { type: "image", url: secondImage },
+      { type: "image", url: thirdImage }
     ]
   }, {
     fetchMediaBytes() {
-      return { byteLength: 15 * 1024 * 1024 };
+      return { byteLength: 9 * 1024 * 1024 };
     }
   });
 
-  assert.equal(resolved.attachments.length, 1);
+  assert.equal(resolved.attachments.length, 2);
   assert.equal(resolved.skipped.length, 1);
-  assert.equal(resolved.skipped[0].sourceUrl, secondImage);
+  assert.equal(resolved.skipped[0].sourceUrl, thirdImage);
   assert.equal(resolved.skipped[0].reason, "size");
+  assert.equal(ATTACHMENT_REQUEST_MAX_BYTES, 24 * 1024 * 1024);
 });
 
 test("attachment helpers keep stable names and summarize reasons", () => {
