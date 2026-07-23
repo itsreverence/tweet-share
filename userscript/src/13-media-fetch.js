@@ -1,6 +1,8 @@
-// Discord currently caps the complete message request at 25 MiB. Keep 1 MiB
-// available for multipart boundaries, filenames, and the JSON payload.
-const ATTACHMENT_MAX_BYTES = 24 * 1024 * 1024;
+// Discord's default upload limit is 10 MiB per attachment. The complete
+// message request is capped at 25 MiB, so keep 1 MiB available for multipart
+// boundaries, filenames, and the JSON payload when combining attachments.
+const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+const ATTACHMENT_REQUEST_MAX_BYTES = 24 * 1024 * 1024;
 const ATTACHMENT_MAX_COUNT = 10;
 const MEDIA_FETCH_TIMEOUT_MS = 20_000;
 const MEDIA_SIZE_TIMEOUT_MS = 5_000;
@@ -178,7 +180,9 @@ async function resolveAttachmentsForTweet(tweet, shareOptions = {}) {
     }
     if (!media.url) continue;
 
-    const resolved = await resolveMediaAttachment(media, ATTACHMENT_MAX_BYTES - totalBytes, shareOptions);
+    const remainingRequestBytes = ATTACHMENT_REQUEST_MAX_BYTES - totalBytes;
+    const remainingBytes = Math.min(ATTACHMENT_MAX_BYTES, remainingRequestBytes);
+    const resolved = await resolveMediaAttachment(media, remainingBytes, shareOptions);
     if (resolved.bytes) {
       const index = attachments.length;
       attachments.push({
