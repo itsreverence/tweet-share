@@ -109,6 +109,7 @@ function playableVideoVariants(variants = []) {
       type: variant.content_type || variant.type || ""
     }))
     .filter((variant) => variant.type === "video/mp4" && isPlayableTweetVideoUrl(variant.url))
+    .filter((variant, index, all) => all.findIndex((candidate) => candidate.url === variant.url) === index)
     .sort((left, right) => (right.bitrate || videoQualityScore(right.url)) - (left.bitrate || videoQualityScore(left.url)));
 }
 

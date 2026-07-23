@@ -38,7 +38,8 @@ async function shareToDestination(destinationId, tweet, options = {}) {
   });
 
   if (resolved.skipped.length > 0 && attachments.length === 0) {
-    showToast("Media could not upload; sent available fallback content.", "info");
+    const skippedSummary = summarizeSkippedMedia(resolved.skipped);
+    showToast(`Media could not upload (${skippedSummary}); sent available fallback content.`, "info");
   }
 
   for (let index = 0; index < payloads.length; index += 1) {
