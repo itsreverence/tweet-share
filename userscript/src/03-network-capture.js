@@ -50,12 +50,14 @@ function mediaFromLegacyTweet(legacy) {
     }
 
     if (item.video_info?.variants) {
-      const bestVideoUrl = bestPlayableVideoVariantUrl(item.video_info.variants);
+      const variants = playableVideoVariants(item.video_info.variants);
+      const bestVideoUrl = variants[0]?.url || "";
 
       return [{
         type: "video",
-        url: bestVideoUrl || "",
+        url: bestVideoUrl,
         posterUrl: item.media_url_https || item.media_url || "",
+        variants,
         alt: item.ext_alt_text || ""
       }];
     }

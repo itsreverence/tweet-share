@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweet Discord Share
 // @namespace    https://github.com/itsreverence/tweet-share
-// @version      0.6.29
+// @version      0.6.30
 // @description  Share X/Twitter posts to Discord channels via webhooks (no server required).
 // @homepageURL  https://github.com/itsreverence/tweet-share
 // @supportURL   https://github.com/itsreverence/tweet-share/issues
@@ -429,6 +429,7 @@ function playableVideoVariants(variants = []) {
       type: variant.content_type || variant.type || ""
     }))
     .filter((variant) => variant.type === "video/mp4" && isPlayableTweetVideoUrl(variant.url))
+    .filter((variant, index, all) => all.findIndex((candidate) => candidate.url === variant.url) === index)
     .sort((left, right) => (right.bitrate || videoQualityScore(right.url)) - (left.bitrate || videoQualityScore(left.url)));
 }
 
@@ -512,12 +513,14 @@ function mediaFromLegacyTweet(legacy) {
     }
 
     if (item.video_info?.variants) {
-      const bestVideoUrl = bestPlayableVideoVariantUrl(item.video_info.variants);
+      const variants = playableVideoVariants(item.video_info.variants);
+      const bestVideoUrl = variants[0]?.url || "";
 
       return [{
         type: "video",
-        url: bestVideoUrl || "",
+        url: bestVideoUrl,
         posterUrl: item.media_url_https || item.media_url || "",
+        variants,
         alt: item.ext_alt_text || ""
       }];
     }
@@ -666,6 +669,15 @@ function imageMedia(tweet) {
 
 function videoMedia(tweet) {
   return (tweet.media || []).filter((item) => item.type === "video" && (item.url || item.posterUrl));
+}
+
+function playableVideoVariantsForMedia(media) {
+  const mediaId = posterMediaId(media.posterUrl);
+  const cached = mediaId ? (VIDEO_VARIANT_CACHE.get(mediaId) || []) : [];
+  const direct = isPlayableTweetVideoUrl(normalizeTweetVideoUrl(media.url || ""))
+    ? [{ url: media.url, bitrate: videoQualityScore(media.url), type: "video/mp4" }]
+    : [];
+  return playableVideoVariants([...(media.variants || []), ...cached, ...direct]);
 }
 
 function directPlayableVideoUrls(tweet) {
@@ -1329,16 +1341,20 @@ function mediaFromSyndication(data) {
     }
 
     if ((media.type === "video" || media.type === "animated_gif") && media.video_info?.variants) {
-      const videoUrl = bestPlayableVideoVariantUrl(media.video_info.variants);
+      const variants = playableVideoVariants(media.video_info.variants);
+      const videoUrl = variants[0]?.url || "";
       const posterUrl = media.media_url_https || "";
-      return videoUrl || posterUrl ? [{ type: "video", url: videoUrl, posterUrl, alt: media.ext_alt_text || "" }] : [];
+      return videoUrl || posterUrl
+        ? [{ type: "video", url: videoUrl, posterUrl, variants, alt: media.ext_alt_text || "" }]
+        : [];
     }
 
     return [];
   });
-  const topVideoUrl = bestPlayableVideoVariantUrl(data.video?.variants || []);
+  const topVideoVariants = playableVideoVariants(data.video?.variants || []);
+  const topVideoUrl = topVideoVariants[0]?.url || "";
   const topVideo = topVideoUrl || data.video?.poster
-    ? [{ type: "video", url: topVideoUrl, posterUrl: data.video?.poster || "", alt: "" }]
+    ? [{ type: "video", url: topVideoUrl, posterUrl: data.video?.poster || "", variants: topVideoVariants, alt: "" }]
     : [];
 
   return uniqueMedia([...photos, ...details, ...topVideo]);
@@ -1379,7 +1395,11 @@ function mergeTweetMedia(primary = [], fallback = [], options = {}) {
     }
 
     if (item.type === "video") {
-      const normalized = { ...item, url: normalizeTweetVideoUrl(item.url || "") };
+      const normalized = {
+        ...item,
+        url: normalizeTweetVideoUrl(item.url || ""),
+        variants: playableVideoVariants(item.variants || [])
+      };
       const existingIndex = videos.findIndex((candidate) => sameTweetVideo(candidate, normalized));
       if (existingIndex >= 0) {
         const existing = videos[existingIndex];
@@ -1388,6 +1408,7 @@ function mergeTweetMedia(primary = [], fallback = [], options = {}) {
           ...normalized,
           url: isPlayableTweetVideoUrl(normalized.url) ? normalized.url : existing.url,
           posterUrl: normalized.posterUrl || existing.posterUrl || "",
+          variants: playableVideoVariants([...(existing.variants || []), ...(normalized.variants || [])]),
           alt: normalized.alt || existing.alt || ""
         };
       } else {
@@ -1741,7 +1762,8 @@ async function shareToDestination(destinationId, tweet, options = {}) {
   });
 
   if (resolved.skipped.length > 0 && attachments.length === 0) {
-    showToast("Media could not upload; sent available fallback content.", "info");
+    const skippedSummary = summarizeSkippedMedia(resolved.skipped);
+    showToast(`Media could not upload (${skippedSummary}); sent available fallback content.`, "info");
   }
 
   for (let index = 0; index < payloads.length; index += 1) {
@@ -3598,9 +3620,12 @@ function previewStylesCss() {
 }
 
   // --- 13-media-fetch.js ---
-const ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
+// Discord currently caps the complete message request at 25 MiB. Keep 1 MiB
+// available for multipart boundaries, filenames, and the JSON payload.
+const ATTACHMENT_MAX_BYTES = 24 * 1024 * 1024;
 const ATTACHMENT_MAX_COUNT = 10;
 const MEDIA_FETCH_TIMEOUT_MS = 20_000;
+const MEDIA_SIZE_TIMEOUT_MS = 5_000;
 
 function mediaUrlExtension(url, fallback = "bin") {
   const match = String(url || "").split("?")[0].match(/\.([a-z0-9]+)(?::[a-z]+)?$/i);
@@ -3640,6 +3665,34 @@ function fetchMediaBytes(url) {
       },
       ontimeout() {
         reject(new Error("Media download timed out."));
+      }
+    });
+  });
+}
+
+function responseContentLength(response) {
+  const match = String(response?.responseHeaders || "").match(/^content-length:\s*(\d+)\s*$/im);
+  return match ? Number(match[1]) : 0;
+}
+
+function fetchMediaSize(url) {
+  return new Promise((resolve, reject) => {
+    xhrClient()({
+      method: "HEAD",
+      url,
+      timeout: MEDIA_SIZE_TIMEOUT_MS,
+      onload(response) {
+        if (response.status >= 200 && response.status < 300) {
+          resolve(responseContentLength(response));
+          return;
+        }
+        reject(new Error(`Media size check returned ${response.status}`));
+      },
+      onerror() {
+        reject(new Error("Could not check media size."));
+      },
+      ontimeout() {
+        reject(new Error("Media size check timed out."));
       }
     });
   });
@@ -3686,10 +3739,58 @@ function collectMediaAttachmentItems(tweet, shareOptions = {}) {
   });
 }
 
+function mediaAttachmentVariantUrls(media) {
+  if (media.type !== "video") return media.url ? [media.url] : [];
+  const variants = playableVideoVariantsForMedia(media).map((variant) => variant.url);
+  const directUrl = normalizeTweetVideoUrl(media.url || "");
+  return unique([...variants, directUrl].filter(isPlayableTweetVideoUrl));
+}
+
+async function resolveMediaAttachment(media, remainingBytes, options = {}) {
+  const fetcher = options.fetchMediaBytes || fetchMediaBytes;
+  const sizeFetcher = options.fetchMediaSize || fetchMediaSize;
+  const variantUrls = mediaAttachmentVariantUrls(media);
+  let lastFetchError = null;
+  let sawOversizedVariant = false;
+
+  for (const url of variantUrls) {
+    if (media.type === "video") {
+      try {
+        const declaredSize = await sizeFetcher(url, media);
+        if (declaredSize > remainingBytes) {
+          sawOversizedVariant = true;
+          continue;
+        }
+      } catch {
+        // Some CDNs reject HEAD requests. The bounded GET below remains the
+        // source of truth and still enforces the request budget.
+      }
+    }
+
+    try {
+      const bytes = await fetcher(url, { ...media, url });
+      const size = attachmentBytesLength(bytes);
+      if (size > remainingBytes) {
+        sawOversizedVariant = true;
+        continue;
+      }
+      return { bytes, size, url };
+    } catch (error) {
+      lastFetchError = error;
+    }
+  }
+
+  return {
+    error: lastFetchError,
+    reason: lastFetchError ? "fetch" : (sawOversizedVariant ? "size" : "fetch")
+  };
+}
+
 async function resolveAttachmentsForTweet(tweet, shareOptions = {}) {
   const attachments = [];
   const skipped = [];
-  const fetcher = shareOptions.fetchMediaBytes || fetchMediaBytes;
+  const resolvedUrls = [];
+  let totalBytes = 0;
   const candidates = collectMediaAttachmentItems(tweet, shareOptions);
 
   for (const media of candidates) {
@@ -3699,25 +3800,28 @@ async function resolveAttachmentsForTweet(tweet, shareOptions = {}) {
     }
     if (!media.url) continue;
 
-    try {
-      const bytes = await fetcher(media.url, media);
-      const size = attachmentBytesLength(bytes);
-      if (size > ATTACHMENT_MAX_BYTES) {
-        skipped.push({ sourceUrl: media.url, reason: "size", size });
-        continue;
-      }
+    const resolved = await resolveMediaAttachment(media, ATTACHMENT_MAX_BYTES - totalBytes, shareOptions);
+    if (resolved.bytes) {
       const index = attachments.length;
       attachments.push({
         filename: attachmentFilename(media, index),
-        bytes,
-        contentType: mediaContentType(media, media.url),
-        sourceUrl: media.url
+        bytes: resolved.bytes,
+        contentType: mediaContentType(media, resolved.url),
+        sourceUrl: resolved.url
       });
-    } catch (error) {
-      skipped.push({ sourceUrl: media.url, reason: "fetch", error });
+      totalBytes += resolved.size;
+      const primaryUrl = media.type === "video" ? normalizeTweetVideoUrl(media.url) : media.url;
+      resolvedUrls.push(primaryUrl, resolved.url);
+      continue;
     }
+
+    skipped.push({
+      sourceUrl: media.url,
+      reason: resolved.reason,
+      error: resolved.error
+    });
   }
 
-  return { attachments, skipped, urls: attachments.map((item) => item.sourceUrl) };
+  return { attachments, skipped, urls: unique(resolvedUrls.filter(Boolean)) };
 }
 })();

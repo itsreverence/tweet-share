@@ -159,6 +159,10 @@ test("mediaFromLegacyTweet extracts photo and highest bitrate video", () => {
   assert.equal(media[1].type, "video");
   assert.equal(media[1].url, "https://video.twimg.com/ext_tw_video/123/pu/vid/1280x720/high.mp4");
   assert.equal(media[1].posterUrl, "https://pbs.twimg.com/ext_tw_video_thumb/123/pu/img/poster.jpg");
+  assert.deepEqual(Array.from(media[1].variants, (variant) => variant.url), [
+    "https://video.twimg.com/ext_tw_video/123/pu/vid/1280x720/high.mp4",
+    "https://video.twimg.com/ext_tw_video/123/pu/vid/640x360/low.mp4"
+  ]);
 });
 
 test("scanForVideoVariants populates cache for bestCachedVideoUrlForTweet", () => {
@@ -209,6 +213,7 @@ test("tweetFromSyndication emits playable videos with posters", () => {
   assert.equal(videos.some((video) => video.url === bestSyndicationVideoUrl(data)), true);
   assert.equal(videos.every((video) => isPlayableTweetVideoUrl(video.url)), true);
   assert.equal(videos.some((video) => video.posterUrl === "https://pbs.twimg.com/ext_tw_video_thumb/1000000000000000001/pu/img/poster.jpg"), true);
+  assert.equal(videos.every((video) => video.variants.length > 0), true);
 });
 
 test("mediaFromSyndication returns images and multiple videos from mediaDetails", () => {

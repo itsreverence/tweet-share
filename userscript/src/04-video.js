@@ -45,6 +45,15 @@ function videoMedia(tweet) {
   return (tweet.media || []).filter((item) => item.type === "video" && (item.url || item.posterUrl));
 }
 
+function playableVideoVariantsForMedia(media) {
+  const mediaId = posterMediaId(media.posterUrl);
+  const cached = mediaId ? (VIDEO_VARIANT_CACHE.get(mediaId) || []) : [];
+  const direct = isPlayableTweetVideoUrl(normalizeTweetVideoUrl(media.url || ""))
+    ? [{ url: media.url, bitrate: videoQualityScore(media.url), type: "video/mp4" }]
+    : [];
+  return playableVideoVariants([...(media.variants || []), ...cached, ...direct]);
+}
+
 function directPlayableVideoUrls(tweet) {
   return unique(videoMedia(tweet).map((item) => normalizeTweetVideoUrl(item.url)).filter(isPlayableTweetVideoUrl));
 }

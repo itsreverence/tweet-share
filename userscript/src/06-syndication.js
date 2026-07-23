@@ -39,16 +39,20 @@ function mediaFromSyndication(data) {
     }
 
     if ((media.type === "video" || media.type === "animated_gif") && media.video_info?.variants) {
-      const videoUrl = bestPlayableVideoVariantUrl(media.video_info.variants);
+      const variants = playableVideoVariants(media.video_info.variants);
+      const videoUrl = variants[0]?.url || "";
       const posterUrl = media.media_url_https || "";
-      return videoUrl || posterUrl ? [{ type: "video", url: videoUrl, posterUrl, alt: media.ext_alt_text || "" }] : [];
+      return videoUrl || posterUrl
+        ? [{ type: "video", url: videoUrl, posterUrl, variants, alt: media.ext_alt_text || "" }]
+        : [];
     }
 
     return [];
   });
-  const topVideoUrl = bestPlayableVideoVariantUrl(data.video?.variants || []);
+  const topVideoVariants = playableVideoVariants(data.video?.variants || []);
+  const topVideoUrl = topVideoVariants[0]?.url || "";
   const topVideo = topVideoUrl || data.video?.poster
-    ? [{ type: "video", url: topVideoUrl, posterUrl: data.video?.poster || "", alt: "" }]
+    ? [{ type: "video", url: topVideoUrl, posterUrl: data.video?.poster || "", variants: topVideoVariants, alt: "" }]
     : [];
 
   return uniqueMedia([...photos, ...details, ...topVideo]);
@@ -89,7 +93,11 @@ function mergeTweetMedia(primary = [], fallback = [], options = {}) {
     }
 
     if (item.type === "video") {
-      const normalized = { ...item, url: normalizeTweetVideoUrl(item.url || "") };
+      const normalized = {
+        ...item,
+        url: normalizeTweetVideoUrl(item.url || ""),
+        variants: playableVideoVariants(item.variants || [])
+      };
       const existingIndex = videos.findIndex((candidate) => sameTweetVideo(candidate, normalized));
       if (existingIndex >= 0) {
         const existing = videos[existingIndex];
@@ -98,6 +106,7 @@ function mergeTweetMedia(primary = [], fallback = [], options = {}) {
           ...normalized,
           url: isPlayableTweetVideoUrl(normalized.url) ? normalized.url : existing.url,
           posterUrl: normalized.posterUrl || existing.posterUrl || "",
+          variants: playableVideoVariants([...(existing.variants || []), ...(normalized.variants || [])]),
           alt: normalized.alt || existing.alt || ""
         };
       } else {

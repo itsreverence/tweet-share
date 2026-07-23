@@ -167,6 +167,7 @@ test("shareToDestination posts JSON image layout when upload eligibility fails",
   assert.match(calls.requests[0].body.content, /alice\/status\/1/);
   assert.ok(Array.isArray(calls.requests[0].body.embeds));
   assert.equal(calls.requests[0].body.embeds[0].image.url, "https://pbs.twimg.com/media/photo.jpg");
+  assert.ok(calls.toasts.some((toast) => /failed to download/i.test(toast.message)));
 });
 
 test("successful resolution sends one compact multipart request", async () => {
@@ -186,6 +187,39 @@ test("successful resolution sends one compact multipart request", async () => {
   assert.equal(calls.multipart[0].files[0].contentType, "video/mp4");
   assert.equal(calls.multipart[0].payload.embeds[0].image, undefined);
   assert.doesNotMatch(JSON.stringify(calls.multipart[0].payload), /Video 1|Plays below|main\.mp4/);
+});
+
+test("lower fitting video variant uploads without exposing a CDN fallback link", async () => {
+  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
+  await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
+  const highUrl = "https://video.twimg.com/amplify_video/1/vid/avc1/1288x2230/high.mp4";
+  const lowerUrl = "https://video.twimg.com/amplify_video/1/vid/avc1/720x1246/lower.mp4";
+
+  await shareToDestination("main", {
+    ...videoTweet,
+    media: [{
+      type: "video",
+      url: highUrl,
+      variants: [
+        { type: "video/mp4", url: highUrl, bitrate: 10_368_000 },
+        { type: "video/mp4", url: lowerUrl, bitrate: 2_176_000 }
+      ]
+    }]
+  }, {
+    includeQuote: false,
+    fetchMediaSize(url) {
+      return url === highUrl ? 25 * 1024 * 1024 : 4 * 1024 * 1024;
+    },
+    fetchMediaBytes(url) {
+      assert.equal(url, lowerUrl);
+      return { byteLength: 4 * 1024 * 1024 };
+    }
+  });
+
+  assert.equal(calls.multipart.length, 1);
+  assert.equal(calls.multipart[0].files.length, 1);
+  assert.equal(calls.requests.length, 0);
+  assert.doesNotMatch(JSON.stringify(calls.multipart[0].payload), /video\.twimg\.com|high\.mp4|lower\.mp4/);
 });
 
 test("all skipped video media sends one playable fallback URL", async () => {

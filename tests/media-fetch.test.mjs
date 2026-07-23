@@ -26,8 +26,10 @@ function loadMediaFetchContext(xhrHandler = () => {
     ATTACHMENT_MAX_COUNT,
     attachmentFilename,
     collectMediaAttachmentUrls,
+    fetchMediaSize,
     fetchMediaBytes,
     MEDIA_FETCH_TIMEOUT_MS,
+    MEDIA_SIZE_TIMEOUT_MS,
     resolveAttachmentsForTweet,
     summarizeSkippedMedia
   };`, context);
@@ -98,6 +100,104 @@ test("successful video fetch creates one MP4 attachment", async () => {
   assert.equal(resolved.skipped.length, 0);
 });
 
+test("Buzz Patterson video uploads its 15.3 MB highest-quality variant", async () => {
+  const highUrl = "https://video.twimg.com/amplify_video/2079786897140772864/vid/avc1/1288x2230/high.mp4";
+  const mediumUrl = "https://video.twimg.com/amplify_video/2079786897140772864/vid/avc1/720x1246/medium.mp4";
+  const sizes = new Map([
+    [highUrl, 15_319_401],
+    [mediumUrl, 3_744_793]
+  ]);
+  const resolved = await resolveAttachmentsForTweet({
+    ...tweet,
+    media: [{
+      type: "video",
+      url: highUrl,
+      variants: [
+        { content_type: "video/mp4", url: highUrl, bitrate: 10_368_000 },
+        { content_type: "video/mp4", url: mediumUrl, bitrate: 2_176_000 }
+      ]
+    }]
+  }, {
+    fetchMediaSize(url) {
+      return sizes.get(url);
+    },
+    fetchMediaBytes(url) {
+      return { byteLength: sizes.get(url) };
+    }
+  });
+
+  assert.equal(resolved.attachments.length, 1);
+  assert.equal(resolved.attachments[0].sourceUrl, highUrl);
+  assert.equal(resolved.attachments[0].bytes.byteLength, 15_319_401);
+  assert.equal(resolved.skipped.length, 0);
+});
+
+test("oversized highest-quality video falls back to the best fitting variant", async () => {
+  const highUrl = "https://video.twimg.com/amplify_video/1/vid/avc1/1288x2230/high.mp4";
+  const mediumUrl = "https://video.twimg.com/amplify_video/1/vid/avc1/720x1246/medium.mp4";
+  const lowUrl = "https://video.twimg.com/amplify_video/1/vid/avc1/480x830/low.mp4";
+  const sizes = new Map([
+    [highUrl, ATTACHMENT_MAX_BYTES + 1],
+    [mediumUrl, 3_744_793],
+    [lowUrl, 2_042_211]
+  ]);
+  const fetched = [];
+  const resolved = await resolveAttachmentsForTweet({
+    ...tweet,
+    media: [{
+      type: "video",
+      url: highUrl,
+      variants: [
+        { content_type: "video/mp4", url: highUrl, bitrate: 10_368_000 },
+        { content_type: "video/mp4", url: mediumUrl, bitrate: 2_176_000 },
+        { content_type: "video/mp4", url: lowUrl, bitrate: 950_000 }
+      ]
+    }]
+  }, {
+    fetchMediaSize(url) {
+      return sizes.get(url);
+    },
+    fetchMediaBytes(url) {
+      fetched.push(url);
+      return { byteLength: sizes.get(url) };
+    }
+  });
+
+  assert.deepEqual(fetched, [mediumUrl]);
+  assert.equal(resolved.attachments[0].sourceUrl, mediumUrl);
+  assert.deepEqual(Array.from(resolved.urls), [highUrl, mediumUrl]);
+  assert.equal(resolved.skipped.length, 0);
+});
+
+test("failed size probes still fall back after enforcing downloaded byte size", async () => {
+  const highUrl = "https://video.twimg.com/amplify_video/1/vid/avc1/1288x2230/high.mp4";
+  const lowUrl = "https://video.twimg.com/amplify_video/1/vid/avc1/720x1246/low.mp4";
+  const fetched = [];
+  const resolved = await resolveAttachmentsForTweet({
+    ...tweet,
+    media: [{
+      type: "video",
+      url: highUrl,
+      variants: [
+        { content_type: "video/mp4", url: highUrl, bitrate: 10_368_000 },
+        { content_type: "video/mp4", url: lowUrl, bitrate: 2_176_000 }
+      ]
+    }]
+  }, {
+    fetchMediaSize() {
+      throw new Error("HEAD unavailable");
+    },
+    fetchMediaBytes(url) {
+      fetched.push(url);
+      return { byteLength: url === highUrl ? ATTACHMENT_MAX_BYTES + 1 : 3_744_793 };
+    }
+  });
+
+  assert.deepEqual(fetched, [highUrl, lowUrl]);
+  assert.equal(resolved.attachments[0].sourceUrl, lowUrl);
+  assert.equal(resolved.skipped.length, 0);
+});
+
 test("oversized video is skipped with its source URL and size reason", async () => {
   const resolved = await resolveAttachmentsForTweet({ ...tweet, media: [tweet.media[0]] }, {
     fetchMediaBytes() {
@@ -158,6 +258,27 @@ test("partial success returns attachments and skipped source details", async () 
   assert.equal(resolved.skipped[0].reason, "fetch");
 });
 
+test("attachments share one bounded multipart request budget", async () => {
+  const firstImage = "https://pbs.twimg.com/media/first.jpg";
+  const secondImage = "https://pbs.twimg.com/media/second.jpg";
+  const resolved = await resolveAttachmentsForTweet({
+    ...tweet,
+    media: [
+      { type: "image", url: firstImage },
+      { type: "image", url: secondImage }
+    ]
+  }, {
+    fetchMediaBytes() {
+      return { byteLength: 15 * 1024 * 1024 };
+    }
+  });
+
+  assert.equal(resolved.attachments.length, 1);
+  assert.equal(resolved.skipped.length, 1);
+  assert.equal(resolved.skipped[0].sourceUrl, secondImage);
+  assert.equal(resolved.skipped[0].reason, "size");
+});
+
 test("attachment helpers keep stable names and summarize reasons", () => {
   assert.equal(attachmentFilename({ type: "image", url: "https://pbs.twimg.com/media/a.png?name=orig" }, 1), "media_1.png");
   assert.equal(summarizeSkippedMedia([
@@ -177,4 +298,19 @@ test("media downloads apply a timeout and surface timeout failures", async () =>
 
   await assert.rejects(() => fetchMediaBytes(videoUrl), /timed out/i);
   assert.equal(requestOptions.timeout, MEDIA_FETCH_TIMEOUT_MS);
+});
+
+test("video size probes use a bounded HEAD request and parse content length", async () => {
+  let requestOptions;
+  const { fetchMediaSize, MEDIA_SIZE_TIMEOUT_MS } = loadMediaFetchContext((options) => {
+    requestOptions = options;
+    queueMicrotask(() => options.onload({
+      status: 200,
+      responseHeaders: "content-type: video/mp4\r\nContent-Length: 15319401\r\n"
+    }));
+  });
+
+  assert.equal(await fetchMediaSize(videoUrl), 15_319_401);
+  assert.equal(requestOptions.method, "HEAD");
+  assert.equal(requestOptions.timeout, MEDIA_SIZE_TIMEOUT_MS);
 });
