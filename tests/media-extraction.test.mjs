@@ -45,6 +45,8 @@ function loadMediaContext(request = () => Promise.resolve(null)) {
     mediaFromLegacyTweet,
     syndicationToken,
     fetchSyndicationTweet,
+    syndicationMediaEntityUrls,
+    visibleSyndicationText,
     scanForVideoVariants,
     mediaFromSyndication,
     mergeTweetMedia,
@@ -219,6 +221,29 @@ test("tweetFromSyndication preserves multiple photos", () => {
   assert.ok(imageMedia(tweet).length >= 2);
   assert.ok(tweet.media.some((item) => item.url === "https://pbs.twimg.com/media/photo-one.jpg?format=jpg&name=orig"));
   assert.ok(tweet.media.some((item) => item.url === "https://pbs.twimg.com/media/photo-two.jpg?format=jpg&name=orig"));
+});
+
+test("tweetFromSyndication removes hidden media URLs but preserves ordinary links", () => {
+  const tweet = tweetFromSyndication({
+    text: "Read https://example.com then watch https://t.co/media123",
+    entities: {
+      urls: [{ url: "https://example.com" }],
+      media: [{ url: "https://t.co/media123" }]
+    }
+  });
+
+  assert.equal(tweet.text, "Read https://example.com then watch");
+});
+
+test("tweetFromSyndication prefers text visible in the X page", () => {
+  const tweet = tweetFromSyndication({
+    text: "Visible quoted body https://t.co/media123",
+    entities: { media: [{ url: "https://t.co/media123" }] }
+  }, {
+    text: "Visible quoted body"
+  });
+
+  assert.equal(tweet.text, "Visible quoted body");
 });
 
 test("tweetFromSyndication emits playable videos with posters", () => {
