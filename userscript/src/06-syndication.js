@@ -1,7 +1,17 @@
+function syndicationToken(tweetId) {
+  return ((Number(tweetId) / 1e15) * Math.PI)
+    .toString(36)
+    .replace(/(0+|\.)/g, "");
+}
+
 async function fetchSyndicationTweet(tweetId) {
   if (!tweetId) return null;
   try {
-    return await request("GET", `https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}&lang=en`);
+    const token = syndicationToken(tweetId);
+    return await request(
+      "GET",
+      `https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}&lang=en&token=${token}`
+    );
   } catch (error) {
     console.debug("Tweet Discord Share syndication lookup failed", error);
     return null;
