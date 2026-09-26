@@ -8,7 +8,7 @@ import path from "node:path";
 /*
 Fixture refresh notes:
 Syndication fixtures can be refreshed with
-GET https://cdn.syndication.twimg.com/tweet-result?id=<tweetId>&lang=en, then saved
+GET https://cdn.syndication.twimg.com/tweet-result?id=<tweetId>&lang=en&token=<token>, then saved
 as redacted JSON. DOM fixtures can be refreshed from DevTools by copying the outer
 HTML of [data-testid="tweet"], stripping scripts, and storing it under
 tests/fixtures/dom/ when an HTML fixture becomes useful.
@@ -18,7 +18,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const srcDir = path.join(root, "userscript", "src");
 const fixtureDir = path.join(root, "tests", "fixtures", "syndication");
 
-function loadMediaContext() {
+function loadMediaContext(request = () => Promise.resolve(null)) {
   const files = [
     "00-config.js",
     "02-utils.js",
@@ -39,10 +39,14 @@ function loadMediaContext() {
         return [];
       }
     },
-    request: () => Promise.resolve(null)
+    request
   });
   runInNewContext(`${code}\nthis.exports = {
     mediaFromLegacyTweet,
+    syndicationToken,
+    fetchSyndicationTweet,
+    syndicationMediaEntityUrls,
+    visibleSyndicationText,
     scanForVideoVariants,
     mediaFromSyndication,
     mergeTweetMedia,
@@ -96,6 +100,21 @@ const {
   bestCachedTweetForQuote,
   cacheTweetResult
 } = loadMediaContext();
+
+test("syndication requests include X's derived token", async () => {
+  const calls = [];
+  const context = loadMediaContext((...args) => {
+    calls.push(args);
+    return Promise.resolve({ id_str: "2057610994122166373" });
+  });
+
+  assert.equal(context.syndicationToken("2057610994122166373"), "4zk6bk5el");
+  await context.fetchSyndicationTweet("2057610994122166373");
+  assert.deepEqual(calls, [[
+    "GET",
+    "https://cdn.syndication.twimg.com/tweet-result?id=2057610994122166373&lang=en&token=4zk6bk5el"
+  ]]);
+});
 
 function readFixture(name) {
   return JSON.parse(readFileSync(path.join(fixtureDir, name), "utf8"));
@@ -202,6 +221,29 @@ test("tweetFromSyndication preserves multiple photos", () => {
   assert.ok(imageMedia(tweet).length >= 2);
   assert.ok(tweet.media.some((item) => item.url === "https://pbs.twimg.com/media/photo-one.jpg?format=jpg&name=orig"));
   assert.ok(tweet.media.some((item) => item.url === "https://pbs.twimg.com/media/photo-two.jpg?format=jpg&name=orig"));
+});
+
+test("tweetFromSyndication removes hidden media URLs but preserves ordinary links", () => {
+  const tweet = tweetFromSyndication({
+    text: "Read https://example.com then watch https://t.co/media123",
+    entities: {
+      urls: [{ url: "https://example.com" }],
+      media: [{ url: "https://t.co/media123" }]
+    }
+  });
+
+  assert.equal(tweet.text, "Read https://example.com then watch");
+});
+
+test("tweetFromSyndication prefers text visible in the X page", () => {
+  const tweet = tweetFromSyndication({
+    text: "Visible quoted body https://t.co/media123",
+    entities: { media: [{ url: "https://t.co/media123" }] }
+  }, {
+    text: "Visible quoted body"
+  });
+
+  assert.equal(tweet.text, "Visible quoted body");
 });
 
 test("tweetFromSyndication emits playable videos with posters", () => {
