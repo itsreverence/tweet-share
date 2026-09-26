@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweet Discord Share
 // @namespace    https://github.com/itsreverence/tweet-share
-// @version      0.6.31
+// @version      0.6.33
 // @description  Share X/Twitter posts to Discord channels via webhooks (no server required).
 // @homepageURL  https://github.com/itsreverence/tweet-share
 // @supportURL   https://github.com/itsreverence/tweet-share/issues
@@ -1300,10 +1300,20 @@ function splitText(text, limit) {
 }
 
   // --- 06-syndication.js ---
+function syndicationToken(tweetId) {
+  return ((Number(tweetId) / 1e15) * Math.PI)
+    .toString(36)
+    .replace(/(0+|\.)/g, "");
+}
+
 async function fetchSyndicationTweet(tweetId) {
   if (!tweetId) return null;
   try {
-    return await request("GET", `https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}&lang=en`);
+    const token = syndicationToken(tweetId);
+    return await request(
+      "GET",
+      `https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}&lang=en&token=${token}`
+    );
   } catch (error) {
     console.debug("Tweet Discord Share syndication lookup failed", error);
     return null;
@@ -1321,6 +1331,19 @@ function bestSyndicationVideoUrl(data) {
 
 function syndicationPosterUrl(data) {
   return data?.video?.poster || data?.mediaDetails?.find((media) => media.media_url_https)?.media_url_https || "";
+}
+
+function syndicationMediaEntityUrls(data) {
+  const mediaEntities = Array.isArray(data?.entities?.media) ? data.entities.media : [];
+  return unique(mediaEntities.map((entity) => entity.url).filter(Boolean));
+}
+
+function visibleSyndicationText(data) {
+  let value = String(data?.text || "");
+  for (const mediaUrl of syndicationMediaEntityUrls(data)) {
+    value = value.split(mediaUrl).join("");
+  }
+  return value.replace(/[ \t]+$/gm, "").trim();
 }
 
 function mediaFromSyndication(data) {
@@ -1442,7 +1465,7 @@ function tweetFromSyndication(data, fallback = {}) {
       username: data.user?.screen_name || fallback.author?.username || "",
       avatarUrl: highResolutionProfileImageUrl(data.user?.profile_image_url_https || fallback.author?.avatarUrl || "")
     },
-    text: data.text || fallback.text || "",
+    text: fallback.text || visibleSyndicationText(data),
     createdAt: data.created_at || fallback.createdAt || "",
     media: mergeTweetMedia(mediaFromSyndication(data), fallback.media || []),
     quote: fallback.quote
