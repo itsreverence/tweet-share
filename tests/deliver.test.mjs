@@ -9,7 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const srcDir = path.join(root, "userscript", "src");
 const validWebhook = "https://discord.com/api/webhooks/1234567890/abc_DEF-123";
 
-function loadDeliverContext({ multipartError = null, requestErrorAt = null } = {}) {
+function loadDeliverContext({ multipartError = null, requestErrorAt = null, holdDelays = false } = {}) {
   const files = [
     "00-config.js",
     "02-utils.js",
@@ -22,7 +22,7 @@ function loadDeliverContext({ multipartError = null, requestErrorAt = null } = {
   ];
   const code = files.map((name) => readFileSync(path.join(srcDir, name), "utf8")).join("\n");
   const storage = new Map();
-  const calls = { requests: [], multipart: [], toasts: [], delays: 0 };
+  const calls = { requests: [], multipart: [], toasts: [], log: [], heldDelays: [] };
 
   const context = createContext({
     console,
@@ -39,12 +39,14 @@ function loadDeliverContext({ multipartError = null, requestErrorAt = null } = {
         return Promise.resolve();
       }
     },
-    delay: async () => {
-      calls.delays += 1;
+    delay(ms) {
+      calls.log.push({ kind: "delay", ms });
+      return holdDelays ? new Promise((resolve) => calls.heldDelays.push(resolve)) : Promise.resolve();
     },
     showToast(message, state) {
       calls.toasts.push({ message, state });
     },
+    __calls: calls,
     __multipartError: multipartError,
     __requestErrorAt: requestErrorAt,
     xhrClient() {
@@ -55,32 +57,33 @@ function loadDeliverContext({ multipartError = null, requestErrorAt = null } = {
   runInNewContext(
     `${code}
 request = async (method, url, body) => {
-  __calls.requests.push({ method, url, body, kind: "json" });
+  const entry = { method, url, body, kind: "json" };
+  __calls.requests.push(entry);
+  __calls.log.push(entry);
   if (__requestErrorAt === __calls.requests.length) throw new Error("follow-up failed");
   return {};
 };
 requestMultipart = async (url, payload, files) => {
   if (__multipartError) throw __multipartError;
-  __calls.multipart.push({
+  const entry = {
     url,
     payload,
-    files: files.map((file) => ({ filename: file.filename, contentType: file.contentType }))
-  });
+    files: files.map((file) => ({ filename: file.filename, contentType: file.contentType })),
+    kind: "multipart"
+  };
+  __calls.multipart.push(entry);
+  __calls.log.push(entry);
   return {};
 };
-const __calls = { requests: [], multipart: [], toasts: [], delays: 0 };
 this.exports = {
   shareToDestination,
-  sanitizeWebhookPayload,
   buildWebhookTestPayload,
   sendWebhookTest,
-  saveAllDestinations,
-  __calls
+  saveAllDestinations
 };`,
     context
   );
 
-  Object.assign(calls, context.exports.__calls);
   return { ...context.exports, storage, calls };
 }
 
@@ -102,13 +105,6 @@ const videoTweet = {
     { type: "video", url: skippedVideoUrl }
   ]
 };
-
-test("sanitizeWebhookPayload removes internal message labels", () => {
-  const { sanitizeWebhookPayload } = loadDeliverContext();
-  const cleaned = sanitizeWebhookPayload({ content: "hi", _messageLabel: "Videos" });
-  assert.equal(cleaned.content, "hi");
-  assert.equal(Object.hasOwn(cleaned, "_messageLabel"), false);
-});
 
 test("buildWebhookTestPayload uses Tweet Discord Share branding", () => {
   const { buildWebhookTestPayload } = loadDeliverContext();
@@ -277,9 +273,10 @@ test("multipart network failure is surfaced without an automatic JSON retry", as
   assert.equal(calls.multipart.length, 0);
 });
 
-test("shareToDestination delays between multi-message shares", async () => {
-  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
+test("shareToDestination waits out each pacing delay before sending the next message", async () => {
+  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext({ holdDelays: true });
   await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
   const tweet = {
     ...sampleTweet,
@@ -291,15 +288,56 @@ test("shareToDestination delays between multi-message shares", async () => {
     ]
   };
 
-  await shareToDestination("main", tweet, {
+  const sharing = shareToDestination("main", tweet, {
     includeQuote: false,
     fetchMediaBytes() {
       throw new Error("unavailable");
     }
   });
+  await settle();
+  while (calls.heldDelays.length > 0) {
+    const delaysSoFar = calls.log.filter((entry) => entry.kind === "delay").length;
+    assert.equal(calls.heldDelays.length, 1, "only one delay is pending at a time");
+    assert.equal(calls.log.length - delaysSoFar, delaysSoFar, "no message is sent while a delay is pending");
+    calls.heldDelays.shift()();
+    await settle();
+  }
+  await sharing;
 
-  assert.ok(calls.requests.length >= 2);
-  assert.equal(calls.delays, calls.requests.length - 1);
+  const messageCount = calls.log.filter((entry) => entry.kind !== "delay").length;
+  assert.ok(messageCount >= 2, "an embed message and a video message are sent");
+  const expected = Array.from({ length: messageCount }, (_, index) => (index === 0 ? ["json"] : ["delay", "json"])).flat();
+  assert.deepEqual(calls.log.map((entry) => entry.kind), expected, "one delay between each pair of messages");
+  for (const entry of calls.log.filter((entry) => entry.kind === "delay")) {
+    assert.ok(entry.ms > 0, `delay of ${entry.ms} ms paces the webhook`);
+  }
+});
+
+test("shareToDestination sends no internal message labels to Discord", async () => {
+  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
+  await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
+
+  await shareToDestination("main", {
+    ...sampleTweet,
+    text: "Long post. ".repeat(900),
+    media: [
+      { type: "image", url: "https://pbs.twimg.com/media/photo.jpg" },
+      { type: "video", url: skippedVideoUrl }
+    ]
+  }, {
+    includeQuote: false,
+    fetchMediaBytes(url) {
+      if (url === skippedVideoUrl) throw new Error("unavailable");
+      return { byteLength: 128 };
+    }
+  });
+
+  assert.equal(calls.multipart.length, 1, "the first message uploads the image");
+  assert.ok(calls.requests.length >= 2, "continuation embeds and the video link are sent as JSON");
+  const bodies = [...calls.multipart.map((entry) => entry.payload), ...calls.requests.map((entry) => entry.body)];
+  for (const [index, body] of bodies.entries()) {
+    assert.equal(Object.hasOwn(body, "_messageLabel"), false, `message ${index + 1} has no _messageLabel`);
+  }
 });
 
 test("shareToDestination reports how many messages were sent before a follow-up failure", async () => {
