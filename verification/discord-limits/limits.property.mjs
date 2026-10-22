@@ -154,13 +154,19 @@ const twimgImageItem = statusId.map((id) => ({ type: "image", url: `https://pbs.
 const imageItem = fc.oneof(twimgImageItem, fc.constant({ type: "image", url: "https://example.com/not-twimg.jpg" }));
 const VIDEO_SHAPES = {
   ext_tw_video: (id, size, tag) => `https://video.twimg.com/ext_tw_video/${id}/pu/vid/${size}/v${id}.mp4${tag}`,
-  amplify_video: (id, size, tag) => `https://video.twimg.com/amplify_video/${id}/vid/avc1/${size}/v${id}.mp4${tag}`
+  amplify_video: (id, size, tag) => `https://video.twimg.com/amplify_video/${id}/vid/avc1/${size}/v${id}.mp4${tag}`,
+  amplify_video_0_0: (id, size, tag) => `https://video.twimg.com/amplify_video/${id}/vid/avc1/0/0/${size}/v${id}.mp4${tag}`
 };
-const POSTER_DIRS = { ext_tw_video: "ext_tw_video_thumb", amplify_video: "amplify_video_thumb", tweet_video: "tweet_video_thumb" };
+const POSTER_DIRS = {
+  ext_tw_video: "ext_tw_video_thumb",
+  amplify_video: "amplify_video_thumb",
+  amplify_video_0_0: "amplify_video_thumb",
+  tweet_video: "tweet_video_thumb"
+};
 const videoItem = fc
   .record({
     id: statusId,
-    shape: fc.constantFrom("ext_tw_video", "amplify_video", "tweet_video"),
+    shape: fc.constantFrom(...Object.keys(POSTER_DIRS)),
     tag: fc.constantFrom("", "?tag=12", "?tag=14"),
     hasUrl: fc.boolean(),
     hasPoster: fc.boolean(),
@@ -380,7 +386,9 @@ test("every sent message disables mention parsing and uses an allowed sender nam
 
 const collapseWhitespace = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
 const mediaItems = (post) => (post?.media || []).filter((item) => item.url);
-const uploadSources = (item) => [item.url, ...(item.variants || []).map((variant) => variant.url)];
+const collapseZeroVideoDirs = (url) => url.replace(/\/vid\/([^/]+)\/0\/0\/(\d+x\d+)\//, "/vid/$1/$2/");
+const asSent = (url) => [url, collapseZeroVideoDirs(url)];
+const uploadSources = (item) => [item.url, ...(item.variants || []).map((variant) => variant.url)].flatMap(asSent);
 const contentOf = ({ payload }) => String(payload.content ?? "");
 
 function spansChunksAcrossTrimmedCuts(target, chunks, start) {
@@ -402,7 +410,7 @@ function renderedMedia(requests) {
   return (item) =>
     item.type === "image"
       ? embedImages.has(item.url) || uploaded.has(item.url)
-      : unfurledLines.has(item.url) || uploadSources(item).some((url) => uploaded.has(url));
+      : asSent(item.url).some((url) => unfurledLines.has(url)) || uploadSources(item).some((url) => uploaded.has(url));
 }
 
 test("every share carries the main post's text, permalink, and media, and quoted media when included", async () => {
