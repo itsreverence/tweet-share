@@ -50,10 +50,12 @@ function openPage(t, { destinations, discordResponse = { status: 204, responseTe
     }
   };
   window.eval(userscript);
+  const posts = () => requests.filter((request) => request.method === "POST");
   return {
     window,
     document: window.document,
-    webhookPosts: () => requests.filter((request) => request.method === "POST" && request.url === webhookUrl)
+    posts,
+    webhookPosts: () => posts().filter((request) => request.url === webhookUrl)
   };
 }
 
@@ -121,7 +123,7 @@ test("sharing with no destinations opens settings and sends nothing", async (t) 
   click(view, item);
 
   await waitFor(() => view.document.querySelector('[role="dialog"][aria-label="Tweet Discord Share settings"]'), "the settings dialog");
-  assert.equal(view.webhookPosts().length, 0, "no POST to any webhook");
+  assert.equal(view.posts().length, 0, "no POST to any URL");
 });
 
 test("a Discord rejection shows its message in an error toast", async (t) => {
