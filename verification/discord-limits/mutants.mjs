@@ -103,6 +103,13 @@ const mutants = [
     expect: PRESERVES
   },
   {
+    name: "messages without an image embed suppress their embeds",
+    file: "05-format-discord.js",
+    find: "if (embeds.length) payload.embeds = embeds;",
+    replace: "if (embeds.length) payload.embeds = embeds;\n  if (embeds.length && !embeds.some((embed) => embed.image)) payload.flags = 4;",
+    expect: PRESERVES
+  },
+  {
     name: "share content omits the main permalink",
     file: "05-format-discord.js",
     find: "const lines = [];\n  if (tweet.url) lines.push(tweet.url);\n  if (resolveQuoteLayout",

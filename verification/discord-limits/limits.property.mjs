@@ -420,7 +420,7 @@ function renderedMedia(requests) {
 test("every share carries the main post's text, permalink, and media, and quoted media when included", async () => {
   await runShare(tweetWithShareableImages, (t, o, requests) => {
     const rendered = renderedMedia(requests);
-    const descriptions = requests.flatMap(({ payload }) => (payload.embeds || []).map((e) => e.description)).filter(Boolean);
+    const descriptions = requests.filter(rendersEmbeds).flatMap(({ payload }) => (payload.embeds || []).map((e) => e.description)).filter(Boolean);
     const missing = [];
     if (!spansChunksAcrossTrimmedCuts(collapseWhitespace(t.text), descriptions.map(collapseWhitespace), 0)) {
       missing.push("main text in its embed descriptions");
