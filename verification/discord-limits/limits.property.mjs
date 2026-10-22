@@ -204,6 +204,21 @@ function postArb(media) {
     media
   });
 }
+const mediaIdOf = (url) => /\/(?:media|ext_tw_video|amplify_video|tweet_video)\/([^/?.]+)/.exec(url)?.[1];
+
+function withDistinctMediaIds(t) {
+  const seen = new Set();
+  const firstUse = (item) => {
+    const id = mediaIdOf(item.url);
+    if (!id) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  };
+  const main = { ...t, media: t.media.filter(firstUse) };
+  return t.quote ? { ...main, quote: { ...t.quote, media: t.quote.media.filter(firstUse) } } : main;
+}
+
 const tweetOf = (image) =>
   fc.oneof(
     {
@@ -213,7 +228,7 @@ const tweetOf = (image) =>
         .map(([main, quote]) => (quote ? { ...main, quote } : main))
     },
     { weight: 1, arbitrary: fc.tuple(postArb(fullMedia), postArb(fullMedia)).map(([main, quote]) => ({ ...main, quote })) }
-  );
+  ).map(withDistinctMediaIds);
 const tweet = tweetOf(imageItem);
 const tweetWithShareableImages = tweetOf(twimgImageItem);
 const options = fc.record(
