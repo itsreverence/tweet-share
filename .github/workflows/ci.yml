@@ -20,7 +20,7 @@ jobs:
           node-version: "22"
           cache: npm
 
-      - run: npm ci
+      - run: npm ci --ignore-scripts
 
       - name: Test, build, and syntax-check userscript
         run: npm test && npm run check && git diff --check
