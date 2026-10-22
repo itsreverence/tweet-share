@@ -184,6 +184,24 @@ test("auto quote layout inlines text-only main with quoted video", () => {
   assert.match(payloads[1].content, /q\.mp4/);
 });
 
+test("inline quote field stays within Discord's 1024-char field limit for long quoted posts", () => {
+  const discordFieldValueLimit = 1024;
+  const tweet = {
+    ...jamieQuoteTweet,
+    quote: { ...jamieQuoteTweet.quote, text: "Long quoted sentence. ".repeat(50) }
+  };
+  assert.ok(tweet.quote.text.length > 1050, "quoted text is longer than one field");
+
+  const payloads = buildDiscordPayloads(tweet, { quoteLayout: "inline" });
+  const quoteField = payloads[0].embeds[0].fields.find((field) => field.name === "Quoted post from @atrupar");
+  assert.ok(quoteField, "inline quote field is present");
+  assert.ok(
+    quoteField.value.length <= discordFieldValueLimit,
+    `quote field is ${quoteField.value.length} chars, Discord allows ${discordFieldValueLimit}`
+  );
+  assert.ok(quoteField.value.endsWith("..."), "truncated quote ends with an ellipsis");
+});
+
 test("auto quote layout groups main and quoted images in one contextual card", () => {
   const tweet = {
     ...sampleTweet,
