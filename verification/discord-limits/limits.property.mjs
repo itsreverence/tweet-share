@@ -28,7 +28,7 @@ const DISCORD_DOCUMENTED_LIMITS = {
   attachmentsPerMessage: 10
 };
 
-function loadSource() {
+function loadSource({ replaceEmbedBuilder = false } = {}) {
   const files = [
     "00-config.js",
     "01-http.js",
@@ -39,7 +39,7 @@ function loadSource() {
     "08-deliver.js"
   ];
   const code = files.map((name) => readFileSync(path.join(srcDir, name), "utf8")).join("\n");
-  const harness = { transport: null };
+  const harness = { transport: null, embedFormatting: null };
   const context = createContext({
     console: { ...console, warn: () => {} },
     URL,
@@ -51,21 +51,26 @@ function loadSource() {
     window: { setTimeout: (callback) => setImmediate(callback) },
     GM: { xmlHttpRequest: (details) => harness.transport(details) },
     getDestinationById: async () => ({ webhookUrl: WEBHOOK_URL }),
-    showToast: () => {}
+    showToast: () => {},
+    __harness: harness
   });
-  runInNewContext(
-    `${code}\nthis.exports = { buildPlainFallbackPayloads, sanitizeWebhookPayload, shareToDestination, truncate };`,
-    context
-  );
+  const embedBuilder = replaceEmbedBuilder ? "\nbuildEmbedDiscordPayloads = (...args) => __harness.embedFormatting(...args);" : "";
+  runInNewContext(`${code}${embedBuilder}\nthis.exports = { shareToDestination, truncate };`, context);
   return { ...context.exports, harness };
 }
 
-const { buildPlainFallbackPayloads, sanitizeWebhookPayload, shareToDestination, truncate, harness } = loadSource();
+const formatter = loadSource();
+const failingFormatter = loadSource({ replaceEmbedBuilder: true });
+const { truncate } = formatter;
+const EMBED_FAILURES = {
+  throws: () => {
+    throw new Error("embed formatting failed");
+  },
+  "returns no payloads": () => []
+};
+const PLAN_EXHAUSTED = { get: "error", head: "error", size: 0 };
 
-// Each distinct media URL the share downloads gets the next outcome in the plan.
-// Running out of plan means the download fails, so shrinking leans towards no uploads.
 function mediaResponse(details, outcome) {
-  if (!outcome) return details.onerror();
   if (details.method === "HEAD") {
     if (outcome.head === "error") return details.onerror();
     if (outcome.head === "status405") return details.onload({ status: 405, responseHeaders: "" });
@@ -90,14 +95,20 @@ async function webhookRequest(details) {
   return { payload, files };
 }
 
-async function sentWebhookRequests(tweet, shareOptions, fetchPlan) {
+async function sentWebhookRequests(tweet, shareOptions, fetchPlan, embedFailure) {
+  const { shareToDestination, harness } = embedFailure ? failingFormatter : formatter;
+  harness.embedFormatting = EMBED_FAILURES[embedFailure];
   const requests = [];
   const outcomeByUrl = new Map();
+  const nextPlannedOutcome = (url) => {
+    if (!outcomeByUrl.has(url)) outcomeByUrl.set(url, fetchPlan[outcomeByUrl.size] ?? PLAN_EXHAUSTED);
+    return outcomeByUrl.get(url);
+  };
   const pending = [];
   harness.transport = (details) => {
     if (details.url !== WEBHOOK_URL) {
-      if (!outcomeByUrl.has(details.url)) outcomeByUrl.set(details.url, fetchPlan[outcomeByUrl.size]);
-      setImmediate(() => mediaResponse(details, outcomeByUrl.get(details.url)));
+      const outcome = nextPlannedOutcome(details.url);
+      setImmediate(() => mediaResponse(details, outcome));
       return;
     }
     const parsed = webhookRequest(details).then((request) => {
@@ -191,6 +202,8 @@ const fetchOutcome = fc.record({
 const MAX_DOWNLOAD_URLS = 2 * X_MAX_MEDIA_PER_POST * 2;
 const fetchPlan = fc.array(fetchOutcome, { maxLength: MAX_DOWNLOAD_URLS });
 
+const embedFailure = fc.constantFrom(...Object.keys(EMBED_FAILURES));
+
 const len = (value) => String(value ?? "").length;
 
 function embedChars(embed) {
@@ -248,14 +261,19 @@ function mentionViolations(payload, where) {
   const out = [];
   const parse = payload.allowed_mentions?.parse;
   if (!Array.isArray(parse) || parse.length !== 0) out.push(`${where} allowed_mentions.parse is ${JSON.stringify(parse)}, expected []`);
+  for (const key of ["users", "roles"]) {
+    const ids = payload.allowed_mentions?.[key];
+    if (ids !== undefined && (!Array.isArray(ids) || ids.length !== 0)) {
+      out.push(`${where} allowed_mentions.${key} is ${JSON.stringify(ids)}, expected none`);
+    }
+  }
+  if (payload.allowed_mentions?.replied_user === true) out.push(`${where} allowed_mentions.replied_user is true`);
   if (/discord/i.test(payload.username || "")) out.push(`${where} username contains "discord"`);
   if (len(payload.username) > DISCORD_DOCUMENTED_LIMITS.username) {
     out.push(`${where} username exceeds ${DISCORD_DOCUMENTED_LIMITS.username} chars`);
   }
   return out;
 }
-
-const fallbackSentToDiscord = (t, o) => buildPlainFallbackPayloads(t, o).map((p) => sanitizeWebhookPayload(p));
 
 function report(violations) {
   return violations.length === 0 || assert.fail(violations.slice(0, 8).join("\n"));
@@ -274,13 +292,18 @@ function reporter(details) {
   const cause = details.errorInstance?.message || String(details.errorInstance);
   throw new Error(
     `${cause}\n\nCounterexample (shrunk):\n${elideLongStrings(details.counterexample)}\n\n` +
-      `Replay: FC_SEED=${details.seed} npm run verify:discord-limits  (path ${details.counterexamplePath})`
+      `Replay: FC_SEED=${details.seed} FC_NUM_RUNS=${NUM_RUNS} npm run verify:discord-limits\n` +
+      `(counterexample path ${details.counterexamplePath} is informational; the replay does not read it)`
   );
 }
 
 const run = (prop) => fc.assert(prop, { numRuns: NUM_RUNS, seed: SEED, reporter });
-const runShare = (tweets, check) =>
-  run(fc.asyncProperty(tweets, options, fetchPlan, async (t, o, plan) => check(t, o, await sentWebhookRequests(t, o, plan))));
+const runShare = (tweets, check, formatting = fc.constant(undefined)) =>
+  run(
+    fc.asyncProperty(tweets, options, fetchPlan, formatting, async (t, o, plan, failure) =>
+      check(t, o, await sentWebhookRequests(t, o, plan, failure))
+    )
+  );
 
 test("truncate(value, limit) returns at most limit characters for limits from 3 to 4096", () => {
   run(
@@ -303,25 +326,26 @@ test("every sent message respects Discord's per-message limits", async () => {
   await runShare(tweet, (t, o, requests) => report(requests.flatMap((request, m) => messageViolations(request, `message ${m + 1}`))));
 });
 
-test("plain-text fallback messages respect Discord's per-message limits", () => {
-  run(
-    fc.property(tweet, options, (t, o) => {
-      const violations = fallbackSentToDiscord(t, o).flatMap((payload, m) => messageViolations({ payload }, `fallback message ${m + 1}`));
-      return report(violations);
-    })
+test("plain-text fallback messages respect Discord's per-message limits", async () => {
+  await runShare(
+    tweet,
+    (t, o, requests) => report(requests.flatMap((request, m) => messageViolations(request, `fallback message ${m + 1}`))),
+    embedFailure
   );
 });
 
 test("every sent message disables mention parsing and uses an allowed sender name", async () => {
-  await runShare(tweet, (t, o, requests) => {
-    const payloads = [...requests.map((request) => request.payload), ...fallbackSentToDiscord(t, o)];
-    return report(payloads.flatMap((p, m) => mentionViolations(p, `message ${m + 1}`)));
-  });
+  await runShare(
+    tweet,
+    (t, o, requests) => report(requests.flatMap(({ payload }, m) => mentionViolations(payload, `message ${m + 1}`))),
+    fc.option(embedFailure, { nil: undefined })
+  );
 });
 
 const collapseWhitespace = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
 const mediaItems = (post) => (post?.media || []).filter((item) => item.url);
 const uploadSources = (item) => [item.url, ...(item.variants || []).map((variant) => variant.url)];
+const contentOf = ({ payload }) => String(payload.content ?? "");
 
 function spansChunksAcrossTrimmedCuts(target, chunks, start) {
   let matched = 0;
@@ -335,36 +359,46 @@ function spansChunksAcrossTrimmedCuts(target, chunks, start) {
   return matched === target.length;
 }
 
+function renderedMedia(requests) {
+  const uploaded = new Set(requests.flatMap((request) => request.files.map((file) => file.sourceUrl)));
+  const embedImages = new Set(requests.flatMap(({ payload }) => (payload.embeds || []).map((embed) => embed.image?.url)));
+  const unfurledLines = new Set(requests.filter(({ payload }) => !payload.embeds?.length).flatMap((request) => contentOf(request).split("\n")));
+  return (item) =>
+    item.type === "image"
+      ? embedImages.has(item.url) || uploaded.has(item.url)
+      : unfurledLines.has(item.url) || uploadSources(item).some((url) => uploaded.has(url));
+}
+
 test("every share carries the main post's text, permalink, and media, and quoted media when included", async () => {
   await runShare(tweetWithShareableImages, (t, o, requests) => {
-    const wire = JSON.stringify(requests.map((request) => request.payload));
-    const uploaded = new Set(requests.flatMap((request) => request.files.map((file) => file.sourceUrl)));
-    const delivered = (item) => wire.includes(item.url) || uploadSources(item).some((url) => uploaded.has(url));
+    const rendered = renderedMedia(requests);
     const descriptions = requests.flatMap(({ payload }) => (payload.embeds || []).map((e) => e.description)).filter(Boolean);
     const missing = [];
     if (!spansChunksAcrossTrimmedCuts(collapseWhitespace(t.text), descriptions.map(collapseWhitespace), 0)) {
       missing.push("main text in its embed descriptions");
     }
-    if (!wire.includes(t.url)) missing.push(`main permalink ${t.url}`);
-    for (const item of mediaItems(t)) if (!delivered(item)) missing.push(`main media ${item.url}`);
+    if (!requests.some((request) => contentOf(request).includes(t.url))) missing.push(`main permalink ${t.url} in one message`);
+    for (const item of mediaItems(t)) if (!rendered(item)) missing.push(`main media ${item.url}`);
     if (o.includeQuote !== false) {
-      for (const item of mediaItems(t.quote)) if (!delivered(item)) missing.push(`quoted media ${item.url}`);
+      for (const item of mediaItems(t.quote)) if (!rendered(item)) missing.push(`quoted media ${item.url}`);
     }
     return report(missing.map((what) => `share is missing ${what}`));
   });
 });
 
-test("plain-text fallback carries the main post's text and permalink", () => {
-  run(
-    fc.property(tweetWithShareableImages, options, (t, o) => {
-      const contents = fallbackSentToDiscord(t, o).map((p) => p.content || "");
+test("plain-text fallback carries the main post's text and permalink", async () => {
+  await runShare(
+    tweetWithShareableImages,
+    (t, o, requests) => {
+      const contents = requests.map(contentOf);
       const chunks = contents.map(collapseWhitespace);
       const target = collapseWhitespace(t.text);
       const starts = Array.from({ length: (chunks[0]?.length ?? 0) + 1 }, (_, start) => start);
       const missing = [];
       if (!starts.some((start) => spansChunksAcrossTrimmedCuts(target, chunks, start))) missing.push("main text");
-      if (!contents.join("").includes(t.url)) missing.push(`main permalink ${t.url}`);
+      if (!contents.some((content) => content.includes(t.url))) missing.push(`main permalink ${t.url} in one message`);
       return report(missing.map((what) => `fallback is missing ${what}`));
-    })
+    },
+    embedFailure
   );
 });

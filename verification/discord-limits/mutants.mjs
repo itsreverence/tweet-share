@@ -55,6 +55,45 @@ const mutants = [
     expect: MENTIONS
   },
   {
+    name: "embed payloads allow mentions of a listed user",
+    file: "05-format-discord.js",
+    find: "allowed_mentions: { parse: [] }\n  };\n  if (embeds.length)",
+    replace: "allowed_mentions: { parse: [], users: [\"123\"] }\n  };\n  if (embeds.length)",
+    expect: MENTIONS
+  },
+  {
+    name: "embed formatting failures send no fallback",
+    file: "05-format-discord.js",
+    find: "return buildPlainFallbackPayloads(tweet, options);\n}",
+    replace: "return [];\n}",
+    expect: FALLBACK_PRESERVES
+  },
+  {
+    name: "fallback splits the main permalink across two messages",
+    file: "05-format-discord.js",
+    find: "const parts = chunks.length ? chunks : [body || formatAuthor(tweet)];",
+    replace:
+      "const parts = (chunks.length ? chunks : [body || formatAuthor(tweet)]).flatMap((chunk) => {\n" +
+      "    const cut = tweet.url ? chunk.indexOf(tweet.url) : -1;\n" +
+      "    return cut < 0 ? [chunk] : [chunk.slice(0, cut + 12), chunk.slice(cut + 12)];\n" +
+      "  });",
+    expect: FALLBACK_PRESERVES
+  },
+  {
+    name: "single video follow-up wraps its link in <> so Discord does not unfurl it",
+    file: "05-format-discord.js",
+    find: "`_Video:_\\n${entries[0].url}`",
+    replace: "`_Video:_\\n<${entries[0].url}>`",
+    expect: PRESERVES
+  },
+  {
+    name: "share content omits the main permalink",
+    file: "05-format-discord.js",
+    find: "const lines = [];\n  if (tweet.url) lines.push(tweet.url);\n  if (resolveQuoteLayout",
+    replace: "const lines = [];\n  if (resolveQuoteLayout",
+    expect: PRESERVES
+  },
+  {
     name: "drop supplemental image embeds",
     file: "05-format-discord.js",
     find: "return [...withHints, ...supplements];",
