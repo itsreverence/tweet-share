@@ -380,7 +380,7 @@ test("every sent message disables mention parsing and uses an allowed sender nam
   await runShare(
     tweet,
     (t, o, requests) => report(requests.flatMap(({ payload }, m) => mentionViolations(payload, `message ${m + 1}`))),
-    fc.option(embedFailure, { nil: undefined })
+    fc.oneof(fc.constant(undefined), embedFailure)
   );
 });
 
