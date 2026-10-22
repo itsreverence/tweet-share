@@ -1,0 +1,94 @@
+---
+name: verify-discord-limits
+description: Check that every webhook request tweet-share sends to Discord stays within Discord's limits (2000-char content, 10 embeds, 10 attachments and 6000 embed chars per message, 4096 description, 1024 field value, 256 field name/title/author, 25 fields, non-empty fields), disables mentions, and still carries the post's text, permalink, and media as links or uploaded files. Use when changing userscript/src/05-format-discord.js, truncate/splitText or other helpers in 02-utils.js, media helpers in 04-video.js, DISCORD_* constants in 00-config.js, request/requestMultipart in 01-http.js, shareToDestination or sanitizeWebhookPayload in 08-deliver.js, or attachment selection in 13-media-fetch.js, or when a share fails with a Discord 400 "Invalid Form Body".
+---
+
+# Verify Discord webhook limits
+
+**Property.** For every tweet and every outcome of the media downloads, every webhook request that `shareToDestination` sends is one Discord accepts: within Discord's size limits, with no empty field and no message that has neither content, embeds, nor files, at most 10 files, and `allowed_mentions.parse` set to `[]`. The check reads the requests where they leave `01-http.js`: the JSON body of `request`, or the `payload_json` part and the files of the `requestMultipart` form. The plain-text fallback from `buildPlainFallbackPayloads` (what `buildDiscordPayloads` returns when embed formatting throws) is checked against the same per-message limits.
+
+**Preservation.** Staying within limits must not cost content. The sent messages carry the main post's full text in embed descriptions, in order, plus its permalink and every media item, and every quoted media item unless `includeQuote` is `false`. A media item counts as delivered when its URL appears in a sent payload, or when a file in the multipart request was downloaded from it (for a video, from its URL or one of its `variants`). That matches what the code does: `resolveAttachmentsForTweet` downloads the media, `buildDiscordPayloads` hides attached media from embeds and the video follow-up (`attachmentUrls`, `fallbackVideoUrls`), and `shareToDestination` uploads the files with the first message. The plain-text fallback carries the main post's text and permalink. Text is compared by `spansChunksAcrossTrimmedCuts`. It collapses whitespace runs to one space, then walks the post's text through the chunks in order (embed descriptions starting at the first one, or fallback message contents starting anywhere in the first one, after the author line). Characters inside a chunk must match exactly. At each chunk boundary it skips at most one space, because `splitText` trims the whitespace where it cuts and a hard cut mid-word leaves none.
+
+**Harm if broken.** Discord rejects the message with HTTP 400. `retryRateLimitedRequest` retries only 429s, and `buildDiscordPayloads` only falls back to plain text when formatting *throws*, so a rejected message is lost. In a multi-message share, the messages before it have already posted, so the channel gets half a share. A broken `allowed_mentions` lets a tweet containing `@everyone` ping the whole server. A broken preservation property means a share that Discord accepts but that silently drops part of the post, such as a video whose upload failed and whose link was never sent.
+
+**Tool.** Property-based testing with [fast-check](https://fast-check.dev) (pinned `4.10.2` in `package.json`). It runs the real `userscript/src` files in a `node:vm` context, the same way the tests in `tests/` do, and drives `shareToDestination` through a fake `GM.xmlHttpRequest`. The fake answers media `HEAD`/`GET` requests from a generated fetch plan and records every webhook request. No verifier runs on plain browser JS, so this generates inputs against the real code rather than proving anything about a hand-written model. When a property fails, fast-check shrinks the input to a small counterexample.
+
+## Run it
+
+```sh
+npm ci                                    # once; installs fast-check
+npm run verify:discord-limits             # the check alone, ~2 s, 1000 generated cases per property
+npm run verify:discord-limits:mutants     # proves every property can still fail (~20 s)
+```
+
+Knobs: `FC_NUM_RUNS=20000` for a deeper soak, `FC_SEED=<n>` to replay a failure (the failure message prints the exact replay command). `DISCORD_LIMITS_SRC_DIR=<dir>` points the check at another copy of the source.
+
+`npm test` runs this check alongside the unit tests, so CI runs it on every push and pull request. Every property must pass.
+
+## Does my change touch this?
+
+It does if the diff touches any of the following (coverage record):
+
+| File | Functions / constants the check depends on |
+|---|---|
+| `userscript/src/05-format-discord.js` | whole file: `buildDiscordPayloads`, `buildEmbedDiscordPayloads`, `buildTweetEmbedGroup`, `assembleTweetEmbedGroup`, `rebalanceEmbedFields`, `packEmbedsIntoMessages`, `buildInlineQuoteFields`, `formatQuoteFieldValue`, `permalinkField`, `buildShareContentLines`, `collectShareVideoEntries`, `buildVideoFollowUpContent`, `buildImageSupplementEmbeds`, `appendMediaHintToLastContentEmbed`, `attachmentIncludesMediaUrl`, `collectMediaAttachmentUrls`, `mediaLinks`, `hasQuoteTweet`, `resolveQuoteLayout`, `buildWebhookPayload`, `buildPlainFallbackPayloads`, `splitText`, `countEmbedChars` |
+| `userscript/src/02-utils.js` | `truncate`, `unique`, `discordEmbedTimestamp`, `tweetIdFromUrl`, `highResolutionProfileImageUrl`, `isTweetImageMediaUrl`, `tweetImageMediaKey`, `isTweetVideoPosterUrl`, `isTweetVideoThumbnailUrl`, `isPlayableTweetVideoUrl`, `normalizeTweetVideoUrl`, `posterMediaId`, `videoQualityScore`, `playableVideoVariants` |
+| `userscript/src/04-video.js` | `imageMedia`, `videoMedia`, `directPlayableVideoUrls`, `playableVideoVariantsForMedia` |
+| `userscript/src/00-config.js` | `DISCORD_LIMITS`, `DISCORD_EMBED_LIMITS`, `MESSAGE_CHUNK_LIMIT`, `MEDIA_LINK_STYLE`, `WEBHOOK_SENDER_NAME`, `WEBHOOK_SEND_DELAY_MS` |
+| `userscript/src/01-http.js` | `request`, `requestOnce`, `requestMultipart`, `requestMultipartOnce` (the JSON body and the `payload_json` and file parts), `parseDiscordResponse`, `delay` |
+| `userscript/src/08-deliver.js` | `shareToDestination` (which payloads and files get sent, and with which attachment options), `sanitizeWebhookPayload` |
+| `userscript/src/13-media-fetch.js` | `resolveAttachmentsForTweet`, `collectMediaAttachmentItems`, `mediaAttachmentVariantUrls`, `resolveMediaAttachment`, `fetchMediaBytes`, `fetchMediaSize`, `responseContentLength`, `attachmentBytesLength`, `ATTACHMENT_MAX_BYTES`, `ATTACHMENT_REQUEST_MAX_BYTES`, `ATTACHMENT_MAX_COUNT` |
+
+The check loads exactly `00-config.js`, `01-http.js`, `02-utils.js`, `04-video.js`, `05-format-discord.js`, `13-media-fetch.js`, and `08-deliver.js` (see `loadSource` in `verification/discord-limits/limits.property.mjs`). It stubs `getDestinationById` and `showToast`, which live in files it doesn't load. If you move a covered function into another file, add that file to `loadSource`. `prepare` in `mutants.mjs` copies the whole source directory, so it needs no change.
+
+**Sync point.** The check was last confirmed against the code at the last commit that touched the verification or this skill. No hash is stored here, so the rule survives squash merges and rebases. To see what covered source changed since then:
+
+```sh
+sync=$(git log -1 --format=%H -- verification/discord-limits .agents/skills/verify-discord-limits)
+git diff "$sync" -- userscript/src/00-config.js userscript/src/01-http.js userscript/src/02-utils.js userscript/src/04-video.js userscript/src/05-format-discord.js userscript/src/08-deliver.js userscript/src/13-media-fetch.js
+```
+
+An empty diff means the check is in sync. Otherwise, reread the diff, confirm that the generators and checks still describe the code (see "Updating" below), and run both commands with the expected result. Then move the sync point forward by committing your change to the verification or to this skill. A source commit alone never moves it. The reverse also holds: any commit to these paths moves the sync point, even a typo fix, so make one only after that review.
+
+## Reading a failure: real bug or modeling error?
+
+A failure prints the broken limit and a shrunk input, for example:
+
+```
+Error: message 1 embed 1 fields[0].value is 1026 chars (limit 1024)
+Counterexample (shrunk): [{ "url": ..., "text": "aaaa… (250 chars)", "quote": { "text": "😀😀… (1023 chars)", ... } }, {}, []]
+Replay: FC_SEED=-107803955 npm run verify:discord-limits
+```
+
+The second array element is the `options` object passed to `shareToDestination`. The third, for the properties that send a share, is the fetch plan: one `{ get, head, size }` outcome per distinct media URL in the order the share downloads them, where a URL past the end of the plan fails to download. To decide which kind of failure it is:
+
+- **Real bug.** The counterexample is a tweet X could produce: at most 4 media items per post, text up to 25,000 chars, display name up to 50, `@handle` up to 15. Any download outcome is real (CDNs time out, return errors, omit `content-length`, or serve files over Discord's upload limit). Report it with the counterexample in code terms (which function produced the over-limit value). Do not loosen the `DISCORD_DOCUMENTED_LIMITS` table, the generators, or the checks to make it pass. The `DISCORD_DOCUMENTED_LIMITS` table in the check is deliberately separate from `00-config.js`, so a wrong constant in the product cannot hide a bug.
+- **Modeling error.** The input is something the product can never receive, such as more than 4 media items, a tweet shape that `03-network-capture.js` / `06-syndication.js` / `07-extract-dom.js` never builds, or an option that no caller passes. Another sign is an exception thrown from inside the harness (`loadSource` failing with `X is not defined` means a covered function now calls a helper in a file the check doesn't load, and the fake answers every non-webhook request as a media download, so a new kind of request gets nonsense answers). Fix the generator, the loader, or the fake, and say so in your report.
+- If you are unsure, reproduce the case by hand with `buildDiscordPayloads` in a scratch script and check the limit against [Discord's docs](https://discord.com/developers/docs/resources/message#embed-object-embed-limits).
+
+## Updating after an intended change
+
+- **New payload field or embed part** (e.g. you start setting `embed.title` somewhere new, or add `thumbnail`/`provider`): if Discord counts it toward the 6000 total or limits it, add it to `embedChars` / `embedViolations` in `limits.property.mjs`.
+- **New tweet data** that formatting or attachment selection reads (new `tweet.*` key, a new media `type` or media field, a new share option): add it to the generators (`postArb`, `mediaOf`, `videoItem`, `options`), or the check will never exercise it.
+- **New send path** (a new function whose result goes to `request("POST", webhookUrl, …)` or `requestMultipart`): send it through the fake transport in `sentWebhookRequests`, or add a property for it like the fallback one.
+- **New download behavior** (another request in `13-media-fetch.js`, a new response field it reads): teach `mediaResponse` and `fetchOutcome` about it.
+- **New property**: add a mutant to `mutants.mjs` that breaks the code it guards and names that property in `expect`. Every property has at least one mutant, so a property that can never fail shows up as `FAIL missed`.
+- **Renamed or moved guard**: if `mutants.mjs` prints `STALE <name>`, point that mutant's `find` string at the new code, so each property is still shown failing on a broken variant.
+- After any of these, run both commands, then commit the change to move the sync point above.
+
+## Scope: what a pass means and doesn't
+
+**Covered:** the webhook requests `shareToDestination` sends for generated tweets and download outcomes. A main post and an optional quoted post each have text 0–25,000 chars (prose, emoji, newlines, space runs, `@everyone`, lengths clustered around 256/1024/1900/2000/4096/6000), 0–4 media items (pbs.twimg.com images, a non-twimg image, video.twimg.com MP4s with or without a lower-bitrate variant, empty URLs, posters), optional or empty author fields, and `includeQuote` × `quoteLayout` (`auto`/`card`/`inline`). Each media download can succeed, fail, time out, or return 404, its `HEAD` can report a size, omit it, or fail, and sizes cluster around the 10 MiB per-file and 24 MiB per-request budgets, so shares mix uploaded files, skipped files, links, and video follow-ups the way `resolveAttachmentsForTweet` decides them. The preservation properties generate only pbs.twimg.com/media images (`tweetWithShareableImages`), because shares drop other image hosts on purpose. Each property runs 1000 random cases. This is sampling, not exhaustive proof.
+
+**Assumptions:** lengths are measured in UTF-16 code units (`String.length`). That is never smaller than Discord's character count, so a pass is conservative.
+
+**Not covered:**
+- The 10-embeds and 10-attachments-per-message guards are checked but cannot be reached. With at most 4 media per post, a share produces at most 9 embeds per message (card layout, 4 images on both posts) and at most 8 files, so no mutant targets them.
+- Multipart bytes. The fake downloads return stand-in objects that record their source URL, so the check does not see real file contents, content types, filenames, or Discord's per-file and per-request size limits.
+- Webhook failures. Every webhook request succeeds, so 429 retries (`retryRateLimitedRequest`), timeouts, network errors, partial-delivery errors, and `WEBHOOK_SEND_DELAY_MS` pacing are not exercised. `tests/http.test.mjs` and `tests/deliver.test.mjs` cover those.
+- Video variants learned from network capture (`VIDEO_VARIANT_CACHE`, filled by `03-network-capture.js`). The cache stays empty, so only variants on the media item itself are tried.
+- Preservation of the quoted post's text, author names, and timestamps. Only the main text, permalink, and media are checked.
+- Lone surrogates. `truncate`/`splitText` can cut an emoji in half, and the check does not test whether Discord accepts that.
+- URL validity beyond length (Discord rejects some malformed `url`/`image.url` values). Timestamp format.
+- How tweets are extracted (`03-network-capture.js`, `06-syndication.js`, `07-extract-dom.js`). The check assumes they produce the shape above.
+- Settings, preview, and UI code (`09-*`, `10-*`, `11-*`, `12-preview.js`), including the webhook test message and toasts.
