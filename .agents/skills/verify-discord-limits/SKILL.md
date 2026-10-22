@@ -18,7 +18,7 @@ description: Check that every webhook request tweet-share sends to Discord stays
 ```sh
 npm ci                                    # once; installs fast-check
 npm run verify:discord-limits             # the check alone, ~2.5 s, 1000 generated cases per property
-npm run verify:discord-limits:mutants     # proves every property can still fail (~40 s)
+npm run verify:discord-limits:mutants     # proves every property can still fail (~3 s on 8 cores)
 ```
 
 Knobs: `FC_NUM_RUNS=20000` for a deeper soak, `FC_SEED=<n> FC_NUM_RUNS=<n>` to replay a failure (the failure message prints the exact command; the counterexample path it also prints is informational and the replay does not read it). `DISCORD_LIMITS_SRC_DIR=<dir>` points the check at another copy of the source.

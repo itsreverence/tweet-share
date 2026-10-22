@@ -1,6 +1,6 @@
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
-import { tmpdir } from "node:os";
+import { spawn } from "node:child_process";
+import { availableParallelism, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -180,39 +180,53 @@ function prepare(mutant) {
   return { dir };
 }
 
-function failingTests(dir) {
-  const result = spawnSync(process.execPath, ["--test", "--test-reporter=tap", check], {
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+function failingTests(dir, only) {
+  const filter = only ? [`--test-name-pattern=^${escapeRegExp(only)}$`] : [];
+  const child = spawn(process.execPath, ["--test", "--test-reporter=tap", ...filter, check], {
     env: { ...process.env, DISCORD_LIMITS_SRC_DIR: dir },
-    encoding: "utf8"
+    stdio: ["ignore", "pipe", "ignore"]
   });
-  return [...result.stdout.matchAll(/^not ok \d+ - (.+)$/gm)].map((m) => m[1]);
+  let stdout = "";
+  child.stdout.setEncoding("utf8").on("data", (chunk) => (stdout += chunk));
+  return new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", () => resolve([...stdout.matchAll(/^not ok \d+ - (.+)$/gm)].map((m) => m[1])));
+  });
 }
 
-let ok = true;
-
-const baselineFailures = failingTests(srcDir);
-if (baselineFailures.length) {
-  ok = false;
-  console.log(`FAIL baseline should pass, but failed: ${baselineFailures.join("; ")}`);
-} else {
-  console.log("ok   baseline passes");
-}
-
-for (const mutant of mutants) {
+async function verdict(mutant) {
   const { dir, missing } = prepare(mutant);
   if (missing) {
-    ok = false;
-    console.log(`STALE ${mutant.name} — ${mutant.file} no longer contains ${JSON.stringify(missing)}; update this mutant to the new code`);
-    continue;
+    return { ok: false, line: `STALE ${mutant.name} — ${mutant.file} no longer contains ${JSON.stringify(missing)}; update this mutant to the new code` };
   }
-  const failures = failingTests(dir);
-  rmSync(dir, { recursive: true, force: true });
-  if (failures.includes(mutant.expect)) {
-    console.log(`ok   caught: ${mutant.name}`);
-  } else {
-    ok = false;
-    console.log(`FAIL missed: ${mutant.name} (expected "${mutant.expect}" to fail; failed: ${failures.join("; ") || "none"})`);
-  }
+  const failures = await failingTests(dir, mutant.expect).finally(() => rmSync(dir, { recursive: true, force: true }));
+  return failures.includes(mutant.expect)
+    ? { ok: true, line: `ok   caught: ${mutant.name}` }
+    : { ok: false, line: `FAIL missed: ${mutant.name} (expected "${mutant.expect}" to fail; failed: ${failures.join("; ") || "none"})` };
 }
 
-process.exit(ok ? 0 : 1);
+async function baseline() {
+  const failures = await failingTests(srcDir);
+  return failures.length
+    ? { ok: false, line: `FAIL baseline should pass, but failed: ${failures.join("; ")}` }
+    : { ok: true, line: "ok   baseline passes" };
+}
+
+async function inPool(jobs, limit) {
+  const results = new Array(jobs.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < jobs.length) {
+      const index = next++;
+      results[index] = await jobs[index]();
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, jobs.length) }, worker));
+  return results;
+}
+
+const results = await inPool([baseline, ...mutants.map((mutant) => () => verdict(mutant))], availableParallelism());
+for (const { line } of results) console.log(line);
+process.exit(results.every((result) => result.ok) ? 0 : 1);
