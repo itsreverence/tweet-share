@@ -87,6 +87,22 @@ const mutants = [
     expect: PRESERVES
   },
   {
+    name: "video follow-up wraps its links in a code block",
+    file: "05-format-discord.js",
+    edits: [
+      ["`_Video:_\\n${entries[0].url}`", "`_Video:_\\n\\`\\`\\`\\n${entries[0].url}\\n\\`\\`\\``"],
+      ["blocks.join(\"\\n\\n\")", "`\\`\\`\\`\\n${blocks.join(\"\\n\\n\")}\\n\\`\\`\\``"]
+    ],
+    expect: PRESERVES
+  },
+  {
+    name: "every message suppresses its embeds",
+    file: "05-format-discord.js",
+    find: "allowed_mentions: { parse: [] }\n  };\n  if (embeds.length)",
+    replace: "allowed_mentions: { parse: [] },\n    flags: 4\n  };\n  if (embeds.length)",
+    expect: PRESERVES
+  },
+  {
     name: "share content omits the main permalink",
     file: "05-format-discord.js",
     find: "const lines = [];\n  if (tweet.url) lines.push(tweet.url);\n  if (resolveQuoteLayout",

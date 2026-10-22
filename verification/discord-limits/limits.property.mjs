@@ -390,6 +390,9 @@ const collapseZeroVideoDirs = (url) => url.replace(/\/vid\/([^/]+)\/0\/0\/(\d+x\
 const asSent = (url) => [url, collapseZeroVideoDirs(url)];
 const uploadSources = (item) => [item.url, ...(item.variants || []).map((variant) => variant.url)].flatMap(asSent);
 const contentOf = ({ payload }) => String(payload.content ?? "");
+const SUPPRESS_EMBEDS = 1 << 2;
+const rendersEmbeds = ({ payload }) => !(payload.flags & SUPPRESS_EMBEDS);
+const unfencedContentLines = (request) => contentOf(request).replace(/```[\s\S]*?```/g, "").split("\n");
 
 function spansChunksAcrossTrimmedCuts(target, chunks, start) {
   let matched = 0;
@@ -405,8 +408,9 @@ function spansChunksAcrossTrimmedCuts(target, chunks, start) {
 
 function renderedMedia(requests) {
   const uploaded = new Set(requests.flatMap((request) => request.files.map((file) => file.sourceUrl)));
-  const embedImages = new Set(requests.flatMap(({ payload }) => (payload.embeds || []).map((embed) => embed.image?.url)));
-  const unfurledLines = new Set(requests.filter(({ payload }) => !payload.embeds?.length).flatMap((request) => contentOf(request).split("\n")));
+  const rendering = requests.filter(rendersEmbeds);
+  const embedImages = new Set(rendering.flatMap(({ payload }) => (payload.embeds || []).map((embed) => embed.image?.url)));
+  const unfurledLines = new Set(rendering.filter(({ payload }) => !payload.embeds?.length).flatMap(unfencedContentLines));
   return (item) =>
     item.type === "image"
       ? embedImages.has(item.url) || uploaded.has(item.url)
