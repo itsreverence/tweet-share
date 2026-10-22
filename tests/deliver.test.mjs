@@ -273,10 +273,9 @@ test("multipart network failure is surfaced without an automatic JSON retry", as
   assert.equal(calls.multipart.length, 0);
 });
 
-test("shareToDestination waits out each pacing delay before sending the next message", async () => {
+test("shareToDestination waits out each pacing delay before sending the next message", { timeout: 5000 }, async () => {
   const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext({ holdDelays: true });
   await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
-  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
   const tweet = {
     ...sampleTweet,
@@ -288,19 +287,29 @@ test("shareToDestination waits out each pacing delay before sending the next mes
     ]
   };
 
+  let finished = false;
   const sharing = shareToDestination("main", tweet, {
     includeQuote: false,
     fetchMediaBytes() {
       throw new Error("unavailable");
     }
+  }).finally(() => {
+    finished = true;
   });
-  await settle();
+  const untilDelayHeldOrShareDone = async () => {
+    const deadline = Date.now() + 2000;
+    while (!finished && calls.heldDelays.length === 0) {
+      if (Date.now() > deadline) assert.fail("the share neither finished nor reached a pacing delay within 2000 ms");
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+  };
+  await untilDelayHeldOrShareDone();
   while (calls.heldDelays.length > 0) {
     const delaysSoFar = calls.log.filter((entry) => entry.kind === "delay").length;
     assert.equal(calls.heldDelays.length, 1, "only one delay is pending at a time");
     assert.equal(calls.log.length - delaysSoFar, delaysSoFar, "no message is sent while a delay is pending");
     calls.heldDelays.shift()();
-    await settle();
+    await untilDelayHeldOrShareDone();
   }
   await sharing;
 
