@@ -526,6 +526,33 @@ test("enrichTweetMedia merges cached image-only media when syndication is empty"
   assert.equal(tweet.media[0].url, "https://pbs.twimg.com/media/cached-image-only.jpg?format=jpg&name=orig");
 });
 
+test("enrichTweetMedia fills a link-only quote from its syndication result", async () => {
+  const quoteParent = readFixture("quote-parent.json");
+  const syndication = loadMediaContext((method, url) =>
+    Promise.resolve(new URL(url).searchParams.get("id") === quoteParent.id_str ? quoteParent : null)
+  );
+
+  const tweet = await syndication.enrichTweetMedia({
+    url: "https://x.com/fixture_author/status/1000000000000000001",
+    author: { displayName: "Fixture Author", username: "fixture_author", avatarUrl: "" },
+    text: "Main post",
+    media: [],
+    createdAt: "",
+    quote: {
+      url: `https://x.com/quote_parent/status/${quoteParent.id_str}`,
+      author: { displayName: "", username: "", avatarUrl: "" },
+      text: "",
+      media: [],
+      createdAt: ""
+    }
+  });
+
+  assert.ok(tweet.quote, "the quote survives enrichment");
+  assert.equal(tweet.quote.text, quoteParent.text);
+  assert.equal(tweet.quote.author.displayName, quoteParent.user.name);
+  assert.equal(tweet.quote.author.username, quoteParent.user.screen_name);
+});
+
 test("nearestPlayableVideoUrl returns a playable currentSrc URL", () => {
   const url = "https://video.twimg.com/ext_tw_video/999/pu/vid/1280x720/current.mp4";
   const result = nearestPlayableVideoUrl(fakeNode({ currentSrc: url, src: "", poster: "" }));
