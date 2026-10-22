@@ -133,18 +133,18 @@ const piece = fc.oneof(
   { weight: 1, arbitrary: fc.constantFrom("\n", "\n\n", "   ") },
   { weight: 1, arbitrary: fc.constantFrom("😀", "🇺🇸", "é", "中文", "@everyone", "<@123>", "**", "> ") }
 );
-const shortProse = fc.array(piece, { maxLength: 40 }).map((p) => p.join(""));
+const shortProse = fc.array(piece, { maxLength: 40, size: "max" }).map((p) => p.join(""));
 const repeatedBlock = fc.oneof(
-  fc.array(piece, { minLength: 1, maxLength: 40 }).map((p) => p.join("")),
+  fc.array(piece, { minLength: 1, maxLength: 40, size: "max" }).map((p) => p.join("")),
   fc.constantFrom("a", "a ", " a", "😀", "a\n", "word ")
 );
 const longText = fc.tuple(repeatedBlock, length).map(([s, n]) => s.repeat(Math.ceil(n / s.length)).slice(0, n));
 const text = fc.oneof(shortProse, longText);
 const statusId = fc.bigInt({ min: 1n, max: 10n ** 19n }).map(String);
-const username = fc.stringMatching(/^[A-Za-z0-9_]{1,15}$/);
+const username = fc.stringMatching(/^[A-Za-z0-9_]{1,15}$/, { size: "max" });
 const author = fc.record(
   {
-    displayName: fc.oneof(fc.string({ maxLength: 50, unit: "grapheme" }), fc.constant("")),
+    displayName: fc.oneof(fc.string({ maxLength: 50, unit: "grapheme", size: "max" }), fc.constant("")),
     username: fc.oneof(username, fc.constant("")),
     avatarUrl: fc.constantFrom("https://pbs.twimg.com/profile_images/1/a_normal.jpg", "", "http://insecure/x.jpg")
   },
@@ -152,22 +152,42 @@ const author = fc.record(
 );
 const twimgImageItem = statusId.map((id) => ({ type: "image", url: `https://pbs.twimg.com/media/${id}?format=jpg&name=orig` }));
 const imageItem = fc.oneof(twimgImageItem, fc.constant({ type: "image", url: "https://example.com/not-twimg.jpg" }));
-const videoUrl = (id, size) => `https://video.twimg.com/ext_tw_video/${id}/pu/vid/${size}/v${id}.mp4`;
+const VIDEO_SHAPES = {
+  ext_tw_video: (id, size, tag) => `https://video.twimg.com/ext_tw_video/${id}/pu/vid/${size}/v${id}.mp4${tag}`,
+  amplify_video: (id, size, tag) => `https://video.twimg.com/amplify_video/${id}/vid/avc1/${size}/v${id}.mp4${tag}`
+};
+const POSTER_DIRS = { ext_tw_video: "ext_tw_video_thumb", amplify_video: "amplify_video_thumb", tweet_video: "tweet_video_thumb" };
 const videoItem = fc
-  .record({ id: statusId, hasUrl: fc.boolean(), hasPoster: fc.boolean(), hasVariants: fc.boolean() })
-  .map(({ id, hasUrl, hasPoster, hasVariants }) => {
-    const url = hasUrl ? videoUrl(id, "1280x720") : "";
-    const item = { type: "video", url, posterUrl: hasPoster ? `https://pbs.twimg.com/ext_tw_video_thumb/${id}/pu/img/p.jpg` : "" };
+  .record({
+    id: statusId,
+    shape: fc.constantFrom("ext_tw_video", "amplify_video", "tweet_video"),
+    tag: fc.constantFrom("", "?tag=12", "?tag=14"),
+    hasUrl: fc.boolean(),
+    hasPoster: fc.boolean(),
+    hasVariants: fc.boolean()
+  })
+  .map(({ id, shape, tag, hasUrl, hasPoster, hasVariants }) => {
+    const gif = shape === "tweet_video";
+    const url = !hasUrl ? "" : gif ? `https://video.twimg.com/tweet_video/G${id}.mp4` : VIDEO_SHAPES[shape](id, "1280x720", tag);
+    const item = { type: "video", url, posterUrl: hasPoster ? `https://pbs.twimg.com/${POSTER_DIRS[shape]}/${id}/pu/img/p.jpg` : "" };
     if (url && hasVariants) {
-      item.variants = [
-        { url, bitrate: 2176000, type: "video/mp4" },
-        { url: videoUrl(id, "640x360"), bitrate: 832000, type: "video/mp4" }
-      ];
+      item.variants = gif
+        ? [{ url, bitrate: 0, type: "video/mp4" }]
+        : [
+            { url, bitrate: 2176000, type: "video/mp4" },
+            { url: VIDEO_SHAPES[shape](id, "640x360", tag), bitrate: 832000, type: "video/mp4" }
+          ];
     }
     return item;
   });
 const X_MAX_MEDIA_PER_POST = 4;
 const mediaOf = (image) => fc.array(fc.oneof(image, videoItem), { maxLength: X_MAX_MEDIA_PER_POST });
+const fullMediaOf = (...items) => fc.array(fc.oneof(...items), { minLength: X_MAX_MEDIA_PER_POST, maxLength: X_MAX_MEDIA_PER_POST });
+const fullMedia = fc.oneof(
+  { weight: 2, arbitrary: fullMediaOf(twimgImageItem) },
+  { weight: 1, arbitrary: fullMediaOf(videoItem) },
+  { weight: 1, arbitrary: fullMediaOf(twimgImageItem, videoItem) }
+);
 
 function postArb(media) {
   return fc.record({
@@ -178,10 +198,18 @@ function postArb(media) {
     media
   });
 }
-const tweetOf = (media) =>
-  fc.tuple(postArb(media), fc.option(postArb(media), { nil: undefined })).map(([main, quote]) => (quote ? { ...main, quote } : main));
-const tweet = tweetOf(mediaOf(imageItem));
-const tweetWithShareableImages = tweetOf(mediaOf(twimgImageItem));
+const tweetOf = (image) =>
+  fc.oneof(
+    {
+      weight: 3,
+      arbitrary: fc
+        .tuple(postArb(mediaOf(image)), fc.option(postArb(mediaOf(image)), { nil: undefined }))
+        .map(([main, quote]) => (quote ? { ...main, quote } : main))
+    },
+    { weight: 1, arbitrary: fc.tuple(postArb(fullMedia), postArb(fullMedia)).map(([main, quote]) => ({ ...main, quote })) }
+  );
+const tweet = tweetOf(imageItem);
+const tweetWithShareableImages = tweetOf(twimgImageItem);
 const options = fc.record(
   {
     includeQuote: fc.boolean(),
@@ -199,9 +227,17 @@ const fetchOutcome = fc.record({
   head: fc.constantFrom("length", "length", "no-length", "status405", "error"),
   size: mediaSize
 });
+const smallDownload = fc.record({
+  get: fc.constant("ok"),
+  head: fc.constantFrom("length", "no-length"),
+  size: fc.integer({ min: 1, max: 3 * MiB })
+});
 const MAX_DOWNLOAD_URLS = 2 * X_MAX_MEDIA_PER_POST * 2;
-const fetchPlan = fc.array(fetchOutcome, { maxLength: MAX_DOWNLOAD_URLS });
-
+const fetchPlan = fc.oneof(
+  { weight: 4, arbitrary: fc.array(fetchOutcome, { maxLength: MAX_DOWNLOAD_URLS, size: "max" }) },
+  { weight: 1, arbitrary: fc.array(smallDownload, { minLength: MAX_DOWNLOAD_URLS, maxLength: MAX_DOWNLOAD_URLS }) },
+  { weight: 2, arbitrary: fc.constant([]) }
+);
 const embedFailure = fc.constantFrom(...Object.keys(EMBED_FAILURES));
 
 const len = (value) => String(value ?? "").length;

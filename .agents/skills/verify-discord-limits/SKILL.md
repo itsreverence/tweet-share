@@ -17,7 +17,7 @@ description: Check that every webhook request tweet-share sends to Discord stays
 
 ```sh
 npm ci                                    # once; installs fast-check
-npm run verify:discord-limits             # the check alone, ~2 s, 1000 generated cases per property
+npm run verify:discord-limits             # the check alone, ~2.5 s, 1000 generated cases per property
 npm run verify:discord-limits:mutants     # proves every property can still fail (~40 s)
 ```
 
@@ -69,21 +69,22 @@ The second array element is the `options` object passed to `shareToDestination`.
 ## Updating after an intended change
 
 - **New payload field or embed part** (e.g. you start setting `embed.title` somewhere new, or add `thumbnail`/`provider`): if Discord counts it toward the 6000 total or limits it, add it to `embedChars` / `embedViolations` in `limits.property.mjs`.
-- **New tweet data** that formatting or attachment selection reads (new `tweet.*` key, a new media `type` or media field, a new share option): add it to the generators (`postArb`, `mediaOf`, `videoItem`, `options`), or the check will never exercise it.
+- **New tweet data** that formatting or attachment selection reads (new `tweet.*` key, a new media `type` or media field, a new share option): add it to the generators (`postArb`, `mediaOf`, `fullMedia`, `videoItem`, `options`), or the check will never exercise it.
 - **New send path** (a new function whose result goes to `request("POST", webhookUrl, …)` or `requestMultipart`): send it through the fake transport in `sentWebhookRequests`, or load a variant of the source for it the way `failingFormatter` forces the fallback.
-- **New download behavior** (another request in `13-media-fetch.js`, a new response field it reads): teach `mediaResponse` and `fetchOutcome` about it.
+- **New download behavior** (another request in `13-media-fetch.js`, a new response field it reads): teach `mediaResponse`, `fetchOutcome`, and `smallDownload` about it.
 - **New property**: add a mutant to `mutants.mjs` that breaks the code it guards and names that property in `expect`. Every property has at least one mutant, so a property that can never fail shows up as `FAIL missed`.
 - **Renamed or moved guard**: if `mutants.mjs` prints `STALE <name>`, point that mutant's `find` string at the new code, so each property is still shown failing on a broken variant.
+- **Array, string, or regex generators**: give each one that may grow past 10 elements `size: "max"`. fast-check's default size caps them near 10 whatever `maxLength` or the regex says.
 - After any of these, run both commands, then commit the change to move the sync point above.
 
 ## Scope: what a pass means and doesn't
 
-**Covered:** the webhook requests `shareToDestination` sends for generated tweets and download outcomes. A main post and an optional quoted post each have text 0–25,000 chars (prose, emoji, newlines, space runs, `@everyone`, lengths clustered around 256/1024/1900/2000/4096/6000), 0–4 media items (pbs.twimg.com images, a non-twimg image, video.twimg.com MP4s with or without a lower-bitrate variant, empty URLs, posters), optional or empty author fields, and `includeQuote` × `quoteLayout` (`auto`/`card`/`inline`). Each media download can succeed, fail, time out, or return 404, its `HEAD` can report a size, omit it, or fail, and sizes cluster around the 10 MiB per-file and 24 MiB per-request budgets, so shares mix uploaded files, skipped files, links, and video follow-ups the way `resolveAttachmentsForTweet` decides them. The preservation properties generate only pbs.twimg.com/media images (`tweetWithShareableImages`), because shares drop other image hosts on purpose. Each property runs 1000 random cases. This is sampling, not exhaustive proof.
+**Covered:** the webhook requests `shareToDestination` sends for generated tweets and download outcomes. A main post and an optional quoted post each have text 0–25,000 chars (prose, emoji, newlines, space runs, `@everyone`, lengths clustered around 256/1024/1900/2000/4096/6000), 0–4 media items (pbs.twimg.com images, a non-twimg image, `ext_tw_video` and `amplify_video` MP4s with or without `?tag=` queries and a lower-bitrate variant, `tweet_video` GIFs with a bitrate-0 variant, empty URLs, posters), optional or empty author fields with display names up to 50 graphemes, and `includeQuote` × `quoteLayout` (`auto`/`card`/`inline`). Each media download can succeed, fail, time out, or return 404, its `HEAD` can report a size, omit it, or fail, and sizes cluster around the 10 MiB per-file and 24 MiB per-request budgets, so shares mix uploaded files, skipped files, links, and video follow-ups the way `resolveAttachmentsForTweet` decides them. A quarter of the tweets have 4 media items on both posts (`fullMedia`: all images, all videos, or mixed), and the fetch plan is sometimes empty (nothing uploads) or all small successful downloads (everything uploads), so the densest shares occur. In 2000 sampled shares, measured with three seeds, the busiest message held 1 embed in about 60% of shares, 2 in 22%, 3 to 5 in 15%, 6 to 8 in 3 to 4%, and 9 in 1 to 4 shares. The busiest request carried no file in about 65%, 1 to 4 files in 31 to 34%, 5 to 7 in 1 to 2%, and 8 in 9 to 16 shares. The generators before this change reached at most 5 embeds and 4 files in the same sample. The preservation properties generate only pbs.twimg.com/media images (`tweetWithShareableImages`), because shares drop other image hosts on purpose. Each property runs 1000 random cases. This is sampling, not exhaustive proof.
 
 **Assumptions:** lengths are measured in UTF-16 code units (`String.length`). That is never smaller than Discord's character count, so a pass is conservative.
 
 **Not covered:**
-- The 10-embeds and 10-attachments-per-message guards are checked but cannot be reached. With at most 4 media per post, a share produces at most 9 embeds per message (card layout, 4 images on both posts) and at most 8 files, so no mutant targets them.
+- The 10-embeds and 10-attachments-per-message guards are checked but cannot be reached. With at most 4 media per post, a share produces at most 9 embeds per message (two description embeds and seven image embeds, when none of 8 images uploads) and at most 8 files, and the generators do produce both, so no mutant targets them.
 - Multipart bytes. The fake downloads return stand-in objects that record their source URL, so the check does not see real file contents, content types, filenames, or Discord's per-file and per-request size limits.
 - Webhook failures. Every webhook request succeeds, so 429 retries (`retryRateLimitedRequest`), timeouts, network errors, partial-delivery errors, and `WEBHOOK_SEND_DELAY_MS` pacing are not exercised. `tests/http.test.mjs` and `tests/deliver.test.mjs` cover those.
 - Video variants learned from network capture (`VIDEO_VARIANT_CACHE`, filled by `03-network-capture.js`). The cache stays empty, so only variants on the media item itself are tried.
