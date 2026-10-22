@@ -219,7 +219,7 @@ async function enrichTweetMedia(tweet) {
   });
 
   if (hasQuoteCandidate(tweet)) {
-    await enrichTweetMedia(tweet.quote);
+    tweet.quote = await enrichTweetMedia(tweet.quote);
   }
 
   if (!hasQuoteTweet(tweet)) {
