@@ -191,11 +191,13 @@ test("choosing the second destination in the preview posts only to its webhook",
   assert.ok(sent.includes(quoteUrl), "with the quote toggle left on, the quote permalink is sent");
 });
 
-test("unchecking Include quoted tweet keeps the quote out of the preview and the message", async (t) => {
-  const view = openPage(t, { destinations: [general, friends], quote: true });
+test("a quoted post opens the preview for a single destination, and unchecking the quote keeps it out", async (t) => {
+  const view = openPage(t, { destinations: [friends], quote: true });
 
   const menu = await openPreview(view);
-  click(view, byText(menu, "label", "Include quoted tweet")[0]);
+  const [quoteToggle] = byText(menu, "label", "Include quoted tweet");
+  assert.ok(quoteToggle, "the preview offers the quote toggle");
+  click(view, quoteToggle);
   assert.ok(!menu.textContent.includes(quoteText), "the preview drops the quoted post");
   click(view, byText(menu, '[role="menuitem"]', "Friends")[0]);
 
