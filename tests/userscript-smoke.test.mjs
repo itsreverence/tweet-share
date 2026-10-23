@@ -111,6 +111,39 @@ async function openShareMenu(view) {
   return shareItems(view);
 }
 
+const byText = (root, selector, text) =>
+  [...root.querySelectorAll(selector)].filter((node) => node.textContent.trim() === text);
+const previewMenu = ({ document }) => document.querySelector('[role="menu"][aria-label="Share to Discord"]');
+const sentText = (requests) => requests.map((request) => JSON.stringify(postedMessage(request).payload)).join("\n");
+
+async function openPreview(view) {
+  const [item] = await openShareMenu(view);
+  click(view, item);
+  const menu = await waitFor(() => previewMenu(view), "the Share to Discord preview");
+  await waitFor(() => {
+    const destinations = [...menu.querySelectorAll('[role="menuitem"]')];
+    return destinations.length > 0 && destinations.every((button) => !button.disabled);
+  }, "the destinations to enable once the preview loads");
+  return menu;
+}
+
+const settingsDialog = ({ document }) =>
+  document.querySelector('[role="dialog"][aria-label="Tweet Discord Share settings"]');
+const addChannelCard = (dialog) => byText(dialog, "div", "Add channel")[0].parentElement;
+const fieldInput = (container, label) => byText(container, "label", label)[0].parentElement.querySelector("input");
+const channelNames = (dialog) =>
+  [...dialog.querySelectorAll('input[type="text"]')].map((input) => input.value).filter(Boolean);
+
+function type({ window }, input, value) {
+  input.value = value;
+  input.dispatchEvent(new window.Event("input", { bubbles: true }));
+}
+
+async function openSettings(view) {
+  view.menuCommands.get("Tweet Discord Share settings…")();
+  return waitFor(() => settingsDialog(view), "the settings dialog");
+}
+
 test("sharing to the only destination posts the post to its webhook", async (t) => {
   const view = openPage(t, { destinations: [general] });
 
@@ -141,7 +174,7 @@ test("sharing with no destinations opens settings and sends nothing", async (t) 
   const [item] = await openShareMenu(view);
   click(view, item);
 
-  await waitFor(() => view.document.querySelector('[role="dialog"][aria-label="Tweet Discord Share settings"]'), "the settings dialog");
+  await waitFor(() => settingsDialog(view), "the settings dialog");
   assert.equal(view.posts().length, 0, "no POST to any URL");
 });
 
@@ -157,22 +190,6 @@ test("a Discord rejection shows its message in an error toast", async (t) => {
   const error = await waitFor(() => toast(view, "error"), "the error toast");
   assert.equal(error.textContent, "Invalid Form Body");
 });
-
-const byText = (root, selector, text) =>
-  [...root.querySelectorAll(selector)].filter((node) => node.textContent.trim() === text);
-const previewMenu = ({ document }) => document.querySelector('[role="menu"][aria-label="Share to Discord"]');
-const sentText = (requests) => requests.map((request) => JSON.stringify(postedMessage(request).payload)).join("\n");
-
-async function openPreview(view) {
-  const [item] = await openShareMenu(view);
-  click(view, item);
-  const menu = await waitFor(() => previewMenu(view), "the Share to Discord preview");
-  await waitFor(() => {
-    const destinations = [...menu.querySelectorAll('[role="menuitem"]')];
-    return destinations.length > 0 && destinations.every((button) => !button.disabled);
-  }, "the destinations to enable once the preview loads");
-  return menu;
-}
 
 test("choosing the second destination in the preview posts only to its webhook", async (t) => {
   const view = openPage(t, { destinations: [general, friends], quote: true });
@@ -222,23 +239,6 @@ for (const [how, dismiss] of [
     assert.equal(view.document.querySelector('[role="status"], [role="alert"]'), null, "no share starts");
     assert.equal(view.posts().length, 0, "no POST to any URL");
   });
-}
-
-const settingsDialog = ({ document }) =>
-  document.querySelector('[role="dialog"][aria-label="Tweet Discord Share settings"]');
-const addChannelCard = (dialog) => byText(dialog, "div", "Add channel")[0].parentElement;
-const fieldInput = (container, label) => byText(container, "label", label)[0].parentElement.querySelector("input");
-const channelNames = (dialog) =>
-  [...dialog.querySelectorAll('input[type="text"]')].map((input) => input.value).filter(Boolean);
-
-function type({ window }, input, value) {
-  input.value = value;
-  input.dispatchEvent(new window.Event("input", { bubbles: true }));
-}
-
-async function openSettings(view) {
-  view.menuCommands.get("Tweet Discord Share settings…")();
-  return waitFor(() => settingsDialog(view), "the settings dialog");
 }
 
 test("a channel added in settings and saved persists across reloads and receives the next share", async (t) => {
