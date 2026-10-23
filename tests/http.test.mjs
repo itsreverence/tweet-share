@@ -16,25 +16,30 @@ class FakeFormData {
   }
 }
 
-function loadHttpContext(respond) {
+function loadHttpContext(respond, { holdTimers = false } = {}) {
   const calls = [];
   const delays = [];
+  const timers = [];
   const context = createContext({
     Blob,
     FormData: FakeFormData,
     console,
-    window: { setTimeout },
+    window: {
+      setTimeout(callback, ms) {
+        delays.push(ms);
+        if (holdTimers) timers.push(callback);
+        else queueMicrotask(callback);
+      }
+    },
     GM: {
       xmlHttpRequest(options) {
         calls.push(options);
         queueMicrotask(() => respond(options, calls.length));
       }
-    },
-    __delays: delays
+    }
   });
 
   runInNewContext(`${source}
-delay = async (ms) => __delays.push(ms);
 this.exports = {
   HTTP_TIMEOUT_MS,
   parseDiscordResponse,
@@ -42,7 +47,7 @@ this.exports = {
   requestMultipart
 };`, context);
 
-  return { ...context.exports, calls, delays };
+  return { ...context.exports, calls, delays, timers };
 }
 
 test("request applies a bounded timeout and reports timeout failures", async () => {
@@ -54,17 +59,39 @@ test("request applies a bounded timeout and reports timeout failures", async () 
 });
 
 test("request retries explicit Discord rate limits using retry_after", async () => {
-  const { request, calls, delays } = loadHttpContext((options, attempt) => {
+  const { request, calls, delays, timers } = loadHttpContext((options, attempt) => {
     if (attempt === 1) {
       options.onload({ status: 429, responseText: '{"message":"rate limited","retry_after":0.25}' });
       return;
     }
     options.onload({ status: 204, responseText: "" });
-  });
+  }, { holdTimers: true });
 
-  await request("POST", "https://discord.com/api/webhooks/1/token", { content: "hello" });
-  assert.equal(calls.length, 2);
+  const sent = request("POST", "https://discord.com/api/webhooks/1/token", { content: "hello" });
+  await new Promise(setImmediate);
+  assert.equal(calls.length, 1, "no retry before the retry_after delay elapses");
   assert.deepEqual(delays, [250]);
+  timers.shift()();
+  await sent;
+  assert.equal(calls.length, 2, "retries once the retry_after delay elapses");
+});
+
+test("multipart requests wait before retrying a rate limit without retry_after", async () => {
+  const { requestMultipart, calls, delays, timers } = loadHttpContext((options, attempt) => {
+    if (attempt === 1) {
+      options.onload({ status: 429, responseText: '{"message":"rate limited"}' });
+      return;
+    }
+    options.onload({ status: 200, responseText: '{"id":"1"}' });
+  }, { holdTimers: true });
+
+  const sent = requestMultipart("https://discord.com/api/webhooks/1/token", { content: "hello" }, []);
+  await new Promise(setImmediate);
+  assert.equal(calls.length, 1, "no retry before the default delay elapses");
+  assert.ok(delays.length === 1 && delays[0] > 0, `waits a nonzero default delay, got ${delays}`);
+  timers.shift()();
+  await sent;
+  assert.equal(calls.length, 2, "retries once the default delay elapses");
 });
 
 test("request stops after the bounded rate-limit retry count", async () => {
