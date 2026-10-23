@@ -41,7 +41,6 @@ function loadHttpContext(respond, { holdTimers = false } = {}) {
 
   runInNewContext(`${source}
 this.exports = {
-  HTTP_TIMEOUT_MS,
   parseDiscordResponse,
   request,
   requestMultipart
@@ -50,12 +49,19 @@ this.exports = {
   return { ...context.exports, calls, delays, timers };
 }
 
+function assertBoundedTimeout(options) {
+  assert.ok(
+    options.timeout >= 5_000 && options.timeout <= 120_000,
+    `Discord requests time out between 5 s and 120 s so a stalled share fails instead of hanging, got ${options.timeout}`
+  );
+}
+
 test("request applies a bounded timeout and reports timeout failures", async () => {
-  const { request, calls, HTTP_TIMEOUT_MS } = loadHttpContext((options) => options.ontimeout());
+  const { request, calls } = loadHttpContext((options) => options.ontimeout());
 
   await assert.rejects(() => request("POST", "https://discord.com/api/webhooks/1/token", {}), /timed out/i);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].timeout, HTTP_TIMEOUT_MS);
+  assertBoundedTimeout(calls[0]);
 });
 
 test("request retries explicit Discord rate limits using retry_after", async () => {
@@ -128,4 +134,5 @@ test("multipart requests do not retry ambiguous network failures", async () => {
     /Could not reach Discord/i
   );
   assert.equal(calls.length, 1);
+  assertBoundedTimeout(calls[0]);
 });
