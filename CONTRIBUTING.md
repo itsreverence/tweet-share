@@ -10,7 +10,7 @@ Thanks for helping improve Tweet Discord Share.
 
 ## Local setup
 
-Requirements: Node.js 22 or newer. The userscript has no runtime dependencies; `npm ci` installs the development dependencies the tests use.
+Requirements: Node.js 22.22.2+, 24.15.0+, or 26 and newer (the versions jsdom supports). The userscript has no runtime dependencies; `npm ci` installs the development dependencies the tests use.
 
 ```bash
 git clone https://github.com/itsreverence/tweet-share.git
