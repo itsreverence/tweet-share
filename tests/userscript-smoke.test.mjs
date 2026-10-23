@@ -221,3 +221,71 @@ for (const [how, dismiss] of [
     assert.equal(view.posts().length, 0, "no POST to any URL");
   });
 }
+
+const settingsDialog = ({ document }) =>
+  document.querySelector('[role="dialog"][aria-label="Tweet Discord Share settings"]');
+const addChannelCard = (dialog) => byText(dialog, "div", "Add channel")[0].parentElement;
+const fieldInput = (container, label) => byText(container, "label", label)[0].parentElement.querySelector("input");
+const channelNames = (dialog) =>
+  [...dialog.querySelectorAll('input[type="text"]')].map((input) => input.value).filter(Boolean);
+
+function type({ window }, input, value) {
+  input.value = value;
+  input.dispatchEvent(new window.Event("input", { bubbles: true }));
+}
+
+async function openSettings(view) {
+  view.menuCommands.get("Tweet Discord Share settings…")();
+  return waitFor(() => settingsDialog(view), "the settings dialog");
+}
+
+test("a channel added in settings and saved persists across reloads and receives the next share", async (t) => {
+  const view = openPage(t, { destinations: [] });
+
+  const dialog = await openSettings(view);
+  const addCard = addChannelCard(dialog);
+  type(view, fieldInput(addCard, "Display name"), "Friends");
+  type(view, fieldInput(addCard, "Webhook URL"), friendsWebhookUrl);
+  click(view, byText(dialog, "button", "Save")[0]);
+  const saved = await waitFor(() => toast(view, "success"), "the Settings saved toast");
+  assert.equal(saved.textContent, "Settings saved.");
+
+  const reloaded = openPage(t, { store: view.store });
+  const reopened = await openSettings(reloaded);
+  assert.deepEqual(channelNames(reopened), ["Friends"], "settings list the saved channel after a reload");
+  click(reloaded, byText(reopened, "button", "Cancel")[0]);
+
+  const [item] = await openShareMenu(reloaded);
+  click(reloaded, item);
+  const success = await waitFor(() => toast(reloaded, "success"), "the share success toast");
+  assert.equal(success.textContent, "Sent to Friends", "the share goes to the saved channel");
+  assert.ok(reloaded.webhookPosts(friendsWebhookUrl).length > 0, "the saved channel's webhook receives the post");
+});
+
+test("Test webhook sends one test message to the URL being added", async (t) => {
+  const view = openPage(t, { destinations: [] });
+
+  const addCard = addChannelCard(await openSettings(view));
+  type(view, fieldInput(addCard, "Webhook URL"), friendsWebhookUrl);
+  click(view, byText(addCard, "button", "Test webhook")[0]);
+
+  const success = await waitFor(() => toast(view, "success"), "the test success toast");
+  assert.equal(success.textContent, "Test message sent. Check that Discord channel.");
+  assert.deepEqual(view.posts().map((request) => request.url), [friendsWebhookUrl], "exactly one POST, to the typed webhook");
+});
+
+test("Cancel discards edited and removed channels", async (t) => {
+  const view = openPage(t, { destinations: [general, friends] });
+  const stored = structuredClone([...view.store]);
+
+  const dialog = await openSettings(view);
+  type(view, [...dialog.querySelectorAll("input")].find((input) => input.value === "General"), "Renamed");
+  click(view, byText(dialog, "button", "Remove")[1]);
+  assert.deepEqual(channelNames(dialog), ["Renamed"], "the dialog shows the pending edit and removal");
+  click(view, byText(dialog, "button", "Cancel")[0]);
+  assert.equal(settingsDialog(view), null, "Cancel closes settings");
+
+  const reopened = await openSettings(view);
+  assert.deepEqual(channelNames(reopened), ["General", "Friends"], "reopened settings show the original channels");
+  assert.deepEqual([...view.store], stored, "storage is unchanged");
+});

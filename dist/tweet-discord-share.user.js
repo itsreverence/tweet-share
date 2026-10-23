@@ -3140,16 +3140,16 @@ async function openSettingsModal() {
   addBtn.type = "button";
   addBtn.className = `${SETTINGS_CLASS}__btn ${SETTINGS_CLASS}__btn--ghost`;
   addBtn.textContent = "Add to list";
-  addBtn.addEventListener("click", () => {
+  function addPendingChannel() {
     const label = newLabelInput.value.trim();
     const webhookUrl = newUrlInput.value.trim();
     if (!label) {
       showToast("Enter a display name.", "error");
-      return;
+      return false;
     }
     if (!isValidWebhookUrl(webhookUrl)) {
       showToast("Enter a valid Discord webhook URL.", "error");
-      return;
+      return false;
     }
     const existingIds = new Set(destinations.map((item) => item.id));
     destinations.push({
@@ -3160,7 +3160,9 @@ async function openSettingsModal() {
     newLabelInput.value = "";
     newUrlInput.value = "";
     renderList();
-  });
+    return true;
+  }
+  addBtn.addEventListener("click", addPendingChannel);
 
   const addActions = document.createElement("div");
   addActions.className = `${SETTINGS_CLASS}__card-actions`;
@@ -3188,6 +3190,8 @@ async function openSettingsModal() {
   saveBtn.className = `${SETTINGS_CLASS}__btn ${SETTINGS_CLASS}__btn--primary`;
   saveBtn.textContent = "Save";
   saveBtn.addEventListener("click", async () => {
+    const hasPendingChannel = newLabelInput.value.trim() || newUrlInput.value.trim();
+    if (hasPendingChannel && !addPendingChannel()) return;
     const sanitized = sanitizeDestinations(destinations);
     if (sanitized.length === 0 && destinations.length > 0) {
       showToast("Fix invalid names or webhook URLs before saving.", "error");
