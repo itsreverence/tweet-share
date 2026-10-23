@@ -23,7 +23,6 @@ function loadMediaFetchContext(xhrHandler = () => {
   });
   runInNewContext(`${code}\nthis.exports = {
     ATTACHMENT_MAX_BYTES,
-    ATTACHMENT_MAX_COUNT,
     ATTACHMENT_REQUEST_MAX_BYTES,
     attachmentFilename,
     collectMediaAttachmentUrls,
@@ -39,7 +38,6 @@ function loadMediaFetchContext(xhrHandler = () => {
 
 const {
   ATTACHMENT_MAX_BYTES,
-  ATTACHMENT_MAX_COUNT,
   ATTACHMENT_REQUEST_MAX_BYTES,
   attachmentFilename,
   collectMediaAttachmentUrls,
@@ -227,22 +225,20 @@ test("failed fetch is skipped with its source URL and fetch reason", async () =>
 });
 
 test("ten-file limit retains every over-limit source URL", async () => {
-  const many = {
-    ...tweet,
-    media: Array.from({ length: ATTACHMENT_MAX_COUNT + 2 }, (_, index) => ({
-      type: "video",
-      url: `https://video.twimg.com/ext_tw_video/${index}/pu/vid/1280x720/clip.mp4`
-    }))
-  };
+  const urls = Array.from({ length: 12 }, (_, index) => `https://video.twimg.com/ext_tw_video/${index}/pu/vid/1280x720/clip.mp4`);
+  const many = { ...tweet, media: urls.map((url) => ({ type: "video", url })) };
   const resolved = await resolveAttachmentsForTweet(many, {
     fetchMediaBytes() {
       return { byteLength: 10 };
     }
   });
 
-  assert.equal(resolved.attachments.length, ATTACHMENT_MAX_COUNT);
-  assert.equal(resolved.skipped.length, 2);
-  assert.equal(resolved.skipped.every((item) => item.reason === "count" && item.sourceUrl), true);
+  assert.equal(resolved.attachments.length, 10, "uploads up to Discord's limit of 10 files per message");
+  assert.deepEqual(
+    Array.from(resolved.skipped, (item) => [item.sourceUrl, item.reason]),
+    urls.slice(10).map((url) => [url, "count"]),
+    "the files past Discord's limit are skipped by count with their source URLs"
+  );
 });
 
 test("partial success returns attachments and skipped source details", async () => {
