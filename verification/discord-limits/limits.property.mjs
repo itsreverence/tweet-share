@@ -204,7 +204,9 @@ function postArb(media) {
     media
   });
 }
-const mediaIdOf = (url) => /\/(?:media|ext_tw_video|amplify_video|tweet_video)\/([^/?.]+)/.exec(url)?.[1];
+const MEDIA_ID = /\/(?:media|ext_tw_video|amplify_video|tweet_video)\/([^/?.]+)/g;
+const mediaIdsIn = (value) => [...String(value).matchAll(MEDIA_ID)].map((match) => match[1]);
+const mediaIdOf = (url) => mediaIdsIn(url)[0];
 
 function withDistinctMediaIds(t) {
   const seen = new Set();
@@ -230,6 +232,14 @@ const tweetOf = (image) =>
     { weight: 1, arbitrary: fc.tuple(postArb(fullMedia), postArb(fullMedia)).map(([main, quote]) => ({ ...main, quote })) }
   ).map(withDistinctMediaIds);
 const tweet = tweetOf(imageItem);
+const QUOTE_MARK = "‡quoted‡";
+const tweetWithMarkedQuote = fc
+  .oneof(fc.tuple(postArb(mediaOf(imageItem)), postArb(mediaOf(imageItem))), fc.tuple(postArb(fullMedia), postArb(fullMedia)))
+  .map(([main, quote]) => ({
+    ...main,
+    quote: { ...quote, url: quote.url.replace("https://x.com/", "https://twitter.com/"), text: `${QUOTE_MARK} ${quote.text}` }
+  }))
+  .map(withDistinctMediaIds);
 const tweetWithShareableImages = tweetOf(twimgImageItem);
 const options = fc.record(
   {
@@ -463,5 +473,30 @@ test("plain-text fallback carries the main post's text and permalink", async () 
       return report(missing.map((what) => `fallback is missing ${what}`));
     },
     embedFailure
+  );
+});
+
+const sentText = ({ payload, files }) => [JSON.stringify(payload), ...files.flatMap((file) => [file.filename, file.sourceUrl])].join("\n");
+
+test("a share carries the quoted post's text and permalink when included, and none of its text, permalink, or media when excluded", async () => {
+  await runShare(
+    tweetWithMarkedQuote,
+    (t, o, requests) => {
+      const sent = requests.map(sentText).join("\n");
+      const problems = [];
+      if (o.includeQuote === false) {
+        if (sent.includes(QUOTE_MARK)) problems.push("carries the excluded quote's text");
+        if (sent.includes(t.quote.url)) problems.push(`carries the excluded quote's permalink ${t.quote.url}`);
+        const sentIds = new Set(mediaIdsIn(sent));
+        for (const item of mediaItems(t.quote)) {
+          if (sentIds.has(mediaIdOf(item.url))) problems.push(`carries excluded quoted media ${item.url}`);
+        }
+      } else {
+        if (!sent.includes(QUOTE_MARK)) problems.push("is missing the included quote's text");
+        if (!sent.includes(t.quote.url)) problems.push(`is missing the included quote's permalink ${t.quote.url}`);
+      }
+      return report(problems.map((what) => `share ${what}`));
+    },
+    fc.oneof(fc.constant(undefined), embedFailure)
   );
 });
