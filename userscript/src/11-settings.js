@@ -139,29 +139,24 @@ async function openSettingsModal() {
   addBtn.type = "button";
   addBtn.className = `${SETTINGS_CLASS}__btn ${SETTINGS_CLASS}__btn--ghost`;
   addBtn.textContent = "Add to list";
-  function addPendingChannel() {
+  function readPendingChannel() {
     const label = newLabelInput.value.trim();
     const webhookUrl = newUrlInput.value.trim();
-    if (!label) {
-      showToast("Enter a display name.", "error");
-      return false;
+    if (!label) return { error: "Enter a display name.", input: newLabelInput };
+    if (!isValidWebhookUrl(webhookUrl)) return { error: "Enter a valid Discord webhook URL.", input: newUrlInput };
+    return { channel: { id: createDestinationId(label, new Set(destinations.map((item) => item.id))), label, webhookUrl } };
+  }
+  addBtn.addEventListener("click", () => {
+    const { error, channel } = readPendingChannel();
+    if (error) {
+      showToast(error, "error");
+      return;
     }
-    if (!isValidWebhookUrl(webhookUrl)) {
-      showToast("Enter a valid Discord webhook URL.", "error");
-      return false;
-    }
-    const existingIds = new Set(destinations.map((item) => item.id));
-    destinations.push({
-      id: createDestinationId(label, existingIds),
-      label,
-      webhookUrl
-    });
+    destinations.push(channel);
     newLabelInput.value = "";
     newUrlInput.value = "";
     renderList();
-    return true;
-  }
-  addBtn.addEventListener("click", addPendingChannel);
+  });
 
   const addActions = document.createElement("div");
   addActions.className = `${SETTINGS_CLASS}__card-actions`;
@@ -189,14 +184,19 @@ async function openSettingsModal() {
   saveBtn.className = `${SETTINGS_CLASS}__btn ${SETTINGS_CLASS}__btn--primary`;
   saveBtn.textContent = "Save";
   saveBtn.addEventListener("click", async () => {
-    const hasPendingChannel = newLabelInput.value.trim() || newUrlInput.value.trim();
-    if (hasPendingChannel && !addPendingChannel()) return;
-    const sanitized = sanitizeDestinations(destinations);
-    if (sanitized.length === 0 && destinations.length > 0) {
+    const pending = newLabelInput.value.trim() || newUrlInput.value.trim() ? readPendingChannel() : {};
+    if (pending.error) {
+      showToast(`${pending.error} Finish or clear the Add channel form before saving.`, "error");
+      pending.input.focus();
+      return;
+    }
+    const candidates = pending.channel ? [...destinations, pending.channel] : destinations;
+    const sanitized = sanitizeDestinations(candidates);
+    if (sanitized.length === 0 && candidates.length > 0) {
       showToast("Fix invalid names or webhook URLs before saving.", "error");
       return;
     }
-    if (sanitized.length !== destinations.length) {
+    if (sanitized.length !== candidates.length) {
       showToast("Fix invalid channel names or webhook URLs before saving.", "error");
       return;
     }
