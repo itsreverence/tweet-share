@@ -330,11 +330,15 @@ test("packEmbedsIntoMessages respects the 6000 character budget", () => {
   }));
 
   const packed = packEmbedsIntoMessages(embeds);
-  assert.ok(packed.length >= 2);
+  const embedTextLength = (embed) =>
+    [embed.title, embed.description, embed.footer?.text, embed.author?.name, ...(embed.fields || []).flatMap((field) => [field.name, field.value])]
+      .reduce((sum, value) => sum + String(value ?? "").length, 0);
+  assert.ok(packed.length >= 2, "7224 chars of embeds need at least two messages");
+  assert.deepEqual([...packed.flat()], embeds, "packing keeps every embed, in order");
   for (const group of packed) {
-    const total = group.reduce((sum, embed) => sum + countEmbedChars(embed), 0);
-    assert.ok(total <= 6000);
-    assert.ok(group.length <= 10);
+    const total = group.reduce((sum, embed) => sum + embedTextLength(embed), 0);
+    assert.ok(total <= 6000, `message has ${total} embed chars, Discord allows 6000`);
+    assert.ok(group.length <= 10, `message has ${group.length} embeds, Discord allows 10`);
   }
 });
 
@@ -579,7 +583,9 @@ test("long tweet text splits across continuation embeds without duplicate url", 
     text: `${"Word ".repeat(900)}end`
   };
   const embeds = buildTweetEmbedGroup(longTweet, "main");
+  const normalize = (value) => value.replace(/\s+/g, " ").trim();
   assert.ok(embeds.length > 1);
+  assert.equal(normalize(embeds.map((embed) => embed.description).join(" ")), normalize(longTweet.text), "descriptions rejoin to the full text");
   assert.equal(embeds[0].url, longTweet.url);
   assert.equal(embeds[1].url, undefined);
 });
