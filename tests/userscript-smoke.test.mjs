@@ -105,7 +105,7 @@ test("sharing to the only destination posts the post to its webhook", async (t) 
   const messages = view.webhookPosts().map(postedMessage);
   assert.ok(messages.length >= 1, "the share POSTs to the webhook");
   const payloads = messages.map((message) => message.payload);
-  assert.ok(payloads.some((payload) => payload.content?.split("\n").includes(postUrl)), "a message carries the post URL");
+  assert.ok(payloads.some((payload) => payload.content?.split("\n").some((line) => line === postUrl)), "a message carries the post URL");
   assert.ok(
     payloads.some((payload) => payload.embeds?.some((embed) => embed.description?.includes(postText))),
     "an embed description carries the post text"
