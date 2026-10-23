@@ -101,6 +101,7 @@ const click = ({ window }, node) => node.dispatchEvent(new window.MouseEvent("cl
 const shareItems = ({ document }) =>
   [...document.querySelectorAll('[role="menuitem"]')].filter((item) => item.textContent.trim() === "Share to Discord");
 const toast = ({ document }, state) => document.querySelector(`.tds-toast[data-state="${state}"]`);
+const toasts = ({ document }, state) => [...document.querySelectorAll(`.tds-toast[data-state="${state}"]`)];
 
 async function openShareMenu(view) {
   click(view, view.document.querySelector('[data-testid="share"]'));
@@ -293,3 +294,68 @@ test("Cancel discards edited and removed channels", async (t) => {
   assert.deepEqual([...view.store], stored, "storage is unchanged");
 });
 
+test("Save refuses an unfinished Add channel form, points at the field to fix, and saves once it is cleared", async (t) => {
+  const view = openPage(t, { destinations: [general] });
+  const stored = structuredClone([...view.store]);
+
+  const dialog = await openSettings(view);
+  type(view, fieldInput(channelList(dialog), "Display name"), "Renamed");
+  click(view, byText(dialog, "span", "Always show preview before sending")[0]);
+  const addCard = addChannelCard(dialog);
+  const newLabel = fieldInput(addCard, "Display name");
+  const newUrl = fieldInput(addCard, "Webhook URL");
+  const save = byText(dialog, "button", "Save")[0];
+  const hint = "Finish or clear the Add channel form before saving.";
+
+  for (const [what, label, url, message, offending] of [
+    ["a name without a URL", "Friends", "", `Enter a valid Discord webhook URL. ${hint}`, newUrl],
+    ["a URL without a name", "", friendsWebhookUrl, `Enter a display name. ${hint}`, newLabel],
+    ["a non-webhook URL", "Friends", "https://example.com/not-a-webhook", `Enter a valid Discord webhook URL. ${hint}`, newUrl]
+  ]) {
+    type(view, newLabel, label);
+    type(view, newUrl, url);
+    const errorsBefore = toasts(view, "error").length;
+    save.focus();
+    click(view, save);
+
+    const error = await waitFor(() => toasts(view, "error")[errorsBefore], `the error toast for ${what}`);
+    assert.equal(error.textContent, message, `the toast for ${what} names the problem and the Add channel form`);
+    assert.equal(view.document.activeElement, offending, `focus moves to the field to fix for ${what}`);
+    assert.equal(settingsDialog(view), dialog, `settings stay open for ${what}`);
+    assert.deepEqual([...view.store], stored, `storage is unchanged for ${what}`);
+    assert.equal(toast(view, "success"), null, `no success toast for ${what}`);
+    assert.deepEqual([newLabel.value, newUrl.value], [label, url], `the typed input stays in the form for ${what}`);
+    assert.deepEqual(channelNames(dialog), ["Renamed"], `the channel list is unchanged for ${what}`);
+  }
+
+  type(view, newLabel, "");
+  type(view, newUrl, "");
+  click(view, save);
+  const saved = await waitFor(() => toast(view, "success"), "the Settings saved toast once the form is cleared");
+  assert.equal(saved.textContent, "Settings saved.");
+  assert.equal(settingsDialog(view), null, "Save closes settings");
+  assert.deepEqual(view.store.get("tds-destinations"), [{ ...general, label: "Renamed" }], "the rename persists");
+  assert.equal(view.store.get("tds-preferences").alwaysShowPreview, true, "the preference change persists");
+});
+
+test("a Save blocked by an invalid channel leaves the channel being added in the Add channel form", async (t) => {
+  const view = openPage(t, { destinations: [general] });
+  const stored = structuredClone([...view.store]);
+
+  const dialog = await openSettings(view);
+  type(view, fieldInput(channelList(dialog), "Webhook URL"), "https://example.com/not-a-webhook");
+  const addCard = addChannelCard(dialog);
+  type(view, fieldInput(addCard, "Display name"), "Friends");
+  type(view, fieldInput(addCard, "Webhook URL"), friendsWebhookUrl);
+  click(view, byText(dialog, "button", "Save")[0]);
+
+  const error = await waitFor(() => toast(view, "error"), "the error toast");
+  assert.equal(error.textContent, "Fix invalid channel names or webhook URLs before saving.");
+  assert.deepEqual(channelNames(dialog), ["General"], "the channel being added is not moved into the list");
+  assert.deepEqual(
+    [fieldInput(addCard, "Display name").value, fieldInput(addCard, "Webhook URL").value],
+    ["Friends", friendsWebhookUrl],
+    "the Add channel form keeps the typed channel"
+  );
+  assert.deepEqual([...view.store], stored, "storage is unchanged");
+});
