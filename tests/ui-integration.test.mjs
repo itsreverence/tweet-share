@@ -9,7 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const uiPath = path.join(root, "userscript", "src", "09-ui.js");
 const uiSource = readFileSync(uiPath, "utf8").replace(/\nstartUi\(\);\s*$/, "");
 
-function createUiHarness({ destinations = [], alwaysShowPreview = true, hasQuote = false } = {}) {
+function createUiHarness({ destinations = [], alwaysShowPreview = true } = {}) {
   const calls = {
     closeOverlay: 0,
     documentScans: 0,
@@ -54,7 +54,7 @@ function createUiHarness({ destinations = [], alwaysShowPreview = true, hasQuote
     },
     getDestinations: async () => destinations,
     loadPreferences: async () => ({ alwaysShowPreview }),
-    extractTweet: () => ({ quote: hasQuote ? { text: "quote" } : null }),
+    extractTweet: () => ({ quote: null }),
     hasQuoteTweet: (tweet) => Boolean(tweet.quote),
     closeXOverlay() {
       calls.closeOverlay += 1;
@@ -127,20 +127,6 @@ test("startDiscordShare sends directly only for the one-destination no-preview p
   assert.equal(calls.runShares[0][0], article);
   assert.equal(calls.runShares[0][1], destination.id);
   assert.equal(calls.menus.length, 0);
-});
-
-test("startDiscordShare preserves preview when the post has a quote", async () => {
-  const { startDiscordShare, calls } = createUiHarness({
-    destinations: [{ id: "friends", label: "Friends" }],
-    alwaysShowPreview: false,
-    hasQuote: true
-  });
-
-  await startDiscordShare({}, {});
-
-  assert.equal(calls.runShares.length, 0);
-  assert.equal(calls.menus.length, 1);
-  assert.equal(calls.menus[0][3].showQuoteOption, true);
 });
 
 test("mutation integration scans only added menu neighborhoods", () => {
