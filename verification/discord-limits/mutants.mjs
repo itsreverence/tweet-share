@@ -14,8 +14,7 @@ const FALLBACK = "plain-text fallback messages respect Discord's per-message lim
 const MENTIONS = "every sent message disables mention parsing and uses an allowed sender name";
 const PRESERVES = "every share carries the main post's text, permalink, and media, and quoted media when included";
 const FALLBACK_PRESERVES = "plain-text fallback carries the main post's text and permalink";
-const QUOTE_ONLY_WHEN_INCLUDED =
-  "a share carries the quoted post's text and permalink when included, and none of its text, permalink, or media when excluded";
+const QUOTE_ONLY_WHEN_INCLUDED = "a share carries the quoted post's text and permalink when included, and none of its text, permalink, or media when excluded";
 const TRUNCATE = "truncate(value, limit) returns at most limit characters for limits from 3 to 4096";
 
 const mutants = [
