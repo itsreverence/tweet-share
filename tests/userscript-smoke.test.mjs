@@ -129,10 +129,11 @@ async function openPreview(view) {
 
 const settingsDialog = ({ document }) =>
   document.querySelector('[role="dialog"][aria-label="Tweet Discord Share settings"]');
+const channelList = (dialog) => dialog.querySelector(".tds-settings__list");
 const addChannelCard = (dialog) => byText(dialog, "div", "Add channel")[0].parentElement;
 const fieldInput = (container, label) => byText(container, "label", label)[0].parentElement.querySelector("input");
 const channelNames = (dialog) =>
-  [...dialog.querySelectorAll('input[type="text"]')].map((input) => input.value).filter(Boolean);
+  byText(channelList(dialog), "label", "Display name").map((label) => label.parentElement.querySelector("input").value);
 
 function type({ window }, input, value) {
   input.value = value;
@@ -291,3 +292,4 @@ test("Cancel discards edited and removed channels", async (t) => {
   assert.deepEqual(channelNames(reopened), ["General", "Friends"], "reopened settings show the original channels");
   assert.deepEqual([...view.store], stored, "storage is unchanged");
 });
+
