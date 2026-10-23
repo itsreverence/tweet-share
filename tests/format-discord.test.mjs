@@ -359,6 +359,11 @@ test("rebalanceEmbedsForCharBudget splits fields when one embed exceeds 6000 cha
   for (const part of rebalanced) {
     assert.ok(countEmbedChars(part) <= 6000);
   }
+  assert.deepEqual(
+    rebalanced.flatMap((part) => part.fields || []),
+    embed.fields,
+    "every field survives the split, in order"
+  );
 });
 
 test("image-only posts use embed heroes and supplemental image embeds", () => {
