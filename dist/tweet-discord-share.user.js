@@ -876,7 +876,7 @@ function rebalanceEmbedFields(embed, maxChars = DISCORD_EMBED_LIMITS.totalEmbedC
 
   for (const field of fields) {
     const trial = pruneEmbed({ ...base, fields: [...kept, field] });
-    if (countEmbedChars(trial) <= maxChars) {
+    if (!spilled.length && countEmbedChars(trial) <= maxChars) {
       kept.push(field);
     } else {
       spilled.push(field);

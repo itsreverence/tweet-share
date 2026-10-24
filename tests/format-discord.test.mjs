@@ -367,6 +367,30 @@ test("rebalanceEmbedsForCharBudget splits fields when one embed exceeds 6000 cha
   );
 });
 
+test("rebalanceEmbedsForCharBudget keeps field order when a later field would still fit", () => {
+  const embed = {
+    color: 1942002,
+    author: { name: "Alice" },
+    description: "d".repeat(4096),
+    fields: [
+      { name: "Quoted post", value: "q".repeat(900), inline: false },
+      { name: "Original post", value: "o".repeat(1024), inline: false },
+      { name: "More images", value: "m".repeat(100), inline: false }
+    ]
+  };
+
+  const expectedFields = structuredClone(embed.fields);
+  const rebalanced = rebalanceEmbedsForCharBudget([embed]);
+  for (const part of rebalanced) {
+    assert.ok(countEmbedChars(part) <= 6000, `part has ${countEmbedChars(part)} embed chars, Discord allows 6000`);
+  }
+  assert.deepEqual(
+    rebalanced.flatMap((part) => part.fields || []),
+    expectedFields,
+    "every field survives the split unchanged, in its original order across the primary and continued embeds"
+  );
+});
+
 test("image-only posts use embed heroes and supplemental image embeds", () => {
   const photoTweet = {
     ...sampleTweet,
