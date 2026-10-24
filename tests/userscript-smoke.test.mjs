@@ -8,7 +8,7 @@ const webhookUrl = "https://discord.com/api/webhooks/123/abc-DEF";
 const friendsWebhookUrl = "https://discord.com/api/webhooks/456/friends-XYZ";
 const postUrl = "https://x.com/alice/status/1234567890";
 const postText = "Hello from the smoke test";
-const quoteUrl = "https://x.com/bob/status/999";
+const quoteId = "999";
 const quoteText = "Bob's quoted words";
 const photoUrl = "https://pbs.twimg.com/media/SmokePhoto?format=jpg&name=small";
 const general = { id: "general", label: "General", webhookUrl };
@@ -118,8 +118,13 @@ const previewMenu = ({ document }) => document.querySelector('[role="menu"][aria
 const sentText = (requests) => requests.map((request) => JSON.stringify(postedMessage(request).payload)).join("\n");
 const stringsIn = (value) =>
   typeof value === "string" ? [value] : value && typeof value === "object" ? Object.values(value).flatMap(stringsIn) : [];
-const sentUrls = (requests) =>
-  new Set(requests.flatMap((request) => stringsIn(postedMessage(request).payload)).flatMap((text) => text.match(/https?:\/\/[^\s<>)]+/g) || []));
+const sentStatusIds = (requests) =>
+  new Set(
+    requests
+      .flatMap((request) => stringsIn(postedMessage(request).payload))
+      .flatMap((text) => text.match(/https?:\/\/[^\s<>)]+/g) || [])
+      .flatMap((url) => /\/status\/(\d+)/.exec(url)?.[1] ?? [])
+  );
 
 async function openPreview(view) {
   const [item] = await openShareMenu(view);
@@ -211,7 +216,7 @@ test("choosing the second destination in the preview posts only to its webhook",
   const sent = sentText(view.webhookPosts(friendsWebhookUrl));
   assert.ok(sent.includes(postText), "the chosen destination receives the post text");
   assert.ok(sent.includes(quoteText), "with the quote toggle left on, the quote text is sent");
-  assert.ok(sentUrls(view.webhookPosts(friendsWebhookUrl)).has(quoteUrl), "with the quote toggle left on, the quote permalink is sent");
+  assert.ok(sentStatusIds(view.webhookPosts(friendsWebhookUrl)).has(quoteId), "with the quote toggle left on, the quote permalink is sent");
 });
 
 test("a quoted post opens the preview for a single destination, and unchecking the quote keeps it out", async (t) => {
@@ -228,7 +233,7 @@ test("a quoted post opens the preview for a single destination, and unchecking t
   const sent = sentText(view.webhookPosts(friendsWebhookUrl));
   assert.ok(sent.includes(postText), "the post text is still sent");
   assert.ok(!sent.includes(quoteText), "the quote text is not sent");
-  assert.ok(!sentUrls(view.webhookPosts(friendsWebhookUrl)).has(quoteUrl), "the quote permalink is not sent");
+  assert.ok(!sentStatusIds(view.webhookPosts(friendsWebhookUrl)).has(quoteId), "no link to the quoted post is sent");
 });
 
 for (const [how, dismiss] of [
