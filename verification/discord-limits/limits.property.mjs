@@ -204,9 +204,7 @@ function postArb(media) {
     media
   });
 }
-const MEDIA_ID = /\/(?:media|ext_tw_video|amplify_video|tweet_video)\/([^/?.]+)/g;
-const mediaIdsIn = (value) => [...String(value).matchAll(MEDIA_ID)].map((match) => match[1]);
-const mediaIdOf = (url) => mediaIdsIn(url)[0];
+const mediaIdOf = (url) => /\/(?:media|ext_tw_video|amplify_video|tweet_video)\/([^/?.]+)/.exec(url)?.[1];
 
 function withDistinctMediaIds(t) {
   const seen = new Set();
@@ -233,13 +231,17 @@ const tweetOf = (image) =>
   ).map(withDistinctMediaIds);
 const tweet = tweetOf(imageItem);
 const QUOTE_MARK = "‡quoted‡";
+const quoteText = fc.oneof(text.map((value) => `${QUOTE_MARK} ${value}`), fc.constant(""));
 const tweetWithMarkedQuote = fc
   .oneof(fc.tuple(postArb(mediaOf(imageItem)), postArb(mediaOf(imageItem))), fc.tuple(postArb(fullMedia), postArb(fullMedia)))
-  .map(([main, quote]) => ({
-    ...main,
-    quote: { ...quote, url: quote.url.replace("https://x.com/", "https://twitter.com/"), text: `${QUOTE_MARK} ${quote.text}` }
-  }))
-  .map(withDistinctMediaIds);
+  .chain(([main, quote]) =>
+    quoteText.map((value) => ({
+      ...main,
+      quote: { ...quote, url: quote.url.replace("https://x.com/", "https://twitter.com/"), text: value }
+    }))
+  )
+  .map(withDistinctMediaIds)
+  .filter((t) => t.quote.text || mediaItems(t.quote).length > 0);
 const tweetWithShareableImages = tweetOf(twimgImageItem);
 const options = fc.record(
   {
@@ -368,7 +370,7 @@ const run = (prop) => fc.assert(prop, { numRuns: NUM_RUNS, seed: SEED, reporter 
 const runShare = (tweets, check, formatting = fc.constant(undefined)) =>
   run(
     fc.asyncProperty(tweets, options, fetchPlan, formatting, async (t, o, plan, failure) =>
-      check(t, o, await sentWebhookRequests(t, o, plan, failure))
+      check(t, o, await sentWebhookRequests(t, o, plan, failure), (other) => sentWebhookRequests(other, o, plan, failure))
     )
   );
 
@@ -476,24 +478,27 @@ test("plain-text fallback carries the main post's text and permalink", async () 
   );
 });
 
-const sentText = ({ payload, files }) => [JSON.stringify(payload), ...files.flatMap((file) => [file.filename, file.sourceUrl])].join("\n");
+const visibleText = (request) => [contentOf(request), ...(rendersEmbeds(request) ? [JSON.stringify(request.payload.embeds ?? [])] : [])];
 
-test("a share carries the quoted post's text and permalink when included, and none of its text, permalink, or media when excluded", async () => {
+test("a share carries the quoted post's text and permalink when included, and sends what it would without the quote when excluded", async () => {
   await runShare(
     tweetWithMarkedQuote,
-    (t, o, requests) => {
-      const sent = requests.map(sentText).join("\n");
+    async (t, o, requests, share) => {
       const problems = [];
       if (o.includeQuote === false) {
-        if (sent.includes(QUOTE_MARK)) problems.push("carries the excluded quote's text");
-        if (sent.includes(t.quote.url)) problems.push(`carries the excluded quote's permalink ${t.quote.url}`);
-        const sentIds = new Set(mediaIdsIn(sent));
-        for (const item of mediaItems(t.quote)) {
-          if (sentIds.has(mediaIdOf(item.url))) problems.push(`carries excluded quoted media ${item.url}`);
+        const { quote, ...withoutQuote } = t;
+        const sent = JSON.stringify(requests);
+        const baseline = JSON.stringify(await share(withoutQuote));
+        if (sent !== baseline) {
+          let at = 0;
+          while (sent[at] === baseline[at]) at += 1;
+          const around = (value) => JSON.stringify(value.slice(Math.max(0, at - 20), at + 60));
+          problems.push(`differs from the same share without the excluded quote: sends ${around(sent)} where it would send ${around(baseline)}`);
         }
       } else {
-        if (!sent.includes(QUOTE_MARK)) problems.push("is missing the included quote's text");
-        if (!sent.includes(t.quote.url)) problems.push(`is missing the included quote's permalink ${t.quote.url}`);
+        const visible = requests.flatMap(visibleText).join("\n");
+        if (t.quote.text && !visible.includes(QUOTE_MARK)) problems.push("is missing the included quote's text");
+        if (!visible.includes(t.quote.url)) problems.push(`is missing the included quote's permalink ${t.quote.url}`);
       }
       return report(problems.map((what) => `share ${what}`));
     },

@@ -14,7 +14,7 @@ const FALLBACK = "plain-text fallback messages respect Discord's per-message lim
 const MENTIONS = "every sent message disables mention parsing and uses an allowed sender name";
 const PRESERVES = "every share carries the main post's text, permalink, and media, and quoted media when included";
 const FALLBACK_PRESERVES = "plain-text fallback carries the main post's text and permalink";
-const QUOTE_ONLY_WHEN_INCLUDED = "a share carries the quoted post's text and permalink when included, and none of its text, permalink, or media when excluded";
+const QUOTE_ONLY_WHEN_INCLUDED = "a share carries the quoted post's text and permalink when included, and sends what it would without the quote when excluded";
 const TRUNCATE = "truncate(value, limit) returns at most limit characters for limits from 3 to 4096";
 
 const mutants = [
@@ -178,6 +178,36 @@ const mutants = [
     file: "05-format-discord.js",
     find: "if (shareOptions.includeQuote === false || !hasQuoteTweet(tweet)) return \"none\";",
     replace: "return \"none\";",
+    expect: QUOTE_ONLY_WHEN_INCLUDED
+  },
+  {
+    name: "shares include a text-less quoted post even when the user excluded it",
+    file: "08-deliver.js",
+    find: "const resolved = await resolveAttachmentsForTweet(tweet, options);",
+    replace: "if (tweet.quote && !tweet.quote.text) options = { ...options, includeQuote: true };\n  const resolved = await resolveAttachmentsForTweet(tweet, options);",
+    expect: QUOTE_ONLY_WHEN_INCLUDED
+  },
+  {
+    name: "embed shares leak part of an excluded quote's text past its opening",
+    file: "05-format-discord.js",
+    find: "  if (tweet.url) lines.push(tweet.url);\n  if (resolveQuoteLayout(tweet, shareOptions) !== \"none\" && tweet.quote?.url) {",
+    replace:
+      "  if (tweet.url) lines.push(tweet.url);\n  if (shareOptions.includeQuote === false && tweet.quote?.text?.length > 100) lines.push(tweet.quote.text.slice(100, 200));\n  if (resolveQuoteLayout(tweet, shareOptions) !== \"none\" && tweet.quote?.url) {",
+    expect: QUOTE_ONLY_WHEN_INCLUDED
+  },
+  {
+    name: "embed shares leak an excluded quote's media that has no twimg media ID",
+    file: "05-format-discord.js",
+    find: "  const embeds = [...buildTweetEmbedGroup(tweet, \"main\", shareOptions)];",
+    replace:
+      "  const embeds = [...buildTweetEmbedGroup(tweet, \"main\", shareOptions)];\n  if (!includeQuote) for (const item of tweet.quote?.media || []) if (item.posterUrl || (item.type === \"image\" && !isTweetImageMediaUrl(item.url))) embeds.push({ image: { url: item.posterUrl || item.url } });",
+    expect: QUOTE_ONLY_WHEN_INCLUDED
+  },
+  {
+    name: "embed messages suppress their embeds, hiding an included quote's text",
+    file: "05-format-discord.js",
+    find: "  if (embeds.length) payload.embeds = embeds;",
+    replace: "  if (embeds.length) {\n    payload.embeds = embeds;\n    payload.flags = 1 << 2;\n  }",
     expect: QUOTE_ONLY_WHEN_INCLUDED
   },
   {
