@@ -266,6 +266,24 @@ test("a channel added in settings and saved persists across reloads and receives
   assert.ok(reloaded.webhookPosts(friendsWebhookUrl).length > 0, "the saved channel's webhook receives the post");
 });
 
+test("a channel added with an existing channel's name still receives its own shares", async (t) => {
+  const view = openPage(t, { destinations: [general] });
+
+  const dialog = await openSettings(view);
+  const addCard = addChannelCard(dialog);
+  type(view, fieldInput(addCard, "Display name"), "General");
+  type(view, fieldInput(addCard, "Webhook URL"), friendsWebhookUrl);
+  click(view, byText(dialog, "button", "Save")[0]);
+  await waitFor(() => toast(view, "success"), "the Settings saved toast");
+
+  const reloaded = openPage(t, { store: view.store });
+  const menu = await openPreview(reloaded);
+  click(reloaded, byText(menu, '[role="menuitem"]', "General")[1]);
+  await waitFor(() => toast(reloaded, "success"), "the share success toast");
+  assert.equal(reloaded.webhookPosts(webhookUrl).length, 0, "nothing is posted to the first General channel");
+  assert.ok(reloaded.webhookPosts(friendsWebhookUrl).length > 0, "the second General channel's webhook receives the post");
+});
+
 test("Test webhook sends one test message to the URL being added", async (t) => {
   const view = openPage(t, { destinations: [] });
 
