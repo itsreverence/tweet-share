@@ -116,6 +116,7 @@ const byText = (root, selector, text) =>
   [...root.querySelectorAll(selector)].filter((node) => node.textContent.trim() === text);
 const previewMenu = ({ document }) => document.querySelector('[role="menu"][aria-label="Share to Discord"]');
 const sentText = (requests) => requests.map((request) => JSON.stringify(postedMessage(request).payload)).join("\n");
+const sentUrls = (requests) => new Set(sentText(requests).match(/https?:\/\/[^\s"<>)]+/g));
 
 async function openPreview(view) {
   const [item] = await openShareMenu(view);
@@ -207,7 +208,7 @@ test("choosing the second destination in the preview posts only to its webhook",
   const sent = sentText(view.webhookPosts(friendsWebhookUrl));
   assert.ok(sent.includes(postText), "the chosen destination receives the post text");
   assert.ok(sent.includes(quoteText), "with the quote toggle left on, the quote text is sent");
-  assert.ok(sent.includes(quoteUrl), "with the quote toggle left on, the quote permalink is sent");
+  assert.ok(sentUrls(view.webhookPosts(friendsWebhookUrl)).has(quoteUrl), "with the quote toggle left on, the quote permalink is sent");
 });
 
 test("a quoted post opens the preview for a single destination, and unchecking the quote keeps it out", async (t) => {
@@ -224,7 +225,7 @@ test("a quoted post opens the preview for a single destination, and unchecking t
   const sent = sentText(view.webhookPosts(friendsWebhookUrl));
   assert.ok(sent.includes(postText), "the post text is still sent");
   assert.ok(!sent.includes(quoteText), "the quote text is not sent");
-  assert.ok(!sent.includes(quoteUrl), "the quote permalink is not sent");
+  assert.ok(!sentUrls(view.webhookPosts(friendsWebhookUrl)).has(quoteUrl), "the quote permalink is not sent");
 });
 
 for (const [how, dismiss] of [
