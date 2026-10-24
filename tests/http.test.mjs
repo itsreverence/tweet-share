@@ -20,17 +20,17 @@ function loadHttpContext(respond, { holdTimers = false } = {}) {
   const calls = [];
   const delays = [];
   const timers = [];
+  const setTimeout = (callback, ms) => {
+    delays.push(ms);
+    if (holdTimers) timers.push(callback);
+    else queueMicrotask(callback);
+  };
   const context = createContext({
     Blob,
     FormData: FakeFormData,
     console,
-    window: {
-      setTimeout(callback, ms) {
-        delays.push(ms);
-        if (holdTimers) timers.push(callback);
-        else queueMicrotask(callback);
-      }
-    },
+    setTimeout,
+    window: { setTimeout },
     GM: {
       xmlHttpRequest(options) {
         calls.push(options);
