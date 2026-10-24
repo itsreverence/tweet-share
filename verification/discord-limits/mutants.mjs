@@ -218,6 +218,13 @@ const mutants = [
     expect: QUOTE_ONLY_WHEN_INCLUDED
   },
   {
+    name: "plain-text fallback relabels media links when the user excluded the quote",
+    file: "05-format-discord.js",
+    find: "for (const item of mediaLinks(tweet, options)) lines.push(formatMediaLinkPlain(item));",
+    replace: "for (const item of mediaLinks(tweet)) lines.push(formatMediaLinkPlain(item));",
+    expect: QUOTE_ONLY_WHEN_INCLUDED
+  },
+  {
     name: "multipart uploads send an empty payload_json",
     file: "01-http.js",
     find: 'formData.append("payload_json", JSON.stringify(payloadJson || {}));',
