@@ -56,6 +56,9 @@ function assertBoundedTimeout(options) {
   );
 }
 
+const observedWebhookBucket = { requests: 5, perMs: 2000 };
+const webhookSlotMs = observedWebhookBucket.perMs / observedWebhookBucket.requests;
+
 test("request applies a bounded timeout and reports timeout failures", async () => {
   const { request, calls } = loadHttpContext((options) => options.ontimeout());
 
@@ -94,7 +97,11 @@ test("multipart requests wait before retrying a rate limit without retry_after",
   const sent = requestMultipart("https://discord.com/api/webhooks/1/token", { content: "hello" }, []);
   await new Promise(setImmediate);
   assert.equal(calls.length, 1, "no retry before the default delay elapses");
-  assert.ok(delays.length === 1 && delays[0] > 0, `waits a nonzero default delay, got ${delays}`);
+  assert.equal(delays.length, 1, "schedules one wait before the retry");
+  assert.ok(
+    delays[0] >= webhookSlotMs,
+    `waits ${delays[0]} ms before retrying without retry_after, needs at least ${webhookSlotMs} ms, one slot of the ${observedWebhookBucket.requests}-per-${observedWebhookBucket.perMs} ms webhook bucket Discord applies in practice`
+  );
   timers.shift()();
   await sent;
   assert.equal(calls.length, 2, "retries once the default delay elapses");
