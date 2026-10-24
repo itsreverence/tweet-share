@@ -478,7 +478,10 @@ test("plain-text fallback carries the main post's text and permalink", async () 
   );
 });
 
-const visibleText = (request) => [contentOf(request), ...(rendersEmbeds(request) ? [JSON.stringify(request.payload.embeds ?? [])] : [])];
+const stringsIn = (value) =>
+  typeof value === "string" ? [value] : value && typeof value === "object" ? Object.values(value).flatMap(stringsIn) : [];
+const visibleText = (request) => [contentOf(request), ...(rendersEmbeds(request) ? stringsIn(request.payload.embeds ?? []) : [])];
+const urlsIn = (texts) => new Set(texts.flatMap((text) => text.match(/https?:\/\/[^\s<>)]+/g) || []));
 
 test("a share carries the quoted post's text and permalink when included, and sends what it would without the quote when excluded", async () => {
   await runShare(
@@ -496,9 +499,9 @@ test("a share carries the quoted post's text and permalink when included, and se
           problems.push(`differs from the same share without the excluded quote: sends ${around(sent)} where it would send ${around(baseline)}`);
         }
       } else {
-        const visible = requests.flatMap(visibleText).join("\n");
-        if (t.quote.text && !visible.includes(QUOTE_MARK)) problems.push("is missing the included quote's text");
-        if (!visible.includes(t.quote.url)) problems.push(`is missing the included quote's permalink ${t.quote.url}`);
+        const visible = requests.flatMap(visibleText);
+        if (t.quote.text && !visible.some((text) => text.includes(QUOTE_MARK))) problems.push("is missing the included quote's text");
+        if (!urlsIn(visible).has(t.quote.url)) problems.push(`is missing the included quote's permalink ${t.quote.url}`);
       }
       return report(problems.map((what) => `share ${what}`));
     },
