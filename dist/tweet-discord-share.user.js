@@ -876,7 +876,7 @@ function rebalanceEmbedFields(embed, maxChars = DISCORD_EMBED_LIMITS.totalEmbedC
 
   for (const field of fields) {
     const trial = pruneEmbed({ ...base, fields: [...kept, field] });
-    if (countEmbedChars(trial) <= maxChars) {
+    if (!spilled.length && countEmbedChars(trial) <= maxChars) {
       kept.push(field);
     } else {
       spilled.push(field);
@@ -1227,7 +1227,7 @@ function buildCompactPlainBody(tweet, options = {}) {
   const lines = [formatAuthor(tweet)];
 
   if (tweet.text) lines.push(tweet.text);
-  for (const item of mediaLinks(tweet)) lines.push(formatMediaLinkPlain(item));
+  for (const item of mediaLinks(tweet, options)) lines.push(formatMediaLinkPlain(item));
   if (tweet.url) lines.push(tweet.url);
 
   if (includeQuote && hasQuoteTweet(tweet)) {

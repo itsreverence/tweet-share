@@ -230,6 +230,18 @@ const tweetOf = (image) =>
     { weight: 1, arbitrary: fc.tuple(postArb(fullMedia), postArb(fullMedia)).map(([main, quote]) => ({ ...main, quote })) }
   ).map(withDistinctMediaIds);
 const tweet = tweetOf(imageItem);
+const QUOTE_MARK = "‡quoted‡";
+const quoteText = fc.oneof(text.map((value) => `${QUOTE_MARK} ${value}`), fc.constant(""));
+const tweetWithMarkedQuote = fc
+  .oneof(fc.tuple(postArb(mediaOf(imageItem)), postArb(mediaOf(imageItem))), fc.tuple(postArb(fullMedia), postArb(fullMedia)))
+  .chain(([main, quote]) =>
+    quoteText.map((value) => ({
+      ...main,
+      quote: { ...quote, url: quote.url.replace("https://x.com/", "https://twitter.com/"), text: value }
+    }))
+  )
+  .map(withDistinctMediaIds)
+  .filter((t) => t.quote.text || mediaItems(t.quote).length > 0);
 const tweetWithShareableImages = tweetOf(twimgImageItem);
 const options = fc.record(
   {
@@ -358,7 +370,7 @@ const run = (prop) => fc.assert(prop, { numRuns: NUM_RUNS, seed: SEED, reporter 
 const runShare = (tweets, check, formatting = fc.constant(undefined)) =>
   run(
     fc.asyncProperty(tweets, options, fetchPlan, formatting, async (t, o, plan, failure) =>
-      check(t, o, await sentWebhookRequests(t, o, plan, failure))
+      check(t, o, await sentWebhookRequests(t, o, plan, failure), (other) => sentWebhookRequests(other, o, plan, failure))
     )
   );
 
@@ -463,5 +475,36 @@ test("plain-text fallback carries the main post's text and permalink", async () 
       return report(missing.map((what) => `fallback is missing ${what}`));
     },
     embedFailure
+  );
+});
+
+const stringsIn = (value) =>
+  typeof value === "string" ? [value] : value && typeof value === "object" ? Object.values(value).flatMap(stringsIn) : [];
+const visibleText = (request) => [contentOf(request), ...(rendersEmbeds(request) ? stringsIn(request.payload.embeds ?? []) : [])];
+const urlsIn = (texts) => new Set(texts.flatMap((text) => text.match(/https?:\/\/[^\s<>)]+/g) || []));
+
+test("a share carries the quoted post's text and permalink when included, and sends what it would without the quote when excluded", async () => {
+  await runShare(
+    tweetWithMarkedQuote,
+    async (t, o, requests, share) => {
+      const problems = [];
+      if (o.includeQuote === false) {
+        const { quote, ...withoutQuote } = t;
+        const sent = JSON.stringify(requests);
+        const baseline = JSON.stringify(await share(withoutQuote));
+        if (sent !== baseline) {
+          let at = 0;
+          while (sent[at] === baseline[at]) at += 1;
+          const around = (value) => JSON.stringify(value.slice(Math.max(0, at - 20), at + 60));
+          problems.push(`differs from the same share without the excluded quote: sends ${around(sent)} where it would send ${around(baseline)}`);
+        }
+      } else {
+        const visible = requests.flatMap(visibleText);
+        if (t.quote.text && !visible.some((text) => text.includes(QUOTE_MARK))) problems.push("is missing the included quote's text");
+        if (!urlsIn(visible).has(t.quote.url)) problems.push(`is missing the included quote's permalink ${t.quote.url}`);
+      }
+      return report(problems.map((what) => `share ${what}`));
+    },
+    fc.oneof(fc.constant(undefined), embedFailure)
   );
 });

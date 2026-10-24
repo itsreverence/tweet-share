@@ -16,55 +16,95 @@ class FakeFormData {
   }
 }
 
-function loadHttpContext(respond) {
+function loadHttpContext(respond, { holdTimers = false } = {}) {
   const calls = [];
   const delays = [];
+  const timers = [];
+  const setTimeout = (callback, ms) => {
+    delays.push(ms);
+    if (holdTimers) timers.push(callback);
+    else queueMicrotask(callback);
+  };
   const context = createContext({
     Blob,
     FormData: FakeFormData,
     console,
+    setTimeout,
     window: { setTimeout },
     GM: {
       xmlHttpRequest(options) {
         calls.push(options);
         queueMicrotask(() => respond(options, calls.length));
       }
-    },
-    __delays: delays
+    }
   });
 
   runInNewContext(`${source}
-delay = async (ms) => __delays.push(ms);
 this.exports = {
-  HTTP_TIMEOUT_MS,
   parseDiscordResponse,
   request,
   requestMultipart
 };`, context);
 
-  return { ...context.exports, calls, delays };
+  return { ...context.exports, calls, delays, timers };
 }
 
+function assertBoundedTimeout(options) {
+  assert.ok(
+    options.timeout >= 5_000 && options.timeout <= 120_000,
+    `request timeout of ${options.timeout} ms is outside the 5000 to 120000 ms sanity range`
+  );
+}
+
+const observedWebhookBucket = { requests: 5, perMs: 2000 };
+const webhookSlotMs = observedWebhookBucket.perMs / observedWebhookBucket.requests;
+
 test("request applies a bounded timeout and reports timeout failures", async () => {
-  const { request, calls, HTTP_TIMEOUT_MS } = loadHttpContext((options) => options.ontimeout());
+  const { request, calls } = loadHttpContext((options) => options.ontimeout());
 
   await assert.rejects(() => request("POST", "https://discord.com/api/webhooks/1/token", {}), /timed out/i);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].timeout, HTTP_TIMEOUT_MS);
+  assertBoundedTimeout(calls[0]);
 });
 
 test("request retries explicit Discord rate limits using retry_after", async () => {
-  const { request, calls, delays } = loadHttpContext((options, attempt) => {
+  const { request, calls, delays, timers } = loadHttpContext((options, attempt) => {
     if (attempt === 1) {
       options.onload({ status: 429, responseText: '{"message":"rate limited","retry_after":0.25}' });
       return;
     }
     options.onload({ status: 204, responseText: "" });
-  });
+  }, { holdTimers: true });
 
-  await request("POST", "https://discord.com/api/webhooks/1/token", { content: "hello" });
-  assert.equal(calls.length, 2);
+  const sent = request("POST", "https://discord.com/api/webhooks/1/token", { content: "hello" });
+  await new Promise(setImmediate);
+  assert.equal(calls.length, 1, "no retry before the retry_after delay elapses");
   assert.deepEqual(delays, [250]);
+  timers.shift()();
+  await sent;
+  assert.equal(calls.length, 2, "retries once the retry_after delay elapses");
+});
+
+test("multipart requests wait before retrying a rate limit without retry_after", async () => {
+  const { requestMultipart, calls, delays, timers } = loadHttpContext((options, attempt) => {
+    if (attempt === 1) {
+      options.onload({ status: 429, responseText: '{"message":"rate limited"}' });
+      return;
+    }
+    options.onload({ status: 200, responseText: '{"id":"1"}' });
+  }, { holdTimers: true });
+
+  const sent = requestMultipart("https://discord.com/api/webhooks/1/token", { content: "hello" }, []);
+  await new Promise(setImmediate);
+  assert.equal(calls.length, 1, "no retry before the default delay elapses");
+  assert.equal(delays.length, 1, "schedules one wait before the retry");
+  assert.ok(
+    delays[0] >= webhookSlotMs,
+    `waits ${delays[0]} ms before retrying without retry_after, needs at least ${webhookSlotMs} ms, one slot of the ${observedWebhookBucket.requests}-per-${observedWebhookBucket.perMs} ms webhook bucket Discord applies in practice`
+  );
+  timers.shift()();
+  await sent;
+  assert.equal(calls.length, 2, "retries once the default delay elapses");
 });
 
 test("request stops after the bounded rate-limit retry count", async () => {
@@ -101,4 +141,5 @@ test("multipart requests do not retry ambiguous network failures", async () => {
     /Could not reach Discord/i
   );
   assert.equal(calls.length, 1);
+  assertBoundedTimeout(calls[0]);
 });

@@ -317,8 +317,13 @@ test("shareToDestination waits out each pacing delay before sending the next mes
   assert.ok(messageCount >= 2, "an embed message and a video message are sent");
   const expected = Array.from({ length: messageCount }, (_, index) => (index === 0 ? ["json"] : ["delay", "json"])).flat();
   assert.deepEqual(calls.log.map((entry) => entry.kind), expected, "one delay between each pair of messages");
+  const observedWebhookBucket = { requests: 5, perMs: 2000 };
+  const minimumGapMs = observedWebhookBucket.perMs / observedWebhookBucket.requests;
   for (const entry of calls.log.filter((entry) => entry.kind === "delay")) {
-    assert.ok(entry.ms > 0, `delay of ${entry.ms} ms paces the webhook`);
+    assert.ok(
+      entry.ms >= minimumGapMs,
+      `delay of ${entry.ms} ms falls below the ${minimumGapMs} ms regression floor, one slot of the ${observedWebhookBucket.requests}-per-${observedWebhookBucket.perMs} ms webhook bucket Discord applies in practice`
+    );
   }
 });
 
