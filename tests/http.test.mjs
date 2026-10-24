@@ -52,7 +52,7 @@ this.exports = {
 function assertBoundedTimeout(options) {
   assert.ok(
     options.timeout >= 5_000 && options.timeout <= 120_000,
-    `request timeout of ${options.timeout} ms is outside the 5000 to 120000 ms bound`
+    `request timeout of ${options.timeout} ms is outside the 5000 to 120000 ms sanity range`
   );
 }
 
