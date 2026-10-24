@@ -1227,7 +1227,7 @@ function buildCompactPlainBody(tweet, options = {}) {
   const lines = [formatAuthor(tweet)];
 
   if (tweet.text) lines.push(tweet.text);
-  for (const item of mediaLinks(tweet)) lines.push(formatMediaLinkPlain(item));
+  for (const item of mediaLinks(tweet, options)) lines.push(formatMediaLinkPlain(item));
   if (tweet.url) lines.push(tweet.url);
 
   if (includeQuote && hasQuoteTweet(tweet)) {
