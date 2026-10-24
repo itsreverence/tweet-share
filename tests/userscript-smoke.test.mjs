@@ -116,7 +116,10 @@ const byText = (root, selector, text) =>
   [...root.querySelectorAll(selector)].filter((node) => node.textContent.trim() === text);
 const previewMenu = ({ document }) => document.querySelector('[role="menu"][aria-label="Share to Discord"]');
 const sentText = (requests) => requests.map((request) => JSON.stringify(postedMessage(request).payload)).join("\n");
-const sentUrls = (requests) => new Set(sentText(requests).match(/https?:\/\/[^\s"<>)]+/g));
+const stringsIn = (value) =>
+  typeof value === "string" ? [value] : value && typeof value === "object" ? Object.values(value).flatMap(stringsIn) : [];
+const sentUrls = (requests) =>
+  new Set(requests.flatMap((request) => stringsIn(postedMessage(request).payload)).flatMap((text) => text.match(/https?:\/\/[^\s<>)]+/g) || []));
 
 async function openPreview(view) {
   const [item] = await openShareMenu(view);
