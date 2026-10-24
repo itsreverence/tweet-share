@@ -354,6 +354,7 @@ test("rebalanceEmbedsForCharBudget splits fields when one embed exceeds 6000 cha
     }))
   };
 
+  const expectedFields = structuredClone(embed.fields);
   const rebalanced = rebalanceEmbedsForCharBudget([embed]);
   assert.ok(rebalanced.length >= 2);
   for (const part of rebalanced) {
@@ -361,7 +362,7 @@ test("rebalanceEmbedsForCharBudget splits fields when one embed exceeds 6000 cha
   }
   assert.deepEqual(
     rebalanced.flatMap((part) => part.fields || []),
-    embed.fields,
+    expectedFields,
     "every field survives the split, in order"
   );
 });
