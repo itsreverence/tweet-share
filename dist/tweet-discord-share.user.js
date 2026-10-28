@@ -91,11 +91,10 @@ const THEME_PALETTES = {
   dark: { surface: "0 0 0", raised: "22 24 28", text: "231 233 234", subtle: "113 118 123", border: "47 51 54", shadow: "255 255 255" }
 };
 const THEME_ACCENTS = { blue: "29 155 240", green: "0 186 124", red: "244 33 46" };
+// Only text and accent colors come from X's variables; the page background picks the rest of the palette.
 const X_THEME_VARIABLES = {
-  surface: "--color-background",
   text: "--color-text",
   subtle: "--color-text-secondary",
-  border: "--color-border",
   blue: "--color-blue",
   green: "--color-green",
   red: "--color-red"
@@ -109,8 +108,7 @@ function themeNameForBackground([red, green, blue]) {
 
 // `variables` holds the X tokens the page defines; `pageBackground` is [r, g, b] or null.
 function resolveTheme({ variables = {}, pageBackground = null } = {}) {
-  const background = variables.surface?.split(/\s+/).map(Number) ?? pageBackground;
-  const palette = THEME_PALETTES[background ? themeNameForBackground(background) : "dark"];
+  const palette = THEME_PALETTES[pageBackground ? themeNameForBackground(pageBackground) : "dark"];
   return { ...palette, ...THEME_ACCENTS, ...variables };
 }
 
