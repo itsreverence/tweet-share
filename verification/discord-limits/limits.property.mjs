@@ -444,6 +444,8 @@ function renderedMedia(requests) {
       : asSent(item.url).some((url) => unfurledLines.has(url)) || uploadSources(item).some((url) => uploaded.has(url));
 }
 
+const urlsIn = (texts) => new Set(texts.flatMap((text) => text.match(/https?:\/\/[^\s<>)]+/g) || []));
+
 test("every share carries the main post's text, permalink, and media, and quoted media when included", async () => {
   await runShare(tweetWithShareableImages, (t, o, requests) => {
     const rendered = renderedMedia(requests);
@@ -452,7 +454,7 @@ test("every share carries the main post's text, permalink, and media, and quoted
     if (!spansChunksAcrossTrimmedCuts(collapseWhitespace(t.text), descriptions.map(collapseWhitespace), 0)) {
       missing.push("main text in its embed descriptions");
     }
-    if (!requests.some((request) => contentOf(request).includes(t.url))) missing.push(`main permalink ${t.url} in one message`);
+    if (!requests.some((request) => urlsIn([contentOf(request)]).has(t.url))) missing.push(`main permalink ${t.url} in one message`);
     for (const item of mediaItems(t)) if (!rendered(item)) missing.push(`main media ${item.url}`);
     if (o.includeQuote !== false) {
       for (const item of mediaItems(t.quote)) if (!rendered(item)) missing.push(`quoted media ${item.url}`);
@@ -471,7 +473,7 @@ test("plain-text fallback carries the main post's text and permalink", async () 
       const starts = Array.from({ length: (chunks[0]?.length ?? 0) + 1 }, (_, start) => start);
       const missing = [];
       if (!starts.some((start) => spansChunksAcrossTrimmedCuts(target, chunks, start))) missing.push("main text");
-      if (!contents.some((content) => content.includes(t.url))) missing.push(`main permalink ${t.url} in one message`);
+      if (!contents.some((content) => urlsIn([content]).has(t.url))) missing.push(`main permalink ${t.url} in one message`);
       return report(missing.map((what) => `fallback is missing ${what}`));
     },
     embedFailure
@@ -481,7 +483,6 @@ test("plain-text fallback carries the main post's text and permalink", async () 
 const stringsIn = (value) =>
   typeof value === "string" ? [value] : value && typeof value === "object" ? Object.values(value).flatMap(stringsIn) : [];
 const visibleText = (request) => [contentOf(request), ...(rendersEmbeds(request) ? stringsIn(request.payload.embeds ?? []) : [])];
-const urlsIn = (texts) => new Set(texts.flatMap((text) => text.match(/https?:\/\/[^\s<>)]+/g) || []));
 
 test("a share carries the quoted post's text and permalink when included, and sends what it would without the quote when excluded", async () => {
   await runShare(
