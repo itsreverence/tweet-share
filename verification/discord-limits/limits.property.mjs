@@ -243,13 +243,7 @@ const tweetWithMarkedQuote = fc
   .map(withDistinctMediaIds)
   .filter((t) => t.quote.text || mediaItems(t.quote).length > 0);
 const tweetWithShareableImages = tweetOf(twimgImageItem);
-const options = fc.record(
-  {
-    includeQuote: fc.boolean(),
-    quoteLayout: fc.constantFrom("auto", "card", "inline")
-  },
-  { requiredKeys: [] }
-);
+const options = fc.record({ includeQuote: fc.boolean() }, { requiredKeys: [] });
 const mediaSize = fc.oneof(
   fc.integer({ min: 1, max: 6 * MiB }),
   fc.constantFrom(10 * MiB - 1, 10 * MiB, 10 * MiB + 1),

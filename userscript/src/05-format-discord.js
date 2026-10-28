@@ -58,11 +58,6 @@ function needsMediaPostPrefix(rootTweet, shareOptions = {}) {
   return tweetHasEmbedImageMedia(rootTweet) && tweetHasEmbedImageMedia(rootTweet.quote);
 }
 
-function resolveQuoteLayout(tweet, shareOptions = {}) {
-  if (shareOptions.includeQuote === false || !hasQuoteTweet(tweet)) return "none";
-  return shareOptions.quoteLayout === "card" ? "card" : "inline";
-}
-
 function mediaCaption(kind, postTweet, index, shareOptions = {}, rootTweet = postTweet) {
   const label = kind === "video" ? `Video ${index + 1}` : `Image ${index + 1}`;
   if (!needsMediaPostPrefix(rootTweet, shareOptions)) return label;
@@ -280,15 +275,15 @@ function postCard(post, kind, { images, fields = [] }) {
 }
 
 function shareCards(tweet, shareOptions = {}) {
-  const layout = resolveQuoteLayout(tweet, shareOptions);
-  const mainImages = cardPhotoUrls(tweet);
-  if (layout === "none") return [postCard(tweet, "main", { images: mainImages })];
+  const images = cardPhotoUrls(tweet);
+  if (shareOptions.includeQuote === false || !hasQuoteTweet(tweet)) return [postCard(tweet, "main", { images })];
 
-  const quoteImages = cardPhotoUrls(tweet.quote, mainImages);
-  if (layout === "card") {
-    return [postCard(tweet, "main", { images: mainImages }), postCard(tweet.quote, "quote", { images: quoteImages })];
+  const quoteImages = cardPhotoUrls(tweet.quote, images);
+  // In one card a quote's photos would read as the main post's, so a quote with photos gets its own.
+  if (quoteImages.length) {
+    return [postCard(tweet, "main", { images }), postCard(tweet.quote, "quote", { images: quoteImages })];
   }
-  return [postCard(tweet, "main", { images: [...mainImages, ...quoteImages], fields: buildInlineQuoteFields(tweet.quote) })];
+  return [postCard(tweet, "main", { images, fields: buildInlineQuoteFields(tweet.quote) })];
 }
 
 function cardEmbeds(card) {

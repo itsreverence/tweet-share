@@ -176,8 +176,8 @@ const mutants = [
   {
     name: "embed shares drop an included quoted post",
     file: "05-format-discord.js",
-    find: "if (shareOptions.includeQuote === false || !hasQuoteTweet(tweet)) return \"none\";",
-    replace: "return \"none\";",
+    find: "if (shareOptions.includeQuote === false || !hasQuoteTweet(tweet)) return [postCard(tweet, \"main\", { images })];",
+    replace: "return [postCard(tweet, \"main\", { images })];",
     expect: QUOTE_ONLY_WHEN_INCLUDED
   },
   {

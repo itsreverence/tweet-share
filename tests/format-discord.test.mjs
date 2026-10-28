@@ -136,25 +136,29 @@ test("webhook sender is branded while the embed shows the tweet author once", ()
   assert.equal(payloads[0].embeds.filter((embed) => embed.author).length, 1, "one embed names the author");
 });
 
-test("quoteLayout card adds a second embed in the same message", () => {
+test("a quote with photos gets its own card in the same message, named and linked as the quoted post", () => {
   const tweet = {
     ...sampleTweet,
     quote: {
       url: "https://x.com/bob/status/2",
       author: { displayName: "Bob", username: "bob" },
       text: "Quoted text",
-      media: []
+      media: [{ type: "image", url: "https://pbs.twimg.com/media/q1.jpg" }]
     }
   };
 
   assert.equal(hasQuoteTweet(tweet), true);
-  const payloads = buildDiscordPayloads(tweet, { quoteLayout: "card" });
+  const payloads = buildDiscordPayloads(tweet);
   assert.equal(payloads.length, 1);
   assert.equal(payloads[0].embeds.length, 2);
-  assert.equal(payloads[0].embeds[1].color, 0x536471);
-  assert.equal(payloads[0].embeds[1].footer.text, "Quoted post · x.com");
-  assert.equal(payloads[0].embeds[1].author.name, "Quoting Bob (@bob)");
-  assert.equal(payloads[0].embeds[1].author.url, tweet.quote.url, "the quote card's author name opens the quoted post");
+  assert.equal(payloads[0].embeds[0].fields, undefined, "the main card has no quote field");
+  const quoteCard = payloads[0].embeds[1];
+  assert.equal(quoteCard.color, 0x536471);
+  assert.equal(quoteCard.footer.text, "Quoted post · x.com");
+  assert.equal(quoteCard.author.name, "Quoting Bob (@bob)");
+  assert.equal(quoteCard.author.url, tweet.quote.url, "the quote card's author name opens the quoted post");
+  assert.equal(quoteCard.description, "Quoted text");
+  assert.equal(quoteCard.image.url, "https://pbs.twimg.com/media/q1.jpg");
 });
 
 test("quote card embed does not use quote timestamp", () => {
@@ -166,16 +170,16 @@ test("quote card embed does not use quote timestamp", () => {
       author: { displayName: "Bob", username: "bob" },
       text: "Quoted text",
       createdAt: "2026-06-11T10:00:00.000Z",
-      media: []
+      media: [{ type: "image", url: "https://pbs.twimg.com/media/q1.jpg" }]
     }
-  }, { quoteLayout: "card" });
+  });
 
   assert.equal(payloads[0].embeds[0].timestamp, "2026-06-10T21:06:19.000Z");
   assert.equal(payloads[0].embeds[1].timestamp, undefined);
 });
 
-test("auto quote layout inlines text-only main with quoted video", () => {
-  const payloads = buildDiscordPayloads(jamieQuoteTweet, { quoteLayout: "auto" });
+test("a quote without photos stays inline in the main card, and its video follows as a link", () => {
+  const payloads = buildDiscordPayloads(jamieQuoteTweet);
   const firstEmbed = payloads[0].embeds[0];
   const quoteField = firstEmbed.fields.find((field) => field.name === "Quoting Aaron Rupar (@atrupar)");
 
@@ -197,7 +201,7 @@ test("inline quote field stays within Discord's 1024-char field limit for long q
   };
   assert.ok(tweet.quote.text.length > 1050, "quoted text is longer than one field");
 
-  const payloads = buildDiscordPayloads(tweet, { quoteLayout: "inline" });
+  const payloads = buildDiscordPayloads(tweet);
   const quoteField = payloads[0].embeds[0].fields.find((field) => field.name === "Quoting Aaron Rupar (@atrupar)");
   assert.ok(quoteField, "inline quote field is present");
   assert.ok(
@@ -209,7 +213,7 @@ test("inline quote field stays within Discord's 1024-char field limit for long q
   assert.equal(link, viewQuotedPost(tweet.quote.url), "truncation keeps the link to the quoted post whole");
 });
 
-test("auto quote layout groups main and quoted images in one contextual card", () => {
+test("each post's photos sit in its own card when both posts have photos", () => {
   const tweet = {
     ...sampleTweet,
     media: [{ type: "image", url: "https://pbs.twimg.com/media/main1.jpg" }],
@@ -221,16 +225,16 @@ test("auto quote layout groups main and quoted images in one contextual card", (
     }
   };
 
-  const payloads = buildDiscordPayloads(tweet, { quoteLayout: "auto" });
+  const payloads = buildDiscordPayloads(tweet);
   assert.equal(payloads[0].embeds.length, 2);
   assert.equal(payloads[0].embeds[0].image.url, "https://pbs.twimg.com/media/main1.jpg");
-  assert.equal(payloads[0].embeds[1].title, undefined);
-  assert.equal(payloads[0].embeds[1].url, tweet.url);
+  assert.equal(payloads[0].embeds[0].fields, undefined);
+  assert.equal(payloads[0].embeds[1].author.name, "Quoting Bob (@bob)");
+  assert.equal(payloads[0].embeds[1].url, tweet.quote.url);
   assert.equal(payloads[0].embeds[1].image.url, "https://pbs.twimg.com/media/q1.jpg");
-  assert.ok(payloads[0].embeds[0].fields.some((field) => field.name === "Quoting Bob (@bob)"));
 });
 
-test("auto inline quote uses quoted image as the embed hero when main has no media", () => {
+test("a photo quote under a text-only post shows its photo in its own card, not the main post's", () => {
   const tweet = {
     ...sampleTweet,
     media: [],
@@ -242,11 +246,12 @@ test("auto inline quote uses quoted image as the embed hero when main has no med
     }
   };
 
-  const payloads = buildDiscordPayloads(tweet, { quoteLayout: "auto" });
+  const payloads = buildDiscordPayloads(tweet);
   assert.equal(payloads.length, 1);
-  assert.equal(payloads[0].embeds.length, 1);
-  assert.equal(payloads[0].embeds[0].image.url, "https://pbs.twimg.com/media/q1.jpg");
-  assert.ok(payloads[0].embeds[0].fields.some((field) => field.name === "Quoting Bob (@bob)"));
+  assert.equal(payloads[0].embeds.length, 2);
+  assert.equal(payloads[0].embeds[0].image, undefined);
+  assert.equal(payloads[0].embeds[1].author.name, "Quoting Bob (@bob)");
+  assert.equal(payloads[0].embeds[1].image.url, "https://pbs.twimg.com/media/q1.jpg");
 });
 
 test("uploaded photos, matched across size variants, show once inside the card through the file uploaded with that message", () => {
@@ -292,8 +297,9 @@ test("inline quote images are deduplicated when extraction also assigns them to 
     }
   };
 
-  const embeds = buildDiscordPayloads(tweet, { quoteLayout: "auto" })[0].embeds;
+  const embeds = buildDiscordPayloads(tweet)[0].embeds;
   const imageUrls = embeds.flatMap((embed) => embed.image?.url ? [embed.image.url] : []);
+  assert.ok(embeds[0].fields.some((field) => field.name === "Quoting Bob (@bob)"), "a quote whose photos the main post already shows stays inline");
 
   assert.deepEqual(Array.from(imageUrls), [
     "https://pbs.twimg.com/media/one.jpg",
@@ -302,7 +308,7 @@ test("inline quote images are deduplicated when extraction also assigns them to 
   ]);
 });
 
-test("auto quote layout inlines main and quoted videos as follow-up links", () => {
+test("a video quote stays inline, and both posts' videos follow as links", () => {
   const mainVideo = "https://video.twimg.com/ext_tw_video/1/pu/vid/abc/1280x720/main.mp4";
   const quoteVideo = "https://video.twimg.com/ext_tw_video/2/pu/vid/abc/1280x720/quote.mp4";
   const tweet = {
@@ -550,7 +556,7 @@ test("supplemental image embeds reject non-Twitter HTTPS image URLs", () => {
   assert.equal(embeds[1].title, undefined);
 });
 
-test("an inline quote's photos join the main card's grid, untitled", () => {
+test("each card's extra photos share that card's url, so the two grids stay apart", () => {
   const tweet = {
     ...sampleTweet,
     text: "main",
@@ -570,13 +576,15 @@ test("an inline quote's photos join the main card's grid, untitled", () => {
   };
 
   const embeds = buildDiscordPayloads(tweet)[0].embeds;
-  assert.equal(embeds.length, 4);
-  assert.equal(embeds[0].color, 0x1da1f2);
-  for (const photo of embeds.slice(1)) {
-    assert.equal(photo.title, undefined);
-    assert.equal(photo.url, tweet.url);
-    assert.equal(photo.color, 0x1da1f2);
-  }
+  assert.deepEqual(
+    Array.from(embeds, (embed) => [embed.url, embed.image?.url, embed.color, embed.title]),
+    [
+      [tweet.url, "https://pbs.twimg.com/media/main1.jpg", 0x1da1f2, undefined],
+      [tweet.url, "https://pbs.twimg.com/media/main2.jpg", 0x1da1f2, undefined],
+      [tweet.quote.url, "https://pbs.twimg.com/media/q1.jpg", 0x536471, undefined],
+      [tweet.quote.url, "https://pbs.twimg.com/media/q2.jpg", 0x536471, undefined]
+    ]
+  );
 });
 
 test("video, images, and quote media stay in order with no photo labels", () => {
@@ -625,7 +633,7 @@ test("long tweet text splits across continuation embeds without duplicate url", 
   assert.equal(embeds[1].url, undefined);
 });
 
-test("quote images stay as supplemental embeds in link mode", () => {
+test("both posts' photos keep their order across the two cards", () => {
   const tweet = {
     ...sampleTweet,
     media: [
