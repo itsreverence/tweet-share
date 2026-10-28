@@ -76,9 +76,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     };
   }
 
-  function returnFocus() {
-    if (anchor.isConnected) anchor.focus({ preventScroll: true });
-  }
+  const returnFocus = () => returnFocusToPost(article, anchor);
 
   function closeAndReturnFocus() {
     closeDestinationMenu();
@@ -95,7 +93,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     event.preventDefault();
     event.stopPropagation();
     closeDestinationMenu();
-    openSettingsModal(anchor);
+    openSettingsModal(returnFocus);
   });
   header.append(titleEl, settingsBtn);
 
@@ -216,7 +214,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     controls.at(next).focus();
   });
 
-  const lifecycle = showPanel(menu, { anchor, returnFocus });
+  const lifecycle = showPanel(menu, { findAnchor: () => currentShareButton(article, anchor), returnFocus });
   loadPreview();
 }
 

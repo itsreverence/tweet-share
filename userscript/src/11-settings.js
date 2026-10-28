@@ -1,4 +1,4 @@
-async function openSettingsModal(returnFocusTo = document.activeElement) {
+async function openSettingsModal(returnFocus) {
   closeDestinationMenu();
   if (document.querySelector(`.${SETTINGS_CLASS}__backdrop`)) return;
   injectSettingsStyles();
@@ -300,7 +300,7 @@ async function openSettingsModal(returnFocusTo = document.activeElement) {
   };
   settingsModalCleanup = () => {
     document.removeEventListener("keydown", onKeyDown);
-    if (returnFocusTo?.isConnected) returnFocusTo.focus();
+    returnFocus();
   };
   document.addEventListener("keydown", onKeyDown);
 
@@ -321,7 +321,10 @@ function registerSettingsMenuCommand() {
       : null;
 
   if (!register) return;
-  register("Tweet Discord Share settings…", () => openSettingsModal());
+  register("Tweet Discord Share settings…", () => {
+    const previousFocus = document.activeElement;
+    openSettingsModal(() => previousFocus?.focus({ preventScroll: true }));
+  });
 }
 
 registerSettingsMenuCommand();

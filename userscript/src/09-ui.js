@@ -45,7 +45,7 @@ async function startDiscordShare(article, anchor) {
   const [destinations, preferences] = await Promise.all([getDestinations(), loadPreferences()]);
   if (destinations.length === 0) {
     closeXOverlay();
-    openSettingsModal(anchor);
+    openSettingsModal(() => returnFocusToPost(article, anchor));
     return;
   }
 
@@ -69,6 +69,22 @@ async function startDiscordShare(article, anchor) {
 function findShareButton(root) {
   return root.querySelector('[data-testid="share"]')
     || [...root.querySelectorAll("button")].find((button) => /share/i.test(button.getAttribute("aria-label") || ""));
+}
+
+// X can re-render a post while the panel or settings are open, which replaces its Share button.
+function currentShareButton(article, anchor) {
+  if (anchor.isConnected) return anchor;
+  const postUrl = tweetUrlFromArticle(article);
+  const post = article.isConnected
+    ? article
+    : [...document.querySelectorAll("article")].find((candidate) => tweetUrlFromArticle(candidate) === postUrl);
+  return post ? findShareButton(post) : null;
+}
+
+function returnFocusToPost(article, anchor) {
+  const target = currentShareButton(article, anchor)
+    || document.querySelector("main")?.querySelector("a[href], button:not(:disabled)");
+  target?.focus({ preventScroll: true });
 }
 
 function captureShareArticle(event) {

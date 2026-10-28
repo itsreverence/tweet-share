@@ -1944,7 +1944,7 @@ function placePanel({ anchorRect, panelSize, viewport }) {
   return { mode, top: Math.round(top), left: Math.round(left), maxHeight };
 }
 
-function positionPopover(panel, anchor) {
+function positionPopover(panel, anchorRect) {
   panel.style.maxHeight = "";
   if (!panel.isConnected) {
     document.body.append(panel);
@@ -1952,7 +1952,7 @@ function positionPopover(panel, anchor) {
 
   const { width, height } = panel.getBoundingClientRect();
   const placement = placePanel({
-    anchorRect: anchor.getBoundingClientRect(),
+    anchorRect,
     panelSize: { width, height },
     viewport: { width: window.innerWidth, height: window.innerHeight }
   });
@@ -1963,20 +1963,25 @@ function positionPopover(panel, anchor) {
 }
 
 // Everything the open panel listens to outside itself is added here and removed by close().
-// It re-places itself whenever the viewport changes size or orientation.
+// It re-places itself whenever the viewport changes size or orientation, next to the Share button
+// findAnchor() returns, or where that button last was once X has re-rendered the post away.
 // Escape is the panel's only while focus is in it, on its Share button, or nowhere, so Escape elsewhere on X is left alone.
-function showPanel(panel, { anchor, returnFocus }) {
+function showPanel(panel, { findAnchor, returnFocus }) {
   closeDestinationMenu();
-  const place = () => positionPopover(panel, anchor);
+  let anchorRect = new DOMRect();
+  const place = () => {
+    anchorRect = findAnchor()?.getBoundingClientRect() ?? anchorRect;
+    positionPopover(panel, anchorRect);
+  };
   const onKeyDown = (event) => {
     const focus = document.activeElement;
-    const ownsFocus = panel.contains(focus) || focus === anchor || focus === document.body;
+    const ownsFocus = panel.contains(focus) || focus === findAnchor() || focus === document.body;
     if (event.key !== "Escape" || event.defaultPrevented || !ownsFocus) return;
     close();
     returnFocus();
   };
   const onPointerDown = (event) => {
-    if (!panel.contains(event.target) && !anchor.contains(event.target)) close();
+    if (!panel.contains(event.target) && !findAnchor()?.contains(event.target)) close();
   };
   const listeners = [
     [document, "keydown", onKeyDown, false],
@@ -2089,9 +2094,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     };
   }
 
-  function returnFocus() {
-    if (anchor.isConnected) anchor.focus({ preventScroll: true });
-  }
+  const returnFocus = () => returnFocusToPost(article, anchor);
 
   function closeAndReturnFocus() {
     closeDestinationMenu();
@@ -2108,7 +2111,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     event.preventDefault();
     event.stopPropagation();
     closeDestinationMenu();
-    openSettingsModal(anchor);
+    openSettingsModal(returnFocus);
   });
   header.append(titleEl, settingsBtn);
 
@@ -2229,7 +2232,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     controls.at(next).focus();
   });
 
-  const lifecycle = showPanel(menu, { anchor, returnFocus });
+  const lifecycle = showPanel(menu, { findAnchor: () => currentShareButton(article, anchor), returnFocus });
   loadPreview();
 }
 
@@ -2477,7 +2480,7 @@ async function startDiscordShare(article, anchor) {
   const [destinations, preferences] = await Promise.all([getDestinations(), loadPreferences()]);
   if (destinations.length === 0) {
     closeXOverlay();
-    openSettingsModal(anchor);
+    openSettingsModal(() => returnFocusToPost(article, anchor));
     return;
   }
 
@@ -2501,6 +2504,22 @@ async function startDiscordShare(article, anchor) {
 function findShareButton(root) {
   return root.querySelector('[data-testid="share"]')
     || [...root.querySelectorAll("button")].find((button) => /share/i.test(button.getAttribute("aria-label") || ""));
+}
+
+// X can re-render a post while the panel or settings are open, which replaces its Share button.
+function currentShareButton(article, anchor) {
+  if (anchor.isConnected) return anchor;
+  const postUrl = tweetUrlFromArticle(article);
+  const post = article.isConnected
+    ? article
+    : [...document.querySelectorAll("article")].find((candidate) => tweetUrlFromArticle(candidate) === postUrl);
+  return post ? findShareButton(post) : null;
+}
+
+function returnFocusToPost(article, anchor) {
+  const target = currentShareButton(article, anchor)
+    || document.querySelector("main")?.querySelector("a[href], button:not(:disabled)");
+  target?.focus({ preventScroll: true });
 }
 
 function captureShareArticle(event) {
@@ -3326,7 +3345,7 @@ function trapFocus(dialog, event) {
 }
 
   // --- 11-settings.js ---
-async function openSettingsModal(returnFocusTo = document.activeElement) {
+async function openSettingsModal(returnFocus) {
   closeDestinationMenu();
   if (document.querySelector(`.${SETTINGS_CLASS}__backdrop`)) return;
   injectSettingsStyles();
@@ -3628,7 +3647,7 @@ async function openSettingsModal(returnFocusTo = document.activeElement) {
   };
   settingsModalCleanup = () => {
     document.removeEventListener("keydown", onKeyDown);
-    if (returnFocusTo?.isConnected) returnFocusTo.focus();
+    returnFocus();
   };
   document.addEventListener("keydown", onKeyDown);
 
@@ -3649,7 +3668,10 @@ function registerSettingsMenuCommand() {
       : null;
 
   if (!register) return;
-  register("Tweet Discord Share settings…", () => openSettingsModal());
+  register("Tweet Discord Share settings…", () => {
+    const previousFocus = document.activeElement;
+    openSettingsModal(() => previousFocus?.focus({ preventScroll: true }));
+  });
 }
 
 registerSettingsMenuCommand();

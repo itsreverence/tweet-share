@@ -165,7 +165,7 @@ function placePanel({ anchorRect, panelSize, viewport }) {
   return { mode, top: Math.round(top), left: Math.round(left), maxHeight };
 }
 
-function positionPopover(panel, anchor) {
+function positionPopover(panel, anchorRect) {
   panel.style.maxHeight = "";
   if (!panel.isConnected) {
     document.body.append(panel);
@@ -173,7 +173,7 @@ function positionPopover(panel, anchor) {
 
   const { width, height } = panel.getBoundingClientRect();
   const placement = placePanel({
-    anchorRect: anchor.getBoundingClientRect(),
+    anchorRect,
     panelSize: { width, height },
     viewport: { width: window.innerWidth, height: window.innerHeight }
   });
@@ -184,20 +184,25 @@ function positionPopover(panel, anchor) {
 }
 
 // Everything the open panel listens to outside itself is added here and removed by close().
-// It re-places itself whenever the viewport changes size or orientation.
+// It re-places itself whenever the viewport changes size or orientation, next to the Share button
+// findAnchor() returns, or where that button last was once X has re-rendered the post away.
 // Escape is the panel's only while focus is in it, on its Share button, or nowhere, so Escape elsewhere on X is left alone.
-function showPanel(panel, { anchor, returnFocus }) {
+function showPanel(panel, { findAnchor, returnFocus }) {
   closeDestinationMenu();
-  const place = () => positionPopover(panel, anchor);
+  let anchorRect = new DOMRect();
+  const place = () => {
+    anchorRect = findAnchor()?.getBoundingClientRect() ?? anchorRect;
+    positionPopover(panel, anchorRect);
+  };
   const onKeyDown = (event) => {
     const focus = document.activeElement;
-    const ownsFocus = panel.contains(focus) || focus === anchor || focus === document.body;
+    const ownsFocus = panel.contains(focus) || focus === findAnchor() || focus === document.body;
     if (event.key !== "Escape" || event.defaultPrevented || !ownsFocus) return;
     close();
     returnFocus();
   };
   const onPointerDown = (event) => {
-    if (!panel.contains(event.target) && !anchor.contains(event.target)) close();
+    if (!panel.contains(event.target) && !findAnchor()?.contains(event.target)) close();
   };
   const listeners = [
     [document, "keydown", onKeyDown, false],

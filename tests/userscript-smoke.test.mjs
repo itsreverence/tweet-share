@@ -409,6 +409,56 @@ test("Escape closes the panel and returns focus to the post's Share button", asy
   assert.equal(view.document.activeElement, view.document.querySelector('[data-testid="share"]'), "focus is back on Share");
 });
 
+const rerenders = [
+  ["X re-renders the post", ({ document }) => {
+    const article = document.querySelector("article");
+    article.replaceWith(article.cloneNode(true));
+  }],
+  ["X re-renders its Share button", ({ document }) => {
+    const share = document.querySelector('[data-testid="share"]');
+    share.replaceWith(share.cloneNode(true));
+  }]
+];
+
+for (const [what, rerender] of rerenders) {
+  test(`when ${what} under the open panel, Escape focuses the post's new Share button`, async (t) => {
+    const view = openPage(t, { destinations: [general, friends] });
+    await openPreview(view);
+    const oldShare = view.document.querySelector('[data-testid="share"]');
+
+    rerender(view);
+    press(view, "Escape");
+    const share = view.document.querySelector('[data-testid="share"]');
+    assert.notEqual(share, oldShare, "the page has a new Share button");
+    assert.equal(view.document.activeElement, share, "focus is on the post's current Share button");
+  });
+
+  test(`when ${what} under settings opened from the panel, closing settings focuses the post's new Share button`, async (t) => {
+    const view = openPage(t, { destinations: [general, friends] });
+    const menu = await openPreview(view);
+    click(view, [...menu.querySelectorAll("button")].find((button) => accessibleName(button) === "Settings"));
+    const dialog = await waitFor(() => settingsDialog(view), "the settings dialog");
+
+    rerender(view);
+    click(view, byText(dialog, "button", "Cancel")[0]);
+    assert.equal(view.document.activeElement, view.document.querySelector('[data-testid="share"]'), "focus is on the post's current Share button");
+  });
+}
+
+test("when the post is gone, closing the panel focuses the main column instead of the page body", async (t) => {
+  const view = openPage(t, { destinations: [general, friends] });
+  const home = view.document.createElement("a");
+  home.href = "/home";
+  home.textContent = "Home";
+  view.document.querySelector("main").prepend(home);
+  await openPreview(view);
+
+  view.document.querySelector("article").remove();
+  press(view, "Escape");
+  assert.equal(previewMenu(view), null, "the panel closes");
+  assert.equal(view.document.activeElement, home, "focus lands on the first control in the main column");
+});
+
 function addComposer({ document }) {
   const composer = document.createElement("textarea");
   composer.setAttribute("aria-label", "Post text");
