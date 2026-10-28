@@ -26,12 +26,13 @@ function createSettingsOption(labelText, detailText, checked) {
   return { option, input };
 }
 
+// The dialog goes first, so returning focus never picks one of its own controls.
 function closeSettingsModal() {
+  document.querySelector(`.${SETTINGS_CLASS}__backdrop`)?.remove();
   if (settingsModalCleanup) {
     settingsModalCleanup();
     settingsModalCleanup = null;
   }
-  document.querySelector(`.${SETTINGS_CLASS}__backdrop`)?.remove();
 }
 
 function nextSettingsId() {

@@ -139,6 +139,18 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(value, max));
 }
 
+// What the user sees, in the coordinates of getBoundingClientRect and fixed positioning. Pinch zoom shrinks and moves it.
+function visibleViewport() {
+  const visual = window.visualViewport;
+  return visual
+    ? new DOMRect(visual.offsetLeft, visual.offsetTop, visual.width, visual.height)
+    : new DOMRect(0, 0, window.innerWidth, window.innerHeight);
+}
+
+function rectsOverlap(a, b) {
+  return a.left <= b.right && b.left <= a.right && a.top <= b.bottom && b.top <= a.bottom;
+}
+
 // Rects and sizes are in viewport pixels; maxHeight caps the panel so only its preview scrolls.
 // A sheet has no top or left, because the narrow-viewport CSS pins it to the bottom edge, clear of the scrollbar.
 function placePanel({ anchorRect, panelSize, viewport }) {

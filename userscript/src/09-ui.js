@@ -81,10 +81,31 @@ function currentShareButton(article, anchor) {
   return post ? findShareButton(post) : null;
 }
 
+const FOCUSABLE_SELECTOR = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+// The browser refuses focus to hidden, inert, and disabled controls, so a target counts once focus actually lands.
+function focusIfAble(target) {
+  if (!target || target.closest('[aria-hidden="true"]')) return false;
+  target.focus({ preventScroll: true });
+  return document.activeElement === target;
+}
+
+// With the post gone, focus goes to a control in view, X's main column first, and as a last resort to main itself.
+function focusFallbackControl() {
+  const main = document.querySelector("main");
+  const controls = [...new Set([...(main?.querySelectorAll(FOCUSABLE_SELECTOR) ?? []), ...document.querySelectorAll(FOCUSABLE_SELECTOR)])];
+  const viewport = visibleViewport();
+  const inView = controls.filter((control) => rectsOverlap(control.getBoundingClientRect(), viewport));
+  if ([...inView, ...controls].some(focusIfAble) || !main) return;
+  if (!main.hasAttribute("tabindex")) {
+    main.tabIndex = -1;
+    main.addEventListener("blur", () => main.removeAttribute("tabindex"), { once: true });
+  }
+  main.focus({ preventScroll: true });
+}
+
 function returnFocusToPost(article, anchor) {
-  const target = currentShareButton(article, anchor)
-    || document.querySelector("main")?.querySelector("a[href], button:not(:disabled)");
-  target?.focus({ preventScroll: true });
+  if (!focusIfAble(currentShareButton(article, anchor))) focusFallbackControl();
 }
 
 function captureShareArticle(event) {

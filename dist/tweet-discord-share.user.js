@@ -1916,6 +1916,18 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(value, max));
 }
 
+// What the user sees, in the coordinates of getBoundingClientRect and fixed positioning. Pinch zoom shrinks and moves it.
+function visibleViewport() {
+  const visual = window.visualViewport;
+  return visual
+    ? new DOMRect(visual.offsetLeft, visual.offsetTop, visual.width, visual.height)
+    : new DOMRect(0, 0, window.innerWidth, window.innerHeight);
+}
+
+function rectsOverlap(a, b) {
+  return a.left <= b.right && b.left <= a.right && a.top <= b.bottom && b.top <= a.bottom;
+}
+
 // Rects and sizes are in viewport pixels; maxHeight caps the panel so only its preview scrolls.
 // A sheet has no top or left, because the narrow-viewport CSS pins it to the bottom edge, clear of the scrollbar.
 function placePanel({ anchorRect, panelSize, viewport }) {
@@ -2522,10 +2534,31 @@ function currentShareButton(article, anchor) {
   return post ? findShareButton(post) : null;
 }
 
+const FOCUSABLE_SELECTOR = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+// The browser refuses focus to hidden, inert, and disabled controls, so a target counts once focus actually lands.
+function focusIfAble(target) {
+  if (!target || target.closest('[aria-hidden="true"]')) return false;
+  target.focus({ preventScroll: true });
+  return document.activeElement === target;
+}
+
+// With the post gone, focus goes to a control in view, X's main column first, and as a last resort to main itself.
+function focusFallbackControl() {
+  const main = document.querySelector("main");
+  const controls = [...new Set([...(main?.querySelectorAll(FOCUSABLE_SELECTOR) ?? []), ...document.querySelectorAll(FOCUSABLE_SELECTOR)])];
+  const viewport = visibleViewport();
+  const inView = controls.filter((control) => rectsOverlap(control.getBoundingClientRect(), viewport));
+  if ([...inView, ...controls].some(focusIfAble) || !main) return;
+  if (!main.hasAttribute("tabindex")) {
+    main.tabIndex = -1;
+    main.addEventListener("blur", () => main.removeAttribute("tabindex"), { once: true });
+  }
+  main.focus({ preventScroll: true });
+}
+
 function returnFocusToPost(article, anchor) {
-  const target = currentShareButton(article, anchor)
-    || document.querySelector("main")?.querySelector("a[href], button:not(:disabled)");
-  target?.focus({ preventScroll: true });
+  if (!focusIfAble(currentShareButton(article, anchor))) focusFallbackControl();
 }
 
 function captureShareArticle(event) {
@@ -3237,12 +3270,13 @@ function createSettingsOption(labelText, detailText, checked) {
   return { option, input };
 }
 
+// The dialog goes first, so returning focus never picks one of its own controls.
 function closeSettingsModal() {
+  document.querySelector(`.${SETTINGS_CLASS}__backdrop`)?.remove();
   if (settingsModalCleanup) {
     settingsModalCleanup();
     settingsModalCleanup = null;
   }
-  document.querySelector(`.${SETTINGS_CLASS}__backdrop`)?.remove();
 }
 
 function nextSettingsId() {

@@ -550,18 +550,76 @@ for (const [what, rerender] of rerenders) {
   });
 }
 
-test("when the post is gone, closing the panel focuses the main column instead of the page body", async (t) => {
+// jsdom has no layout, so a test that cares where a control is gives it a box, as the browser would.
+const placeAt = (node, top, left = 0, size = 34) => {
+  node.getBoundingClientRect = () => new node.ownerDocument.defaultView.DOMRect(left, top, size, size);
+};
+
+// X has closed its share menu by now, as it does on the Escape the userscript sends when it takes over.
+function removePost({ document }) {
+  document.querySelector('[role="menu"]')?.parentElement.remove();
+  document.querySelector("article").remove();
+}
+
+// Each case builds the page around the post, then names where focus belongs once the post is gone.
+const postGoneCases = [
+  ["the main column has a control", "focus lands on the first control in the main column", ({ document }) => {
+    document.querySelector("main").insertAdjacentHTML("afterbegin", '<a href="/home" id="target">Home</a>');
+  }],
+  ["the main column's first control is collapsed", "focus skips it for the first control that can take focus", ({ document }) => {
+    document.querySelector("main").insertAdjacentHTML("afterbegin", '<div hidden><a href="/more">More</a></div><button id="target">Visible</button>');
+  }],
+  ["the main column's first control is scrolled away", "focus goes to a control in view, so the next Tab does not jump the page", ({ document }) => {
+    document.querySelector("main").insertAdjacentHTML("afterbegin", '<a href="/top" id="top">Top</a><a href="/near" id="target">Near</a>');
+    placeAt(document.getElementById("top"), -2000);
+    placeAt(document.getElementById("target"), 300);
+  }],
+  ["the main column has nothing focusable", "focus goes to the first control elsewhere on the page", ({ document }) => {
+    document.body.insertAdjacentHTML("afterbegin", '<nav><a href="/home" id="target">Home</a></nav>');
+  }],
+  ["nothing on the page can take focus", "focus goes to the main column itself", ({ document }) => {
+    document.querySelector("main").id = "target";
+  }]
+];
+
+for (const [what, where, setUp] of postGoneCases) {
+  test(`when the post is gone and ${what}, Escape never leaves focus on the page body: ${where}`, async (t) => {
+    const view = openPage(t, { destinations: [general, friends] });
+    setUp(view);
+    await openPreview(view);
+
+    removePost(view);
+    press(view, "Escape");
+    assert.equal(sharePanel(view), null, "the panel closes");
+    assert.equal(view.document.activeElement, view.document.getElementById("target"), where);
+  });
+}
+
+test("focusing the main column as a last resort leaves it unfocusable again once focus moves on", async (t) => {
+  const view = openPage(t, { destinations: [general, friends] });
+  const main = view.document.querySelector("main");
+  await openPreview(view);
+
+  removePost(view);
+  press(view, "Escape");
+  assert.equal(view.document.activeElement, main, "focus is on the main column");
+  main.blur();
+  assert.equal(main.hasAttribute("tabindex"), false, "X's main column is left as it was");
+});
+
+test("closing settings once the post is gone focuses the page, not a control of the closed dialog", async (t) => {
   const view = openPage(t, { destinations: [general, friends] });
   const home = view.document.createElement("a");
   home.href = "/home";
-  home.textContent = "Home";
   view.document.querySelector("main").prepend(home);
-  await openPreview(view);
+  const menu = await openPreview(view);
+  click(view, [...menu.querySelectorAll("button")].find((button) => accessibleName(button) === "Settings"));
+  const dialog = await waitFor(() => settingsDialog(view), "the settings dialog");
 
-  view.document.querySelector("article").remove();
-  press(view, "Escape");
-  assert.equal(sharePanel(view), null, "the panel closes");
-  assert.equal(view.document.activeElement, home, "focus lands on the first control in the main column");
+  removePost(view);
+  click(view, byText(dialog, "button", "Cancel")[0]);
+  assert.equal(settingsDialog(view), null, "settings close");
+  assert.equal(view.document.activeElement, home, "focus is on the page's first control");
 });
 
 function addComposer({ document }) {
