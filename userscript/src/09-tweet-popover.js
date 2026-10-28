@@ -94,7 +94,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     event.preventDefault();
     event.stopPropagation();
     closeDestinationMenu();
-    openSettingsModal();
+    openSettingsModal(anchor);
   });
   header.append(titleEl, settingsBtn);
 
@@ -255,7 +255,7 @@ function popoverStylesCss() {
       width: min(360px, calc(100vw - ${PANEL_MARGIN * 2}px));
       z-index: 10000;
     }
-    @media (max-width: ${SHEET_MAX_WIDTH - 0.02}px) {
+    @media ${NARROW_VIEWPORT_MEDIA} {
       .${POPOVER_CLASS} {
         border-bottom-width: 0;
         border-radius: 16px 16px 0 0;

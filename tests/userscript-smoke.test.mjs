@@ -112,8 +112,8 @@ function click(view, node) {
   node.dispatchEvent(new view.window.MouseEvent("click", { bubbles: true }));
 }
 
-const press = ({ window, document }, key) =>
-  (document.activeElement || document).dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true }));
+const press = ({ window, document }, key, modifiers = {}) =>
+  (document.activeElement || document).dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true, ...modifiers }));
 const visibleText = (node) =>
   node.nodeType === node.TEXT_NODE
     ? node.textContent
@@ -198,11 +198,22 @@ function renderedLines({ window }, root) {
 
 const settingsDialog = ({ document }) =>
   document.querySelector('[role="dialog"][aria-label="Tweet Discord Share settings"]');
-const channelList = (dialog) => dialog.querySelector(".tds-settings__list");
 const addChannelCard = (dialog) => byText(dialog, "div", "Add channel")[0].parentElement;
 const fieldInput = (container, label) => byText(container, "label", label)[0].control;
-const channelNames = (dialog) =>
-  byText(channelList(dialog), "label", "Display name").map((label) => label.control.value);
+const editButtons = (dialog) => [...dialog.querySelectorAll("button")].filter((button) => /^(Edit|Done)$/.test(button.textContent));
+const channelNames = (dialog) => editButtons(dialog).map(accessibleDescription);
+const controlledBy = ({ document }, button) => document.getElementById(button.getAttribute("aria-controls"));
+
+function editChannel(view, dialog, name) {
+  const button = editButtons(dialog).find((candidate) => accessibleDescription(candidate) === name);
+  click(view, button);
+  return controlledBy(view, button);
+}
+
+function expandAddChannel(view, dialog) {
+  click(view, byText(dialog, "button", "+ Add channel")[0]);
+  return addChannelCard(dialog);
+}
 
 function type(view, input, value) {
   assertInteractable(view, input);
@@ -420,7 +431,7 @@ test("a channel added with an existing channel's name still receives its own sha
   const view = openPage(t, { destinations: [general] });
 
   const dialog = await openSettings(view);
-  const addCard = addChannelCard(dialog);
+  const addCard = expandAddChannel(view, dialog);
   type(view, fieldInput(addCard, "Display name"), "General");
   type(view, fieldInput(addCard, "Webhook URL"), friendsWebhookUrl);
   click(view, byText(dialog, "button", "Save")[0]);
@@ -451,7 +462,7 @@ test("Cancel discards edited and removed channels", async (t) => {
   const stored = structuredClone([...view.store]);
 
   const dialog = await openSettings(view);
-  type(view, [...dialog.querySelectorAll("input")].find((input) => input.value === "General"), "Renamed");
+  type(view, fieldInput(editChannel(view, dialog, "General"), "Display name"), "Renamed");
   click(view, byText(dialog, "button", "Remove")[1]);
   assert.deepEqual(channelNames(dialog), ["Renamed"], "the dialog shows the pending edit and removal");
   click(view, byText(dialog, "button", "Cancel")[0]);
@@ -467,9 +478,9 @@ test("Save refuses an unfinished Add channel form, points at the field to fix, a
   const stored = structuredClone([...view.store]);
 
   const dialog = await openSettings(view);
-  type(view, fieldInput(channelList(dialog), "Display name"), "Renamed");
+  type(view, fieldInput(editChannel(view, dialog, "General"), "Display name"), "Renamed");
   click(view, byText(dialog, "span", "Always show preview before sending")[0]);
-  const addCard = addChannelCard(dialog);
+  const addCard = expandAddChannel(view, dialog);
   const newLabel = fieldInput(addCard, "Display name");
   const newUrl = fieldInput(addCard, "Webhook URL");
   const save = byText(dialog, "button", "Save")[0];
@@ -511,8 +522,8 @@ test("a Save blocked by an invalid channel leaves the channel being added in the
   const stored = structuredClone([...view.store]);
 
   const dialog = await openSettings(view);
-  type(view, fieldInput(channelList(dialog), "Webhook URL"), "https://example.com/not-a-webhook");
-  const addCard = addChannelCard(dialog);
+  type(view, fieldInput(editChannel(view, dialog, "General"), "Webhook URL"), "https://example.com/not-a-webhook");
+  const addCard = expandAddChannel(view, dialog);
   type(view, fieldInput(addCard, "Display name"), "Friends");
   type(view, fieldInput(addCard, "Webhook URL"), friendsWebhookUrl);
   click(view, byText(dialog, "button", "Save")[0]);
@@ -526,6 +537,131 @@ test("a Save blocked by an invalid channel leaves the channel being added in the
     "the Add channel form keeps the typed channel"
   );
   assert.deepEqual([...view.store], stored, "storage is unchanged");
+});
+
+test("settings list each channel as a row with its name and webhook status, without the internal id", async (t) => {
+  const view = openPage(t, { destinations: [{ ...general, id: "chan-7f3a" }, friends] });
+  const dialog = await openSettings(view);
+
+  assert.deepEqual(channelNames(dialog), ["General", "Friends"]);
+  const [generalRow] = editButtons(dialog).map((button) => button.closest("li"));
+  assert.ok(visibleText(generalRow).includes("Webhook saved"), "a saved channel says its webhook is saved");
+  assert.ok(!dialog.textContent.includes("chan-7f3a"), "the internal channel id is not shown");
+});
+
+test("Edit opens one channel's form inline and becomes Done, and Done closes it", async (t) => {
+  const view = openPage(t, { destinations: [general, friends] });
+  const dialog = await openSettings(view);
+  const [generalEdit, friendsEdit] = editButtons(dialog);
+  const generalForm = controlledBy(view, generalEdit);
+  const friendsForm = controlledBy(view, friendsEdit);
+  assert.deepEqual([generalForm.hidden, friendsForm.hidden], [true, true], "channel forms start collapsed");
+
+  click(view, generalEdit);
+  assert.equal(generalForm.hidden, false, "Edit opens the channel's form");
+  assert.deepEqual([generalEdit.textContent, generalEdit.getAttribute("aria-expanded")], ["Done", "true"]);
+  assert.equal(view.document.activeElement, fieldInput(generalForm, "Display name"), "focus moves into the form");
+  type(view, fieldInput(generalForm, "Webhook URL"), "https://example.com/not-a-webhook");
+  assert.ok(visibleText(generalEdit.closest("li")).includes("Needs a valid webhook URL"), "the row flags the bad webhook");
+
+  click(view, friendsEdit);
+  assert.deepEqual([generalForm.hidden, friendsForm.hidden], [true, false], "opening another channel closes the first");
+  assert.equal(generalEdit.textContent, "Edit");
+
+  click(view, friendsEdit);
+  assert.equal(friendsForm.hidden, true, "Done closes the form");
+  assert.deepEqual([friendsEdit.textContent, friendsEdit.getAttribute("aria-expanded")], ["Edit", "false"]);
+  assert.equal(view.document.activeElement, friendsEdit, "focus returns to the button");
+});
+
+test("+ Add channel expands the Add channel form, Discard collapses it, and Add to list adds a row", async (t) => {
+  const view = openPage(t, { destinations: [general] });
+  const dialog = await openSettings(view);
+  const toggle = byText(dialog, "button", "+ Add channel")[0];
+  const addCard = addChannelCard(dialog);
+  assert.equal(addCard.hidden, true, "with a channel saved, the Add channel form starts collapsed");
+
+  click(view, toggle);
+  assert.deepEqual([addCard.hidden, toggle.hidden], [false, true], "the toggle gives way to the form");
+  assert.equal(view.document.activeElement, fieldInput(addCard, "Display name"), "focus moves to the name field");
+  type(view, fieldInput(addCard, "Display name"), "Friends");
+  click(view, byText(addCard, "button", "Discard")[0]);
+  assert.deepEqual([addCard.hidden, toggle.hidden], [true, false], "Discard collapses the form");
+  assert.equal(view.document.activeElement, toggle);
+  assert.equal(fieldInput(addCard, "Display name").value, "", "Discard clears what was typed");
+
+  expandAddChannel(view, dialog);
+  type(view, fieldInput(addCard, "Display name"), "Friends");
+  type(view, fieldInput(addCard, "Webhook URL"), friendsWebhookUrl);
+  click(view, byText(addCard, "button", "Add to list")[0]);
+  assert.deepEqual(channelNames(dialog), ["General", "Friends"], "the new channel joins the list");
+  assert.equal(addCard.hidden, true, "the form collapses again");
+});
+
+for (const [what, field, value] of [
+  ["an emptied name", "Display name", ""],
+  ["a non-webhook URL", "Webhook URL", "https://example.com/not-a-webhook"]
+]) {
+  test(`a Save blocked by ${what} reopens that channel and focuses the field to fix`, async (t) => {
+    const view = openPage(t, { destinations: [general, friends] });
+    const stored = structuredClone([...view.store]);
+    const dialog = await openSettings(view);
+
+    const friendsForm = editChannel(view, dialog, "Friends");
+    type(view, fieldInput(friendsForm, field), value);
+    click(view, editButtons(dialog)[1]);
+    assert.equal(friendsForm.hidden, true, "the channel's form is closed before saving");
+    click(view, byText(dialog, "button", "Save")[0]);
+
+    const error = await waitFor(() => toast(view, "error"), "the error toast");
+    assert.equal(error.textContent, "Fix invalid channel names or webhook URLs before saving.");
+    assert.equal(friendsForm.hidden, false, "Save reopens the channel to fix");
+    assert.equal(view.document.activeElement, fieldInput(friendsForm, field), "focus is on the field to fix");
+    assert.deepEqual([...view.store], stored, "storage is unchanged");
+  });
+}
+
+test("settings focus the dialog, keep Tab inside it, and return focus on close", async (t) => {
+  const view = openPage(t, { destinations: [general] });
+  const share = view.document.querySelector('[data-testid="share"]');
+  share.focus();
+
+  const dialog = await openSettings(view);
+  assert.equal(view.document.activeElement, dialog, "with channels saved, focus starts on the dialog");
+  const close = byText(dialog, "button", "×")[0];
+  const save = byText(dialog, "button", "Save")[0];
+  save.focus();
+  press(view, "Tab");
+  assert.equal(view.document.activeElement, close, "Tab past the last control wraps to the first");
+  press(view, "Tab", { shiftKey: true });
+  assert.equal(view.document.activeElement, save, "Shift+Tab past the first control wraps to the last");
+
+  press(view, "Escape");
+  assert.equal(settingsDialog(view), null, "Escape closes settings");
+  assert.equal(view.document.activeElement, share, "focus returns to where it was");
+});
+
+test("with no channels, settings show the setup steps and focus the open Add channel form", async (t) => {
+  const view = openPage(t, { destinations: [] });
+  const dialog = await openSettings(view);
+
+  const steps = leafWithText(dialog, "No channels yet").parentElement;
+  assertInteractable(view, steps);
+  const addCard = addChannelCard(dialog);
+  assertInteractable(view, addCard);
+  assert.equal(byText(dialog, "button", "+ Add channel")[0].hidden, true, "there is nothing to expand");
+  assert.equal(view.document.activeElement, fieldInput(addCard, "Display name"), "focus is on the name field");
+});
+
+test("settings opened from the share panel return focus to Share on close", async (t) => {
+  const view = openPage(t, { destinations: [general, friends] });
+  const menu = await openPreview(view);
+
+  click(view, [...menu.querySelectorAll("button")].find((button) => accessibleName(button) === "Settings"));
+  const dialog = await waitFor(() => settingsDialog(view), "the settings dialog");
+  assert.equal(previewMenu(view), null, "the panel gives way to settings");
+  click(view, byText(dialog, "button", "Cancel")[0]);
+  assert.equal(view.document.activeElement, view.document.querySelector('[data-testid="share"]'));
 });
 
 test("every settings input is named by its label", async (t) => {

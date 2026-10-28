@@ -67,45 +67,5 @@ function tdsSharedSurfaceCss() {
       color: rgb(var(--tds-text));
       font-family: ${TDS_FONT};
     }
-    .${SETTINGS_CLASS}__hint,
-    .${SETTINGS_CLASS}__card-id,
-    .${SETTINGS_CLASS}__empty,
-    .${SETTINGS_CLASS}__field label {
-      color: rgb(var(--tds-subtle));
-    }
-    .${SETTINGS_CLASS}__close:hover,
-    .${SETTINGS_CLASS}__btn--ghost:hover {
-      background: rgb(var(--tds-blue) / 0.1);
-    }
-    .${SETTINGS_CLASS}__header,
-    .${SETTINGS_CLASS}__footer,
-    .${SETTINGS_CLASS}__card {
-      border-color: rgb(var(--tds-border));
-    }
-    .${SETTINGS_CLASS}__field input {
-      background: rgb(var(--tds-surface));
-      border: 1px solid rgb(var(--tds-border));
-      color: rgb(var(--tds-text));
-    }
-    .${SETTINGS_CLASS}__field input::placeholder {
-      color: rgb(var(--tds-subtle));
-    }
-    .${SETTINGS_CLASS}__field input:focus {
-      border-color: rgb(var(--tds-blue));
-      outline: none;
-    }
-    .${SETTINGS_CLASS}__remove {
-      color: rgb(var(--tds-red));
-    }
-    .${SETTINGS_CLASS}__remove:hover {
-      background: rgb(var(--tds-red) / 0.1);
-    }
-    .${SETTINGS_CLASS}__btn--primary {
-      background: rgb(var(--tds-blue));
-      color: #fff;
-    }
-    .${SETTINGS_CLASS}__btn--primary:hover {
-      background: rgb(var(--tds-blue) / 0.85);
-    }
   `;
 }

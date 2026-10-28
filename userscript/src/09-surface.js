@@ -139,7 +139,8 @@ function closeDestinationMenu() {
 }
 
 const PANEL_MARGIN = 8;
-const SHEET_MAX_WIDTH = 500;
+const NARROW_VIEWPORT_WIDTH = 500;
+const NARROW_VIEWPORT_MEDIA = `(max-width: ${NARROW_VIEWPORT_WIDTH - 0.02}px)`;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(value, max));
@@ -147,7 +148,7 @@ function clamp(value, min, max) {
 
 // Rects and sizes are in viewport pixels; maxHeight caps the panel so only its preview scrolls.
 function placePanel({ anchorRect, panelSize, viewport }) {
-  if (viewport.width < SHEET_MAX_WIDTH) {
+  if (viewport.width < NARROW_VIEWPORT_WIDTH) {
     const maxHeight = Math.round(viewport.height * 0.85);
     return { mode: "sheet", top: Math.round(viewport.height - Math.min(panelSize.height, maxHeight)), left: 0, maxHeight };
   }

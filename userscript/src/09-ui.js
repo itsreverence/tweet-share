@@ -45,7 +45,7 @@ async function startDiscordShare(article, anchor) {
   const [destinations, preferences] = await Promise.all([getDestinations(), loadPreferences()]);
   if (destinations.length === 0) {
     closeXOverlay();
-    openSettingsModal();
+    openSettingsModal(anchor);
     return;
   }
 

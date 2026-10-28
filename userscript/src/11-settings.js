@@ -1,10 +1,15 @@
-async function openSettingsModal() {
+async function openSettingsModal(returnFocusTo = document.activeElement) {
   closeDestinationMenu();
   if (document.querySelector(`.${SETTINGS_CLASS}__backdrop`)) return;
   injectSettingsStyles();
 
   let destinations = [...(await loadAllDestinations())];
-  let preferences = await loadPreferences();
+  const preferences = await loadPreferences();
+  // One channel form is open at a time; the Add form is forced open while there are no channels.
+  let editingId = null;
+  let addForm = "collapsed";
+  let rows = new Map();
+
   const backdrop = document.createElement("div");
   backdrop.className = `${SETTINGS_CLASS}__backdrop`;
 
@@ -14,6 +19,7 @@ async function openSettingsModal() {
   dialog.setAttribute("role", "dialog");
   dialog.setAttribute("aria-modal", "true");
   dialog.setAttribute("aria-label", "Tweet Discord Share settings");
+  dialog.tabIndex = -1;
 
   const header = document.createElement("div");
   header.className = `${SETTINGS_CLASS}__header`;
@@ -30,103 +36,42 @@ async function openSettingsModal() {
   const body = document.createElement("div");
   body.className = `${SETTINGS_CLASS}__body`;
 
-  const sharingTitle = document.createElement("h3");
-  sharingTitle.className = `${SETTINGS_CLASS}__section-title`;
-  sharingTitle.textContent = "Sharing";
-
-  const previewOption = createSettingsOption(
-    "Always show preview before sending",
-    "Turn off to send instantly when you have one channel and the post has no quote.",
-    preferences.alwaysShowPreview
-  );
-  previewOption.input.addEventListener("change", () => {
-    preferences.alwaysShowPreview = previewOption.input.checked;
-  });
-
-  const sharingCard = document.createElement("div");
-  sharingCard.className = `${SETTINGS_CLASS}__card`;
-  sharingCard.append(sharingTitle, previewOption.option);
-  body.append(sharingCard);
-
+  const channelsSection = document.createElement("section");
+  channelsSection.className = `${SETTINGS_CLASS}__section`;
   const channelsTitle = document.createElement("h3");
   channelsTitle.className = `${SETTINGS_CLASS}__section-title`;
+  channelsTitle.id = nextSettingsId();
   channelsTitle.textContent = "Discord channels";
+  const channelCount = document.createElement("span");
+  channelCount.className = `${SETTINGS_CLASS}__count`;
+  channelCount.setAttribute("aria-hidden", "true");
+  channelsTitle.append(channelCount);
 
-  const hint = document.createElement("p");
-  hint.className = `${SETTINGS_CLASS}__hint`;
-  hint.textContent = "Channels and preferences are saved in Violentmonkey (or Tampermonkey) and persist across script updates — do not put webhook URLs in the script source. Treat webhook URLs like passwords.";
-  body.append(channelsTitle, hint);
-
-  const listEl = document.createElement("div");
+  const emptyState = createSettingsEmptyState();
+  const listEl = document.createElement("ul");
   listEl.className = `${SETTINGS_CLASS}__list`;
-  body.append(listEl);
+  listEl.setAttribute("aria-labelledby", channelsTitle.id);
 
-  function renderList() {
-    listEl.replaceChildren();
-    if (destinations.length === 0) {
-      listEl.append(createSettingsEmptyState());
-      return;
-    }
-
-    destinations.forEach((destination, index) => {
-      const card = document.createElement("div");
-      card.className = `${SETTINGS_CLASS}__card`;
-
-      const head = document.createElement("div");
-      head.className = `${SETTINGS_CLASS}__card-head`;
-
-      const meta = document.createElement("div");
-      const titleEl = document.createElement("div");
-      titleEl.className = `${SETTINGS_CLASS}__card-title`;
-      titleEl.textContent = destination.label;
-      const idEl = document.createElement("div");
-      idEl.className = `${SETTINGS_CLASS}__card-id`;
-      idEl.textContent = destination.id;
-      meta.append(titleEl, idEl);
-
-      const removeBtn = document.createElement("button");
-      removeBtn.type = "button";
-      removeBtn.className = `${SETTINGS_CLASS}__remove`;
-      removeBtn.textContent = "Remove";
-      removeBtn.addEventListener("click", () => {
-        destinations = destinations.filter((_, itemIndex) => itemIndex !== index);
-        renderList();
-      });
-      head.append(meta, removeBtn);
-
-      const labelInput = document.createElement("input");
-      labelInput.type = "text";
-      labelInput.value = destination.label;
-      labelInput.addEventListener("input", () => {
-        destinations[index].label = labelInput.value;
-      });
-
-      const urlInput = document.createElement("input");
-      urlInput.placeholder = "https://discord.com/api/webhooks/...";
-      urlInput.value = destination.webhookUrl;
-      urlInput.addEventListener("input", () => {
-        destinations[index].webhookUrl = urlInput.value.trim();
-      });
-
-      const actions = document.createElement("div");
-      actions.className = `${SETTINGS_CLASS}__card-actions`;
-      actions.append(createTestWebhookButton(() => destinations[index]?.webhookUrl || urlInput.value));
-
-      card.append(
-        head,
-        createSettingsField("Display name", labelInput),
-        createWebhookUrlField(urlInput),
-        actions
-      );
-      listEl.append(card);
-    });
-  }
-
-  const addSection = document.createElement("div");
-  addSection.className = `${SETTINGS_CLASS}__card`;
+  const addCard = document.createElement("div");
+  addCard.className = `${SETTINGS_CLASS}__card`;
+  addCard.id = nextSettingsId();
+  addCard.setAttribute("role", "group");
   const addTitleEl = document.createElement("div");
   addTitleEl.className = `${SETTINGS_CLASS}__card-title`;
+  addTitleEl.id = nextSettingsId();
   addTitleEl.textContent = "Add channel";
+  addCard.setAttribute("aria-labelledby", addTitleEl.id);
+
+  const addToggle = document.createElement("button");
+  addToggle.type = "button";
+  addToggle.className = `${SETTINGS_CLASS}__add-toggle`;
+  addToggle.textContent = "+ Add channel";
+  addToggle.setAttribute("aria-controls", addCard.id);
+  addToggle.addEventListener("click", () => {
+    addForm = "open";
+    render();
+    newLabelInput.focus();
+  });
 
   const newLabelInput = document.createElement("input");
   newLabelInput.type = "text";
@@ -135,10 +80,6 @@ async function openSettingsModal() {
   const newUrlInput = document.createElement("input");
   newUrlInput.placeholder = "https://discord.com/api/webhooks/...";
 
-  const addBtn = document.createElement("button");
-  addBtn.type = "button";
-  addBtn.className = `${SETTINGS_CLASS}__btn ${SETTINGS_CLASS}__btn--ghost`;
-  addBtn.textContent = "Add to list";
   function readPendingChannel() {
     const label = newLabelInput.value.trim();
     const webhookUrl = newUrlInput.value.trim();
@@ -146,62 +87,195 @@ async function openSettingsModal() {
     if (!isValidWebhookUrl(webhookUrl)) return { error: "Enter a valid Discord webhook URL.", input: newUrlInput };
     return { channel: { id: createDestinationId(label, new Set(destinations.map((item) => item.id))), label, webhookUrl } };
   }
+
+  function collapseAddForm() {
+    newLabelInput.value = "";
+    newUrlInput.value = "";
+    addForm = "collapsed";
+    render();
+    addToggle.focus();
+  }
+
+  const addBtn = createSettingsButton("Add to list");
   addBtn.addEventListener("click", () => {
-    const { error, channel } = readPendingChannel();
+    const { error, channel, input } = readPendingChannel();
     if (error) {
       showToast(error, "error");
+      input.focus();
       return;
     }
     destinations.push(channel);
-    newLabelInput.value = "";
-    newUrlInput.value = "";
-    renderList();
+    collapseAddForm();
   });
+  const discardBtn = createSettingsButton("Discard", "ghost");
+  discardBtn.addEventListener("click", collapseAddForm);
 
   const addActions = document.createElement("div");
-  addActions.className = `${SETTINGS_CLASS}__card-actions`;
-  addActions.append(addBtn, createTestWebhookButton(() => newUrlInput.value));
-
-  addSection.append(
+  addActions.className = `${SETTINGS_CLASS}__actions`;
+  addActions.append(addBtn, createTestWebhookButton(() => newUrlInput.value), discardBtn);
+  addCard.append(
     addTitleEl,
     createSettingsField("Display name", newLabelInput),
     createWebhookUrlField(newUrlInput),
     addActions
   );
-  body.append(addSection);
+  channelsSection.append(channelsTitle, emptyState, listEl, addToggle, addCard);
+
+  const sharingSection = document.createElement("section");
+  sharingSection.className = `${SETTINGS_CLASS}__section`;
+  const sharingTitle = document.createElement("h3");
+  sharingTitle.className = `${SETTINGS_CLASS}__section-title`;
+  sharingTitle.textContent = "Sharing";
+  const previewOption = createSettingsOption(
+    "Always show preview before sending",
+    "Off: one channel and no quoted post sends right away. The share panel opens with the preview collapsed.",
+    preferences.alwaysShowPreview
+  );
+  previewOption.input.addEventListener("change", () => {
+    preferences.alwaysShowPreview = previewOption.input.checked;
+  });
+  sharingSection.append(sharingTitle, previewOption.option);
+
+  const hint = document.createElement("p");
+  hint.className = `${SETTINGS_CLASS}__hint`;
+  hint.textContent = "Channels are stored only in Violentmonkey or Tampermonkey and survive script updates. Treat webhook URLs like passwords: anyone with one can post to that channel.";
+  body.append(channelsSection, sharingSection, hint);
+
+  function createChannelRow(destination) {
+    const element = document.createElement("li");
+    element.className = `${SETTINGS_CLASS}__row`;
+
+    const main = document.createElement("div");
+    main.className = `${SETTINGS_CLASS}__row-main`;
+    let avatar = createChannelAvatar(destination);
+    const text = document.createElement("div");
+    text.className = `${SETTINGS_CLASS}__row-text`;
+    const title = document.createElement("div");
+    title.className = `${SETTINGS_CLASS}__row-title`;
+    title.id = nextSettingsId();
+    const status = document.createElement("div");
+    status.className = `${SETTINGS_CLASS}__row-status`;
+    text.append(title, status);
+
+    function refresh() {
+      const label = destination.label.trim();
+      const valid = Boolean(sanitizeDestination(destination));
+      title.textContent = label || "Untitled channel";
+      status.textContent = valid ? "Webhook saved" : label ? "Needs a valid webhook URL" : "Needs a display name";
+      status.dataset.invalid = String(!valid);
+      const freshAvatar = createChannelAvatar(destination);
+      avatar.replaceWith(freshAvatar);
+      avatar = freshAvatar;
+    }
+
+    const editRegion = document.createElement("div");
+    editRegion.className = `${SETTINGS_CLASS}__row-edit`;
+    editRegion.id = nextSettingsId();
+
+    const editBtn = createSettingsButton("Edit");
+    editBtn.setAttribute("aria-controls", editRegion.id);
+    editBtn.setAttribute("aria-describedby", title.id);
+    editBtn.addEventListener("click", () => {
+      const opening = editingId !== destination.id;
+      editingId = opening ? destination.id : null;
+      render();
+      (opening ? labelInput : editBtn).focus();
+    });
+
+    function setEditing(open) {
+      editRegion.hidden = !open;
+      editBtn.textContent = open ? "Done" : "Edit";
+      editBtn.setAttribute("aria-expanded", String(open));
+    }
+
+    const removeBtn = createSettingsButton("Remove", "danger");
+    removeBtn.setAttribute("aria-describedby", title.id);
+    removeBtn.addEventListener("click", () => {
+      destinations = destinations.filter((item) => item !== destination);
+      if (editingId === destination.id) editingId = null;
+      render();
+      (listEl.querySelector("button") || newLabelInput).focus();
+    });
+
+    const actions = document.createElement("div");
+    actions.className = `${SETTINGS_CLASS}__actions`;
+    actions.append(editBtn, removeBtn);
+    main.append(avatar, text, actions);
+
+    const labelInput = document.createElement("input");
+    labelInput.type = "text";
+    labelInput.value = destination.label;
+    labelInput.addEventListener("input", () => {
+      destination.label = labelInput.value;
+      refresh();
+    });
+
+    const urlInput = document.createElement("input");
+    urlInput.placeholder = "https://discord.com/api/webhooks/...";
+    urlInput.value = destination.webhookUrl;
+    urlInput.addEventListener("input", () => {
+      destination.webhookUrl = urlInput.value.trim();
+      refresh();
+    });
+
+    const editActions = document.createElement("div");
+    editActions.className = `${SETTINGS_CLASS}__actions`;
+    editActions.append(createTestWebhookButton(() => destination.webhookUrl));
+    editRegion.append(
+      createSettingsField("Display name", labelInput),
+      createWebhookUrlField(urlInput),
+      editActions
+    );
+
+    refresh();
+    element.append(main, editRegion);
+    return { element, labelInput, urlInput, setEditing };
+  }
+
+  function render() {
+    rows = new Map(destinations.map((destination) => [destination, rows.get(destination) ?? createChannelRow(destination)]));
+    listEl.replaceChildren(...[...rows.values()].map((row) => row.element));
+    for (const [destination, row] of rows) row.setEditing(destination.id === editingId);
+    listEl.hidden = destinations.length === 0;
+    emptyState.hidden = destinations.length > 0;
+    channelCount.textContent = destinations.length ? String(destinations.length) : "";
+
+    const addOpen = addForm === "open" || destinations.length === 0;
+    addCard.hidden = !addOpen;
+    addToggle.hidden = addOpen;
+    addToggle.setAttribute("aria-expanded", String(addOpen));
+    discardBtn.hidden = destinations.length === 0;
+  }
 
   const footer = document.createElement("div");
   footer.className = `${SETTINGS_CLASS}__footer`;
 
-  const cancelBtn = document.createElement("button");
-  cancelBtn.type = "button";
-  cancelBtn.className = `${SETTINGS_CLASS}__btn ${SETTINGS_CLASS}__btn--ghost`;
-  cancelBtn.textContent = "Cancel";
+  const cancelBtn = createSettingsButton("Cancel", "ghost");
   cancelBtn.addEventListener("click", closeSettingsModal);
 
-  const saveBtn = document.createElement("button");
-  saveBtn.type = "button";
-  saveBtn.className = `${SETTINGS_CLASS}__btn ${SETTINGS_CLASS}__btn--primary`;
-  saveBtn.textContent = "Save";
+  const saveBtn = createSettingsButton("Save", "primary");
   saveBtn.addEventListener("click", async () => {
+    // The Add form only collapses once cleared, so a pending channel is always visible here.
     const pending = newLabelInput.value.trim() || newUrlInput.value.trim() ? readPendingChannel() : {};
     if (pending.error) {
       showToast(`${pending.error} Finish or clear the Add channel form before saving.`, "error");
       pending.input.focus();
       return;
     }
-    const candidates = pending.channel ? [...destinations, pending.channel] : destinations;
-    const sanitized = sanitizeDestinations(candidates);
-    if (sanitized.length === 0 && candidates.length > 0) {
-      showToast("Fix invalid names or webhook URLs before saving.", "error");
-      return;
-    }
-    if (sanitized.length !== candidates.length) {
+    const invalid = destinations.find((destination) => !sanitizeDestination(destination));
+    if (invalid) {
       showToast("Fix invalid channel names or webhook URLs before saving.", "error");
+      editingId = invalid.id;
+      render();
+      const row = rows.get(invalid);
+      (invalid.label.trim() ? row.urlInput : row.labelInput).focus();
       return;
     }
     try {
-      await Promise.all([saveAllDestinations(sanitized), savePreferences(preferences)]);
+      await Promise.all([
+        saveAllDestinations(pending.channel ? [...destinations, pending.channel] : destinations),
+        savePreferences(preferences)
+      ]);
       showToast("Settings saved.", "success");
       closeSettingsModal();
       refreshShareButtons();
@@ -217,19 +291,22 @@ async function openSettingsModal() {
     if (event.target === backdrop) closeSettingsModal();
   });
 
-  const onEscape = (event) => {
+  const onKeyDown = (event) => {
     if (event.key === "Escape") {
       closeSettingsModal();
+    } else if (event.key === "Tab") {
+      trapFocus(dialog, event);
     }
   };
   settingsModalCleanup = () => {
-    document.removeEventListener("keydown", onEscape);
+    document.removeEventListener("keydown", onKeyDown);
+    if (returnFocusTo?.isConnected) returnFocusTo.focus();
   };
-  document.addEventListener("keydown", onEscape);
+  document.addEventListener("keydown", onKeyDown);
 
   document.body.append(backdrop);
-  renderList();
-  newLabelInput.focus();
+  render();
+  (destinations.length ? dialog : newLabelInput).focus({ preventScroll: true });
 }
 
 function refreshShareButtons() {
