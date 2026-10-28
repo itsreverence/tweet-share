@@ -243,6 +243,10 @@ const tweetWithMarkedQuote = fc
   .map(withDistinctMediaIds)
   .filter((t) => t.quote.text || mediaItems(t.quote).length > 0);
 const tweetWithShareableImages = tweetOf(twimgImageItem);
+// Extraction sometimes gives the main post a quoted post's photo as well, so a quote can repeat a photo the main post shows.
+const tweetWithRepeatedPhoto = tweetWithShareableImages
+  .filter((t) => Boolean(t.quote) && t.media.some((item) => item.type === "image"))
+  .map((t) => ({ ...t, quote: { ...t.quote, media: [t.media.find((item) => item.type === "image"), ...t.quote.media.slice(0, X_MAX_MEDIA_PER_POST - 1)] } }));
 const options = fc.record({ includeQuote: fc.boolean() }, { requiredKeys: [] });
 const mediaSize = fc.oneof(
   fc.integer({ min: 1, max: 6 * MiB }),
@@ -454,6 +458,39 @@ test("every share carries the main post's text, permalink, and media, and quoted
       for (const item of mediaItems(t.quote)) if (!rendered(item)) missing.push(`quoted media ${item.url}`);
     }
     return report(missing.map((what) => `share is missing ${what}`));
+  });
+});
+
+const attachmentNameOf = (url) => /^attachment:\/\/(.+)$/.exec(url)?.[1];
+const photoKey = (url) => /pbs\.twimg\.com\/media\/([^.?/:]+)/.exec(url)?.[1] ?? url;
+
+test("every photo shows once: an attachment:// image names a file uploaded with that message, and an uploaded photo is never also linked", async () => {
+  await runShare(fc.oneof(tweetWithShareableImages, tweetWithRepeatedPhoto), (t, o, requests) => {
+    const problems = [];
+    const shownAt = new Map();
+    const named = new Set();
+    requests.forEach(({ payload, files }, m) => {
+      const uploaded = new Map(files.map((file) => [file.filename, file.sourceUrl]));
+      (payload.embeds || []).forEach((embed, i) => {
+        const url = embed.image?.url;
+        if (!url) return;
+        const where = `message ${m + 1} embed ${i + 1}`;
+        const name = attachmentNameOf(url);
+        if (name && !uploaded.has(name)) problems.push(`${where} shows ${url}, which is not uploaded with that message`);
+        if (name) named.add(`${m}:${name}`);
+        const key = photoKey(name ? uploaded.get(name) ?? url : url);
+        if (shownAt.has(key)) problems.push(`${where} shows the same photo as ${shownAt.get(key)}`);
+        shownAt.set(key, where);
+      });
+    });
+    // Discord lists an upload that no embed of its message names above the message, so an embed showing it would show it twice.
+    requests.forEach(({ files }, m) => {
+      for (const file of files) {
+        const shown = shownAt.get(photoKey(file.sourceUrl));
+        if (!named.has(`${m}:${file.filename}`) && shown) problems.push(`message ${m + 1} uploads ${file.filename} as a plain attachment, and ${shown} shows it again`);
+      }
+    });
+    return report(problems);
   });
 });
 

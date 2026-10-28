@@ -16,6 +16,7 @@ const PRESERVES = "every share carries the main post's text, permalink, and medi
 const FALLBACK_PRESERVES = "plain-text fallback carries the main post's text and permalink";
 const QUOTE_ONLY_WHEN_INCLUDED = "a share carries the quoted post's text and permalink when included, and sends what it would without the quote when excluded";
 const TRUNCATE = "truncate(value, limit) returns at most limit characters for limits from 3 to 4096";
+const PHOTO_ONCE = "every photo shows once: an attachment:// image names a file uploaded with that message, and an uploaded photo is never also linked";
 
 const mutants = [
   {
@@ -123,6 +124,50 @@ const mutants = [
     find: "return [first, ...photos, ...rest];",
     replace: "return [first, ...rest];",
     expect: PRESERVES
+  },
+  {
+    name: "a later message names an attachment:// file that only the first message uploads",
+    file: "05-format-discord.js",
+    find: "messages: [firstWithUploads, ...later],",
+    replace:
+      "messages: [firstWithUploads, ...later.map((group) => group.map((embed) => {\n" +
+      "      const file = fileFor(embed.image?.url);\n" +
+      "      return file ? { ...embed, image: { url: `attachment://${file.filename}` } } : embed;\n" +
+      "    }))],",
+    expect: PHOTO_ONCE
+  },
+  {
+    name: "the first message keeps a photo's link although it uploads the file",
+    file: "05-format-discord.js",
+    find: "return file ? { ...embed, image: { url: `attachment://${file.filename}` } } : embed;",
+    replace: "return embed;",
+    expect: PHOTO_ONCE
+  },
+  {
+    name: "a file whose photo a later message links still uploads with the first",
+    file: "05-format-discord.js",
+    find: "files: attachments.filter((file) => !linkedLater.has(file)).map((file) => file.filename)",
+    replace: "files: attachments.map((file) => file.filename)",
+    expect: PHOTO_ONCE
+  },
+  {
+    name: "a quote card repeats a photo the main card already shows",
+    file: "05-format-discord.js",
+    find: "const quoteImages = cardPhotoUrls(tweet.quote, images);",
+    replace: "const quoteImages = cardPhotoUrls(tweet.quote);",
+    expect: PHOTO_ONCE
+  },
+  {
+    name: "a quote card drops every link to the quoted post",
+    file: "05-format-discord.js",
+    edits: [
+      [
+        "author: isQuote ? embedAuthorBlock(post, `Quoting ${label}`, post.url) : embedAuthorBlock(post, label, profileUrl),",
+        "author: isQuote ? embedAuthorBlock(post, `Quoting ${label}`) : embedAuthorBlock(post, label, profileUrl),"
+      ],
+      ["url: post.url || \"\"", "url: isQuote ? \"\" : post.url || \"\""]
+    ],
+    expect: QUOTE_ONLY_WHEN_INCLUDED
   },
   {
     name: "embed descriptions strip spaces from the main text",
