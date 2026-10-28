@@ -143,7 +143,8 @@ function trapFocus(dialog, event) {
 }
 
 // A channel's summary row and its inline edit form. Edits write straight to `destination`.
-function createChannelRow(destination, { onToggleEdit, onRemove }) {
+// savedWebhookUrl is the URL storage holds for this channel, if any.
+function createChannelRow(destination, { savedWebhookUrl, onToggleEdit, onRemove }) {
   const element = document.createElement("li");
   element.className = `${SETTINGS_CLASS}__row`;
 
@@ -163,7 +164,8 @@ function createChannelRow(destination, { onToggleEdit, onRemove }) {
     const label = destination.label.trim();
     const valid = Boolean(sanitizeDestination(destination));
     title.textContent = label || "Untitled channel";
-    status.textContent = valid ? "Webhook saved" : label ? "Needs a valid webhook URL" : "Needs a display name";
+    if (valid) status.textContent = destination.webhookUrl === savedWebhookUrl ? "Webhook saved" : "Not saved yet";
+    else status.textContent = label ? "Needs a valid webhook URL" : "Needs a display name";
     status.dataset.invalid = String(!valid);
     const freshAvatar = createChannelAvatar(destination);
     avatar.replaceWith(freshAvatar);

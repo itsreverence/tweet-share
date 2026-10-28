@@ -717,6 +717,35 @@ test("settings list each channel as a row with its name and webhook status, with
   assert.ok(!dialog.textContent.includes("chan-7f3a"), "the internal channel id is not shown");
 });
 
+test("a channel's row says Not saved yet until its webhook is stored, and Webhook saved after Save", async (t) => {
+  const view = openPage(t, { destinations: [general] });
+  const rowText = (dialog, name) =>
+    visibleText(editButtons(dialog).find((button) => accessibleDescription(button) === name).closest("li"));
+
+  const dialog = await openSettings(view);
+  assert.match(rowText(dialog, "General"), /Webhook saved/, "a stored channel says its webhook is saved");
+  const addCard = expandAddChannel(view, dialog);
+  type(view, fieldInput(addCard, "Display name"), "Friends");
+  type(view, fieldInput(addCard, "Webhook URL"), friendsWebhookUrl);
+  click(view, byText(addCard, "button", "Add to list")[0]);
+  assert.match(rowText(dialog, "Friends"), /Not saved yet/, "a channel added to the list is not saved yet");
+  assert.doesNotMatch(rowText(dialog, "Friends"), /Webhook saved/);
+
+  const generalForm = editChannel(view, dialog, "General");
+  type(view, fieldInput(generalForm, "Webhook URL"), friendsWebhookUrl);
+  assert.match(rowText(dialog, "General"), /Not saved yet/, "a changed webhook URL is not saved yet");
+  type(view, fieldInput(generalForm, "Webhook URL"), webhookUrl);
+  assert.match(rowText(dialog, "General"), /Webhook saved/, "restoring the stored URL says saved again");
+  type(view, fieldInput(generalForm, "Display name"), "Renamed");
+  assert.match(rowText(dialog, "Renamed"), /Webhook saved/, "a rename leaves the stored webhook saved");
+
+  click(view, byText(dialog, "button", "Save")[0]);
+  await waitFor(() => toast(view, "success"), "the Settings saved toast");
+  const reopened = await openSettings(view);
+  assert.match(rowText(reopened, "Renamed"), /Webhook saved/);
+  assert.match(rowText(reopened, "Friends"), /Webhook saved/, "once saved, the added channel says so");
+});
+
 test("Edit opens one channel's form inline and becomes Done, and Done closes it", async (t) => {
   const view = openPage(t, { destinations: [general, friends] });
   const dialog = await openSettings(view);

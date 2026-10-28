@@ -3346,7 +3346,8 @@ function trapFocus(dialog, event) {
 }
 
 // A channel's summary row and its inline edit form. Edits write straight to `destination`.
-function createChannelRow(destination, { onToggleEdit, onRemove }) {
+// savedWebhookUrl is the URL storage holds for this channel, if any.
+function createChannelRow(destination, { savedWebhookUrl, onToggleEdit, onRemove }) {
   const element = document.createElement("li");
   element.className = `${SETTINGS_CLASS}__row`;
 
@@ -3366,7 +3367,8 @@ function createChannelRow(destination, { onToggleEdit, onRemove }) {
     const label = destination.label.trim();
     const valid = Boolean(sanitizeDestination(destination));
     title.textContent = label || "Untitled channel";
-    status.textContent = valid ? "Webhook saved" : label ? "Needs a valid webhook URL" : "Needs a display name";
+    if (valid) status.textContent = destination.webhookUrl === savedWebhookUrl ? "Webhook saved" : "Not saved yet";
+    else status.textContent = label ? "Needs a valid webhook URL" : "Needs a display name";
     status.dataset.invalid = String(!valid);
     const freshAvatar = createChannelAvatar(destination);
     avatar.replaceWith(freshAvatar);
@@ -3437,6 +3439,7 @@ async function openSettingsModal(returnFocus) {
   injectSettingsStyles();
 
   let destinations = [...(await loadAllDestinations())];
+  const savedWebhookUrls = new Map(destinations.map(({ id, webhookUrl }) => [id, webhookUrl]));
   const preferences = await loadPreferences();
   // One channel form is open at a time; the Add form is forced open while there are no channels.
   let editingId = null;
@@ -3588,6 +3591,7 @@ async function openSettingsModal(returnFocus) {
 
   function render() {
     rows = new Map(destinations.map((destination) => [destination, rows.get(destination) ?? createChannelRow(destination, {
+      savedWebhookUrl: savedWebhookUrls.get(destination.id),
       onToggleEdit: () => toggleEdit(destination),
       onRemove: () => removeChannel(destination)
     })]));

@@ -4,6 +4,7 @@ async function openSettingsModal(returnFocus) {
   injectSettingsStyles();
 
   let destinations = [...(await loadAllDestinations())];
+  const savedWebhookUrls = new Map(destinations.map(({ id, webhookUrl }) => [id, webhookUrl]));
   const preferences = await loadPreferences();
   // One channel form is open at a time; the Add form is forced open while there are no channels.
   let editingId = null;
@@ -155,6 +156,7 @@ async function openSettingsModal(returnFocus) {
 
   function render() {
     rows = new Map(destinations.map((destination) => [destination, rows.get(destination) ?? createChannelRow(destination, {
+      savedWebhookUrl: savedWebhookUrls.get(destination.id),
       onToggleEdit: () => toggleEdit(destination),
       onRemove: () => removeChannel(destination)
     })]));
