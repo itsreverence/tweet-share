@@ -365,9 +365,9 @@ test("the preview shows the post link and the quoted-post line on separate lines
 
   const preview = expandPreview(view, await openPreview(view));
   const lines = renderedLines(view, preview);
-  assert.ok(lines.includes(postUrl), `the post URL is a line of its own in ${JSON.stringify(lines)}`);
+  assert.ok(lines.some((line) => line === postUrl), `the post URL is a line of its own in ${JSON.stringify(lines)}`);
   assert.ok(
-    lines.includes("↳ 📑 Quoted post: https://x.com/bob/status/999"),
+    lines.some((line) => line === "↳ 📑 Quoted post: https://x.com/bob/status/999"),
     `the quoted-post line is a line of its own in ${JSON.stringify(lines)}`
   );
   assert.ok(preview.querySelector(`a[href="${postUrl}"]`), "the post URL is a link");
