@@ -1963,6 +1963,7 @@ function positionPopover(panel, anchor) {
 }
 
 // Everything the open panel listens to outside itself is added here and removed by close().
+// It re-places itself whenever the viewport changes size or orientation.
 // Escape is the panel's only while focus is in it, on its Share button, or nowhere, so Escape elsewhere on X is left alone.
 function showPanel(panel, { anchor, returnFocus }) {
   closeDestinationMenu();
@@ -1979,8 +1980,11 @@ function showPanel(panel, { anchor, returnFocus }) {
   };
   const listeners = [
     [document, "keydown", onKeyDown, false],
-    [document, "pointerdown", onPointerDown, true]
-  ];
+    [document, "pointerdown", onPointerDown, true],
+    [window, "resize", place, false],
+    [window, "orientationchange", place, false],
+    [window.visualViewport, "resize", place, false]
+  ].filter(([target]) => target);
 
   function close() {
     for (const [target, type, listener, capture] of listeners) target.removeEventListener(type, listener, capture);
