@@ -606,6 +606,30 @@ test("Escape after Shift+Tab out of the panel belongs to what has focus", async 
   assert.equal(sharePanel(view), menu, "the panel stays open until dismissed from inside or by a click outside");
 });
 
+test("typing in X's composer while the panel is open costs the page no search for the post", async (t) => {
+  const view = openPage(t, { destinations: [general, friends] });
+  const composer = addComposer(view);
+  await openPreview(view);
+  composer.focus();
+  // With the post re-rendered, finding its Share button again means searching the page.
+  const article = view.document.querySelector("article");
+  article.replaceWith(article.cloneNode(true));
+  let searches = 0;
+  for (const owner of [view.window.Document.prototype, view.window.Element.prototype]) {
+    const querySelectorAll = owner.querySelectorAll;
+    owner.querySelectorAll = function (...args) {
+      searches += 1;
+      return querySelectorAll.apply(this, args);
+    };
+  }
+
+  for (const key of ["a", "j", "Shift", "Enter"]) press(view, key);
+  assert.equal(searches, 0, "keys other than Escape search nothing");
+  press(view, "Escape");
+  assert.ok(searches > 0, "Escape does look for the post's Share button, to tell whether it owns the key");
+  assert.equal(view.document.activeElement, composer, "Escape in the composer stays the composer's");
+});
+
 for (const [how, dismiss] of [
   ["pressing Escape", (view) => view.document.dispatchEvent(new view.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }))],
   ["clicking outside", (view) => view.document.querySelector("main").dispatchEvent(new view.window.PointerEvent("pointerdown", { bubbles: true }))]

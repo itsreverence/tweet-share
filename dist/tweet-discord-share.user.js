@@ -1970,10 +1970,9 @@ function showPanel(panel, { findAnchor, returnFocus }) {
     anchorRect = findAnchor()?.getBoundingClientRect() ?? anchorRect;
     positionPopover(panel, anchorRect);
   };
+  const ownsFocus = (node) => node === document.body || panel.contains(node) || node === findAnchor();
   const onKeyDown = (event) => {
-    const focus = document.activeElement;
-    const ownsFocus = panel.contains(focus) || focus === findAnchor() || focus === document.body;
-    if (event.key !== "Escape" || event.defaultPrevented || !ownsFocus) return;
+    if (event.key !== "Escape" || event.defaultPrevented || !ownsFocus(document.activeElement)) return;
     close();
     returnFocus();
   };
