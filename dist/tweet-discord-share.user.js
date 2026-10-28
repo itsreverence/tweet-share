@@ -1992,9 +1992,11 @@ function placePanel({ anchorRect, panelSize, viewport }) {
   return { mode, top: Math.round(top), left: Math.round(left), maxHeight };
 }
 
+// The panel is measured with none of a sheet's styles, which change its width and border.
 function positionPopover(panel, anchorRect) {
   panel.style.maxHeight = "";
   panel.style.width = "";
+  panel.classList.remove(`${POPOVER_CLASS}--sheet`);
   if (!panel.isConnected) {
     document.body.append(panel);
   }
