@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweet Discord Share
 // @namespace    https://github.com/itsreverence/tweet-share
-// @version      0.6.34
+// @version      0.6.35
 // @description  Share X/Twitter posts to Discord channels via webhooks (no server required).
 // @homepageURL  https://github.com/itsreverence/tweet-share
 // @supportURL   https://github.com/itsreverence/tweet-share/issues
@@ -942,18 +942,14 @@ function buildInlineQuoteFields(tweet) {
   if (!quote) return [];
 
   const username = quote.author?.username ? `@${quote.author.username}` : "unknown";
-  const fields = [];
   const quoteBody = formatQuoteFieldValue(quote.text);
-  if (quoteBody) {
-    fields.push({
-      name: truncate(`Quoted post from ${username}`, DISCORD_EMBED_LIMITS.fieldName),
-      value: quoteBody,
-      inline: false
-    });
-  }
-  const originalField = permalinkField("Original post", tweet.url);
-  if (originalField) fields.push(originalField);
-  return fields;
+  if (!quoteBody) return [];
+
+  return [{
+    name: truncate(`Quoted post from ${username}`, DISCORD_EMBED_LIMITS.fieldName),
+    value: quoteBody,
+    inline: false
+  }];
 }
 
 function buildShareContentLines(tweet, shareOptions = {}) {
