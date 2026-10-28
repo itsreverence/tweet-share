@@ -2258,7 +2258,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
       attachmentUrls,
       fallbackVideoUrls: []
     });
-    previewWrap.replaceChildren(renderDiscordPreview(payloads, { attachmentCount: attachmentUrls.length }));
+    previewWrap.replaceChildren(renderDiscordPreview(payloads, { attachmentUrls }));
     summary.textContent = describeShare(preparedTweet, options, payloads.length);
     lifecycle.place();
   }
@@ -4016,10 +4016,12 @@ function renderDiscordPreview(payloads, options = {}) {
     host.append(createPreviewMessage(payload, index, list.length));
   });
 
-  if (options.attachmentCount) {
+  const attachmentUrls = options.attachmentUrls || [];
+  if (attachmentUrls.length) {
     const hint = document.createElement("div");
     hint.className = `${PREVIEW_CLASS}__attachment-hint`;
-    hint.textContent = `${mediaFileCount(options.attachmentCount)} attached on send. Video too large for Discord goes as a link.`;
+    const videoNote = attachmentUrls.some(isPlayableTweetVideoUrl) ? " Video too large for Discord goes as a link." : "";
+    hint.textContent = `${mediaFileCount(attachmentUrls.length)} attached on send.${videoNote}`;
     host.append(hint);
   }
 

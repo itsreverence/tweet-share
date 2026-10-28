@@ -399,6 +399,35 @@ test("the preview shows where masked links in the post and the quote really go, 
   assert.deepEqual(quotes, ["Claim it x.com/rewards (lure.example) today\nSecond line"], "the quoted post's lines sit in one block quote");
 });
 
+const videoMarkup = '<div data-testid="videoPlayer"><video src="https://video.twimg.com/ext_tw_video/1/pu/vid/720x1280/smoke.mp4"></video></div>';
+const attachmentHint = (preview) => [...preview.querySelectorAll("*")].find((node) => node.children.length === 0 && /attached on send/.test(node.textContent))?.textContent;
+
+for (const [what, setUp, says, hint] of [
+  ["a post with only a photo", () => {}, "leaves video out", "1 media file attached on send."],
+  ["a post with a video", ({ document }) => {
+    document.querySelector('[data-testid="tweetPhoto"]').insertAdjacentHTML("afterend", videoMarkup);
+  }, "says a large video goes as a link", "2 media files attached on send. Video too large for Discord goes as a link."]
+]) {
+  test(`the preview's attachment note for ${what} ${says}`, async (t) => {
+    const view = openPage(t, { destinations: [general, friends] });
+    setUp(view);
+    const preview = expandPreview(view, await openPreview(view));
+
+    assert.equal(attachmentHint(preview), hint);
+  });
+}
+
+test("the video note follows the quote toggle when only the quoted post has a video", async (t) => {
+  const view = openPage(t, { destinations: [general, friends], quote: true });
+  view.document.querySelector('[role="link"] [data-testid="tweetText"]').insertAdjacentHTML("afterend", videoMarkup);
+  const menu = await openPreview(view);
+  const preview = expandPreview(view, menu);
+  assert.match(attachmentHint(preview), /Video too large for Discord goes as a link\.$/, "with the quote included, its video is attached");
+
+  click(view, byText(menu, "label", "Include quoted post")[0].querySelector("input"));
+  assert.equal(attachmentHint(preview), "1 media file attached on send.", "without the quote, only the photo is attached");
+});
+
 test("the preview starts collapsed unless Always show preview is on", async (t) => {
   for (const alwaysShowPreview of [false, true]) {
     const view = openPage(t, {

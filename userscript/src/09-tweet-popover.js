@@ -190,7 +190,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
       attachmentUrls,
       fallbackVideoUrls: []
     });
-    previewWrap.replaceChildren(renderDiscordPreview(payloads, { attachmentCount: attachmentUrls.length }));
+    previewWrap.replaceChildren(renderDiscordPreview(payloads, { attachmentUrls }));
     summary.textContent = describeShare(preparedTweet, options, payloads.length);
     lifecycle.place();
   }
