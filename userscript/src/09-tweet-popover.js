@@ -347,29 +347,27 @@ function popoverStylesCss() {
       border-color: rgb(var(--tds-blue));
     }
     .${POPOVER_CLASS}__item[data-default="true"] {
-      background: rgb(var(--tds-blue));
-      border-color: rgb(var(--tds-blue));
+      background: rgb(var(--tds-accent));
+      border-color: rgb(var(--tds-accent));
       color: #fff;
     }
     .${POPOVER_CLASS}__item[data-default="true"]:hover:not(:disabled) {
-      background: rgb(var(--tds-blue) / 0.85);
+      background: linear-gradient(rgb(0 0 0 / 0.1), rgb(0 0 0 / 0.1)) rgb(var(--tds-accent));
+      border-color: rgb(var(--tds-accent));
     }
     .${POPOVER_CLASS}__item:disabled {
       cursor: progress;
       opacity: 0.5;
     }
+    /* The last-used channel is always the default, so the badge only ever sits on the accent fill. */
     .${POPOVER_CLASS}__badge {
-      background: rgb(var(--tds-blue) / 0.15);
+      background: rgb(0 0 0 / 0.2);
       border-radius: 999px;
-      color: rgb(var(--tds-blue));
+      color: #fff;
       flex-shrink: 0;
       font-size: 12px;
       font-weight: 700;
       padding: 3px 8px;
-    }
-    .${POPOVER_CLASS}__item[data-default="true"] .${POPOVER_CLASS}__badge {
-      background: rgb(255 255 255 / 0.2);
-      color: #fff;
     }
     .${POPOVER_CLASS}__item:focus-visible,
     .${POPOVER_CLASS}__icon-btn:focus-visible,

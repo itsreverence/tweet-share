@@ -126,7 +126,7 @@ function injectSettingsStyles() {
       font-size: 13px;
     }
     .${SETTINGS_CLASS}__row-status[data-invalid="true"] {
-      color: rgb(var(--tds-red));
+      color: rgb(var(--tds-danger));
     }
     .${SETTINGS_CLASS}__row-edit {
       background: rgb(var(--tds-raised));
@@ -224,11 +224,11 @@ function injectSettingsStyles() {
       border-color: transparent;
     }
     .${SETTINGS_CLASS}__btn--danger {
-      color: rgb(var(--tds-red));
+      color: rgb(var(--tds-danger));
     }
     .${SETTINGS_CLASS}__btn--danger:hover {
-      background: rgb(var(--tds-red) / 0.1);
-      border-color: rgb(var(--tds-red) / 0.5);
+      background: rgb(var(--tds-danger) / 0.1);
+      border-color: rgb(var(--tds-danger) / 0.5);
     }
     .${SETTINGS_CLASS}__btn:disabled {
       cursor: wait;
@@ -245,7 +245,7 @@ function injectSettingsStyles() {
       background: transparent;
       border: 1px dashed rgb(var(--tds-border));
       border-radius: 12px;
-      color: rgb(var(--tds-blue));
+      color: rgb(var(--tds-link));
       cursor: pointer;
       font: inherit;
       font-size: 15px;
@@ -254,8 +254,8 @@ function injectSettingsStyles() {
       text-align: start;
     }
     .${SETTINGS_CLASS}__add-toggle:hover {
-      background: rgb(var(--tds-blue) / 0.08);
-      border-color: rgb(var(--tds-blue));
+      background: rgb(var(--tds-link) / 0.08);
+      border-color: rgb(var(--tds-link));
     }
     .${SETTINGS_CLASS}__empty {
       background: rgb(var(--tds-raised));

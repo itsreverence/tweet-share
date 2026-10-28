@@ -394,7 +394,7 @@ function previewStylesCss() {
       padding-inline: 4px 0;
     }
     .${PREVIEW_CLASS}__link {
-      color: rgb(var(--tds-blue));
+      color: rgb(var(--tds-link));
       text-decoration: none;
       word-break: break-all;
     }

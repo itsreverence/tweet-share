@@ -41,19 +41,20 @@ test("a black page gets the dark palette", () => {
   assert.equal(theme.shadow, "255 255 255");
 });
 
-test("with nothing to read, the dark palette and X's accents apply", () => {
+test("with nothing to read, the dark palette and X's blue apply", () => {
   assert.deepEqual(resolveTheme({}), resolveTheme({ pageBackground: [0, 0, 0] }));
   const theme = resolveTheme();
-  assert.deepEqual([theme.blue, theme.green, theme.red], ["29 155 240", "0 186 124", "244 33 46"]);
+  assert.equal(theme.blue, "29 155 240");
+  assert.deepEqual([theme.link, theme.danger, theme.success], ["29 155 240", "244 33 46", "0 186 124"], "on black, X's own blue, red, and green are legible as they are");
 });
 
-test("X's text and accent variables refine the palette the page background picks", () => {
+test("X's text and blue variables refine the palette the page background picks", () => {
   const theme = resolveTheme({ variables: { text: "1 2 3", blue: "120 86 255" }, pageBackground: [255, 255, 255] });
   assert.equal(theme.text, "1 2 3", "X's text color is used as is");
-  assert.equal(theme.blue, "120 86 255", "X's accent color is used as is");
+  assert.equal(theme.blue, "120 86 255", "X's blue is used as is for focus rings and borders");
   assert.equal(theme.surface, "255 255 255", "the surface follows the page background");
   assert.equal(theme.border, "207 217 222", "tokens X does not supply come from the light palette");
-  assert.equal(theme.red, "244 33 46");
+  assert.equal(theme.link, "12 113 181", "links take the light palette's deeper blue");
 });
 
 for (const [what, html, palette] of [
@@ -75,11 +76,13 @@ test("the page background picks the palette even when X's background variable di
   assert.equal(theme.border, "56 68 77", "the border comes from the dim palette, not X's variable");
 });
 
-test("X's text and accent variables on the page apply over the palette", (t) => {
+test("X's text and blue variables on the page apply over the palette, and its muted and red ones do not", (t) => {
   const theme = themeOnPage(t, `<html><head><style>
-    :root { --color-text: 1 2 3; --color-text-secondary: 4 5 6; --color-blue: 120 86 255; }
+    :root { --color-text: 1 2 3; --color-text-secondary: 113 118 123; --color-blue: 120 86 255; --color-red: 4 5 6; }
     body { background-color: rgb(0, 0, 0); }
   </style></head><body></body></html>`);
-  assert.deepEqual([theme.text, theme.subtle, theme.blue], ["1 2 3", "4 5 6", "120 86 255"]);
+  assert.deepEqual([theme.text, theme.blue], ["1 2 3", "120 86 255"]);
+  assert.equal(theme.subtle, "125 131 136", "muted text keeps the dark palette's colour, legible on the raised surface");
+  assert.equal(theme.danger, "244 33 46", "red text keeps the dark palette's colour");
   assert.equal(theme.surface, "0 0 0");
 });

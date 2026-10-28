@@ -23,7 +23,6 @@ function injectStyles() {
 
     .${AVATAR_CLASS} {
       align-items: center;
-      background: hsl(var(--tds-hue) 60% 45%);
       border-radius: 10px;
       color: #fff;
       display: inline-flex;
@@ -59,7 +58,7 @@ function injectStyles() {
     }
     .${TOAST_CLASS}::before {
       border-radius: 999px;
-      color: #fff;
+      color: rgb(var(--tds-surface));
       font-size: 12px;
       font-weight: 800;
       height: 18px;
@@ -72,17 +71,17 @@ function injectStyles() {
     }
     /* The "/ ''" alt text keeps the icon glyph out of what screen readers announce. */
     .${TOAST_CLASS}[data-state="success"]::before {
-      background: rgb(var(--tds-green));
+      background: rgb(var(--tds-success));
       content: "✓";
       content: "✓" / "";
     }
     .${TOAST_CLASS}[data-state="error"]::before {
-      background: rgb(var(--tds-red));
+      background: rgb(var(--tds-danger));
       content: "!";
       content: "!" / "";
     }
     .${TOAST_CLASS}[data-state="info"]::before {
-      background: rgb(var(--tds-blue));
+      background: rgb(var(--tds-link));
       content: "…";
       content: "…" / "";
       line-height: 14px;
@@ -248,6 +247,6 @@ function createChannelAvatar(destination) {
   avatar.textContent = firstGrapheme(destination.label.trim())?.toUpperCase() || "#";
   let hash = 0;
   for (const char of destination.id) hash = (hash * 31 + char.codePointAt(0)) >>> 0;
-  avatar.style.setProperty("--tds-hue", String(hash % 360));
+  avatar.style.background = avatarColor(hash % 360);
   return avatar;
 }
