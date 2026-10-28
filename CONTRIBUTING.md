@@ -34,6 +34,8 @@ git diff --check
 
 `npm run check` rebuilds the userscript, checks JavaScript syntax, and verifies that the committed distribution matches the source and `package.json` version.
 
+When changing how shares are formatted for Discord, also run `npm run verify:discord-limits:mutants`. It checks that the Discord limits tests still catch deliberately broken formatting code, and CI does not run it.
+
 Add or update focused tests for behavior changes. Avoid fixtures containing live credentials or private content.
 
 ## Pull requests
