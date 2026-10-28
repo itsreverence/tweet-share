@@ -97,18 +97,23 @@ async function waitFor(condition, what, timeoutMs = 3000) {
   }
 }
 
-function assertInteractable({ window }, node) {
+// jsdom has no layout and fires click on disabled buttons, so this refuses what a user could not reach.
+// Layout (zero size, off screen, covered) is left to the Chromium flow scripts.
+function assertNotHiddenOrDisabled({ window }, node) {
+  const what = `<${node.tagName.toLowerCase()}> "${node.textContent.trim() || node.value}"`;
+  assert.ok(!node.disabled, `${what} is disabled`);
+  assert.equal(node.closest('[inert], [aria-hidden="true"]'), null, `${what} sits in an inert or aria-hidden region`);
   for (let element = node; element; element = element.parentElement) {
     const style = window.getComputedStyle(element);
     assert.ok(
       !element.hidden && style.display !== "none" && style.visibility !== "hidden",
-      `<${node.tagName.toLowerCase()}> "${node.textContent.trim() || node.value}" sits in a collapsed or hidden region; open it first, as a user would`
+      `${what} sits in a collapsed or hidden region; open it first, as a user would`
     );
   }
 }
 
 function click(view, node) {
-  assertInteractable(view, node);
+  assertNotHiddenOrDisabled(view, node);
   node.dispatchEvent(new view.window.MouseEvent("click", { bubbles: true }));
 }
 
@@ -216,7 +221,7 @@ function expandAddChannel(view, dialog) {
 }
 
 function type(view, input, value) {
-  assertInteractable(view, input);
+  assertNotHiddenOrDisabled(view, input);
   input.value = value;
   input.dispatchEvent(new view.window.Event("input", { bubbles: true }));
 }
@@ -225,6 +230,22 @@ async function openSettings(view) {
   view.menuCommands.get("Tweet Discord Share settings…")();
   return waitFor(() => settingsDialog(view), "the settings dialog");
 }
+
+test("the test click refuses disabled, inert, aria-hidden, and collapsed controls", (t) => {
+  const { window } = new JSDOM(`<body>
+    <button id="disabled" disabled>Disabled</button>
+    <div inert><button id="inert">Inert</button></div>
+    <div aria-hidden="true"><button id="aria-hidden">Hidden from AT</button></div>
+    <div hidden><button id="collapsed">Collapsed</button></div>
+    <button id="reachable">Reachable</button>
+  </body>`, { pretendToBeVisual: true });
+  t.after(() => window.close());
+  const view = { window, document: window.document };
+  for (const id of ["disabled", "inert", "aria-hidden", "collapsed"]) {
+    assert.throws(() => click(view, window.document.getElementById(id)), assert.AssertionError, `the ${id} button is refused`);
+  }
+  assert.doesNotThrow(() => click(view, window.document.getElementById("reachable")));
+});
 
 test("sharing to the only destination posts the post to its webhook", async (t) => {
   const view = openPage(t, { destinations: [general] });
@@ -646,9 +667,9 @@ test("with no channels, settings show the setup steps and focus the open Add cha
   const dialog = await openSettings(view);
 
   const steps = leafWithText(dialog, "No channels yet").parentElement;
-  assertInteractable(view, steps);
+  assertNotHiddenOrDisabled(view, steps);
   const addCard = addChannelCard(dialog);
-  assertInteractable(view, addCard);
+  assertNotHiddenOrDisabled(view, addCard);
   assert.equal(byText(dialog, "button", "+ Add channel")[0].hidden, true, "there is nothing to expand");
   assert.equal(view.document.activeElement, fieldInput(addCard, "Display name"), "focus is on the name field");
 });
