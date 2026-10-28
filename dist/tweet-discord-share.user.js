@@ -79,39 +79,63 @@ function trimCache(cache, maxEntries = CACHE_MAX_ENTRIES) {
   }
 }
 
-// X.com exposes RGB tuples on :root (e.g. --color-text: 231 233 234).
+  // --- 00-theme.js ---
+// Colors are RGB tuples ("231 233 234"), the format X publishes on :root (e.g. --color-text).
 const TDS_FONT = 'TwitterChirp, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
 const TDS_RGB_PATTERN = /^\d+\s+\d+\s+\d+$/;
 
-function readXRgb(variableName, fallback) {
-  const value = getComputedStyle(document.documentElement).getPropertyValue(variableName).trim();
-  return TDS_RGB_PATTERN.test(value) ? value : fallback;
+const THEME_PALETTES = {
+  light: { surface: "255 255 255", raised: "247 249 249", text: "15 20 25", subtle: "83 100 113", border: "207 217 222", shadow: "101 119 134" },
+  dim: { surface: "21 32 43", raised: "30 39 50", text: "247 249 249", subtle: "139 152 165", border: "56 68 77", shadow: "255 255 255" },
+  dark: { surface: "0 0 0", raised: "22 24 28", text: "231 233 234", subtle: "113 118 123", border: "47 51 54", shadow: "255 255 255" }
+};
+const THEME_ACCENTS = { blue: "29 155 240", green: "0 186 124", red: "244 33 46" };
+const X_THEME_VARIABLES = {
+  surface: "--color-background",
+  text: "--color-text",
+  subtle: "--color-text-secondary",
+  border: "--color-border",
+  blue: "--color-blue",
+  green: "--color-green",
+  red: "--color-red"
+};
+
+function themeNameForBackground([red, green, blue]) {
+  const luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255;
+  if (luminance > 0.55) return "light";
+  return luminance > 0.06 ? "dim" : "dark";
 }
 
-function subtleTextRgb(backgroundRgb) {
-  const secondary = getComputedStyle(document.documentElement).getPropertyValue("--color-text-secondary").trim();
-  if (TDS_RGB_PATTERN.test(secondary)) return secondary;
+// `variables` holds the X tokens the page defines; `pageBackground` is [r, g, b] or null.
+function resolveTheme({ variables = {}, pageBackground = null } = {}) {
+  const background = variables.surface?.split(/\s+/).map(Number) ?? pageBackground;
+  const palette = THEME_PALETTES[background ? themeNameForBackground(background) : "dark"];
+  return { ...palette, ...THEME_ACCENTS, ...variables };
+}
 
-  const [red, green, blue] = backgroundRgb.split(/\s+/).map(Number);
-  const luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255;
-  return luminance > 0.55 ? "83 100 113" : "113 118 123";
+function pageBackgroundRgb() {
+  for (const node of [document.body, document.documentElement]) {
+    if (!node) continue;
+    const match = /^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)$/.exec(getComputedStyle(node).backgroundColor);
+    if (match && Number(match[4] ?? 1) > 0) return match.slice(1, 4).map(Number);
+  }
+  return null;
+}
+
+function readThemeEnvironment() {
+  const rootStyle = getComputedStyle(document.documentElement);
+  const variables = {};
+  for (const [token, name] of Object.entries(X_THEME_VARIABLES)) {
+    const value = rootStyle.getPropertyValue(name).trim();
+    if (TDS_RGB_PATTERN.test(value)) variables[token] = value;
+  }
+  return { variables, pageBackground: pageBackgroundRgb() };
 }
 
 function applyXThemeVars(element) {
-  const surface = readXRgb("--color-background", "0 0 0");
-  const text = readXRgb("--color-text", "231 233 234");
-  const border = readXRgb("--color-border", "47 51 54");
-  const blue = readXRgb("--color-blue", "29 155 240");
-  const green = readXRgb("--color-green", "0 186 124");
-  const red = readXRgb("--color-red", "244 33 46");
-
-  element.style.setProperty("--tds-surface", surface);
-  element.style.setProperty("--tds-text", text);
-  element.style.setProperty("--tds-subtle", subtleTextRgb(surface));
-  element.style.setProperty("--tds-border", border);
-  element.style.setProperty("--tds-blue", blue);
-  element.style.setProperty("--tds-green", green);
-  element.style.setProperty("--tds-red", red);
+  for (const [token, value] of Object.entries(resolveTheme(readThemeEnvironment()))) {
+    element.style.setProperty(`--tds-${token}`, value);
+  }
 }
 
 function tdsSharedSurfaceCss() {
@@ -119,21 +143,21 @@ function tdsSharedSurfaceCss() {
     .${POPOVER_CLASS},
     .${TOAST_CLASS},
     .${SETTINGS_CLASS}__dialog {
-      background: rgb(var(--tds-surface, 0 0 0));
-      border: 1px solid rgb(var(--tds-border, 47 51 54));
-      color: rgb(var(--tds-text, 231 233 234));
+      background: rgb(var(--tds-surface));
+      border: 1px solid rgb(var(--tds-border));
+      box-shadow: rgb(var(--tds-shadow) / 0.2) 0 0 15px, rgb(var(--tds-shadow) / 0.15) 0 0 3px 1px;
+      color: rgb(var(--tds-text));
       font-family: ${TDS_FONT};
     }
     .${POPOVER_CLASS} {
       border-radius: var(--border-radius-large, 16px);
-      box-shadow: var(--box-shadow-elevated, rgb(101 119 134 / 20%) 0 0 15px);
     }
     .${POPOVER_CLASS}__title,
     .${SETTINGS_CLASS}__hint,
     .${SETTINGS_CLASS}__card-id,
     .${SETTINGS_CLASS}__empty,
     .${SETTINGS_CLASS}__field label {
-      color: rgb(var(--tds-subtle, 113 118 123));
+      color: rgb(var(--tds-subtle));
     }
     .${POPOVER_CLASS}__item:hover,
     .${POPOVER_CLASS}__item:focus-visible,
@@ -141,58 +165,42 @@ function tdsSharedSurfaceCss() {
     .${POPOVER_CLASS}__manage:focus-visible,
     .${SETTINGS_CLASS}__close:hover,
     .${SETTINGS_CLASS}__btn--ghost:hover {
-      background: rgb(var(--tds-blue, 29 155 240) / 0.1);
+      background: rgb(var(--tds-blue) / 0.1);
     }
     .${POPOVER_CLASS}__item[data-last="true"]::after,
     .${POPOVER_CLASS}__manage {
-      color: rgb(var(--tds-blue, 29 155 240));
+      color: rgb(var(--tds-blue));
     }
     .${POPOVER_CLASS}__footer,
     .${SETTINGS_CLASS}__header,
     .${SETTINGS_CLASS}__footer,
     .${SETTINGS_CLASS}__card {
-      border-color: rgb(var(--tds-border, 47 51 54));
-    }
-    .${TOAST_CLASS} {
-      border-radius: var(--border-radius-large, 16px);
-      box-shadow: var(--box-shadow-elevated, rgb(101 119 134 / 20%) 0 0 15px);
-    }
-    .${TOAST_CLASS}[data-state="success"] {
-      border-left: 3px solid rgb(var(--tds-green, 0 186 124));
-    }
-    .${TOAST_CLASS}[data-state="error"] {
-      border-left: 3px solid rgb(var(--tds-red, 244 33 46));
-    }
-    .${TOAST_CLASS}[data-state="info"] {
-      border-left: 3px solid rgb(var(--tds-blue, 29 155 240));
-    }
-    .${SETTINGS_CLASS}__dialog {
-      box-shadow: var(--box-shadow-elevated, rgb(101 119 134 / 20%) 0 0 15px);
+      border-color: rgb(var(--tds-border));
     }
     .${SETTINGS_CLASS}__field input {
-      background: rgb(var(--tds-surface, 0 0 0));
-      border: 1px solid rgb(var(--tds-border, 47 51 54));
-      color: rgb(var(--tds-text, 231 233 234));
+      background: rgb(var(--tds-surface));
+      border: 1px solid rgb(var(--tds-border));
+      color: rgb(var(--tds-text));
     }
     .${SETTINGS_CLASS}__field input::placeholder {
-      color: rgb(var(--tds-subtle, 113 118 123));
+      color: rgb(var(--tds-subtle));
     }
     .${SETTINGS_CLASS}__field input:focus {
-      border-color: rgb(var(--tds-blue, 29 155 240));
+      border-color: rgb(var(--tds-blue));
       outline: none;
     }
     .${SETTINGS_CLASS}__remove {
-      color: rgb(var(--tds-red, 244 33 46));
+      color: rgb(var(--tds-red));
     }
     .${SETTINGS_CLASS}__remove:hover {
-      background: rgb(var(--tds-red, 244 33 46) / 0.1);
+      background: rgb(var(--tds-red) / 0.1);
     }
     .${SETTINGS_CLASS}__btn--primary {
-      background: rgb(var(--tds-blue, 29 155 240));
+      background: rgb(var(--tds-blue));
       color: #fff;
     }
     .${SETTINGS_CLASS}__btn--primary:hover {
-      background: rgb(var(--tds-blue, 29 155 240) / 0.85);
+      background: rgb(var(--tds-blue) / 0.85);
     }
   `;
 }
@@ -1930,14 +1938,44 @@ function injectStyles() {
       max-width: min(360px, calc(100vw - 32px));
     }
     .${TOAST_CLASS} {
-      border-radius: var(--border-radius-large, 16px);
-      border-left-width: 3px;
-      border-left-style: solid;
-      font-size: 15px;
-      line-height: 1.35;
-      padding: 12px 14px;
-      pointer-events: auto;
       animation: tds-toast-in 0.2s ease;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      line-height: 1.35;
+      padding: 12px 14px 12px 40px;
+      pointer-events: auto;
+      position: relative;
+    }
+    .${TOAST_CLASS}::before {
+      border-radius: 999px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 800;
+      height: 18px;
+      left: 12px;
+      line-height: 18px;
+      position: absolute;
+      text-align: center;
+      top: 13px;
+      width: 18px;
+    }
+    /* The "/ ''" alt text keeps the icon glyph out of what screen readers announce. */
+    .${TOAST_CLASS}[data-state="success"]::before {
+      background: rgb(var(--tds-green));
+      content: "✓";
+      content: "✓" / "";
+    }
+    .${TOAST_CLASS}[data-state="error"]::before {
+      background: rgb(var(--tds-red));
+      content: "!";
+      content: "!" / "";
+    }
+    .${TOAST_CLASS}[data-state="info"]::before {
+      background: rgb(var(--tds-blue));
+      content: "…";
+      content: "…" / "";
+      line-height: 14px;
     }
     @keyframes tds-toast-in {
       from { opacity: 0; transform: translateY(8px); }
@@ -2209,10 +2247,12 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
 }
 
   // --- 09-ui.js ---
-// Simple person outline (head + shoulders), readable at menu size.
-const PERSON_ICON_PATHS = [
-  "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2",
-  "M12 11a4 4 0 0 1 0-8 4 4 0 0 1 0 8z",
+// A filled "#" channel glyph, drawn like X's own filled menu icons.
+const CHANNEL_ICON_PATHS = [
+  "M9.1 3.5h2l-2.2 17h-2z",
+  "M15.1 3.5h2l-2.2 17h-2z",
+  "M3.5 8h17v2h-17z",
+  "M3.5 14h17v2h-17z"
 ];
 
 let pendingShareArticle = null;
@@ -2324,44 +2364,18 @@ function findMenuItemLabelElement(item, referenceItem) {
   return itemSpans.find((node) => node.children.length === 0) || itemSpans[0] || null;
 }
 
-function applyPersonIconToSvg(svg, referenceSvg) {
-  const refPath = referenceSvg?.querySelector("path");
-  if (!svg) return false;
+function replaceMenuItemIcon(item) {
+  const svg = item.querySelector("svg");
+  if (!svg) return;
 
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("aria-hidden", "true");
-  svg.replaceChildren();
-
-  for (const d of PERSON_ICON_PATHS) {
+  svg.replaceChildren(...CHANNEL_ICON_PATHS.map((d) => {
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", d);
-    if (refPath) {
-      for (const attr of ["fill", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin"]) {
-        const val = refPath.getAttribute(attr);
-        if (val != null) path.setAttribute(attr, val);
-      }
-    } else {
-      path.setAttribute("fill", "none");
-      path.setAttribute("stroke", "currentColor");
-      path.setAttribute("stroke-width", "2");
-      path.setAttribute("stroke-linecap", "round");
-      path.setAttribute("stroke-linejoin", "round");
-    }
-    svg.append(path);
-  }
-
-  if (referenceSvg) {
-    for (const attr of ["fill", "stroke", "stroke-width"]) {
-      const val = referenceSvg.getAttribute(attr);
-      if (val != null) svg.setAttribute(attr, val);
-    }
-  }
-
-  return true;
-}
-
-function replaceMenuItemIcon(item, referenceItem) {
-  return applyPersonIconToSvg(item.querySelector("svg"), referenceItem?.querySelector("svg"));
+    path.setAttribute("fill", "currentColor");
+    return path;
+  }));
 }
 
 function replaceMenuItemText(item, text, referenceItem) {
@@ -2421,7 +2435,7 @@ function createDiscordMenuItem(template) {
   item.classList.add(SHARE_MENU_ITEM_CLASS);
 
   replaceMenuItemText(item, "Share to Discord", template);
-  replaceMenuItemIcon(item, template);
+  replaceMenuItemIcon(item);
 
   wireDiscordMenuItem(item);
   return item;

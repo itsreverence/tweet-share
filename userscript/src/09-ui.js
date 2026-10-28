@@ -1,7 +1,9 @@
-// Simple person outline (head + shoulders), readable at menu size.
-const PERSON_ICON_PATHS = [
-  "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2",
-  "M12 11a4 4 0 0 1 0-8 4 4 0 0 1 0 8z",
+// A filled "#" channel glyph, drawn like X's own filled menu icons.
+const CHANNEL_ICON_PATHS = [
+  "M9.1 3.5h2l-2.2 17h-2z",
+  "M15.1 3.5h2l-2.2 17h-2z",
+  "M3.5 8h17v2h-17z",
+  "M3.5 14h17v2h-17z"
 ];
 
 let pendingShareArticle = null;
@@ -113,44 +115,18 @@ function findMenuItemLabelElement(item, referenceItem) {
   return itemSpans.find((node) => node.children.length === 0) || itemSpans[0] || null;
 }
 
-function applyPersonIconToSvg(svg, referenceSvg) {
-  const refPath = referenceSvg?.querySelector("path");
-  if (!svg) return false;
+function replaceMenuItemIcon(item) {
+  const svg = item.querySelector("svg");
+  if (!svg) return;
 
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("aria-hidden", "true");
-  svg.replaceChildren();
-
-  for (const d of PERSON_ICON_PATHS) {
+  svg.replaceChildren(...CHANNEL_ICON_PATHS.map((d) => {
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", d);
-    if (refPath) {
-      for (const attr of ["fill", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin"]) {
-        const val = refPath.getAttribute(attr);
-        if (val != null) path.setAttribute(attr, val);
-      }
-    } else {
-      path.setAttribute("fill", "none");
-      path.setAttribute("stroke", "currentColor");
-      path.setAttribute("stroke-width", "2");
-      path.setAttribute("stroke-linecap", "round");
-      path.setAttribute("stroke-linejoin", "round");
-    }
-    svg.append(path);
-  }
-
-  if (referenceSvg) {
-    for (const attr of ["fill", "stroke", "stroke-width"]) {
-      const val = referenceSvg.getAttribute(attr);
-      if (val != null) svg.setAttribute(attr, val);
-    }
-  }
-
-  return true;
-}
-
-function replaceMenuItemIcon(item, referenceItem) {
-  return applyPersonIconToSvg(item.querySelector("svg"), referenceItem?.querySelector("svg"));
+    path.setAttribute("fill", "currentColor");
+    return path;
+  }));
 }
 
 function replaceMenuItemText(item, text, referenceItem) {
@@ -210,7 +186,7 @@ function createDiscordMenuItem(template) {
   item.classList.add(SHARE_MENU_ITEM_CLASS);
 
   replaceMenuItemText(item, "Share to Discord", template);
-  replaceMenuItemIcon(item, template);
+  replaceMenuItemIcon(item);
 
   wireDiscordMenuItem(item);
   return item;

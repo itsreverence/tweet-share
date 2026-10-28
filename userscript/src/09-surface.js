@@ -107,14 +107,44 @@ function injectStyles() {
       max-width: min(360px, calc(100vw - 32px));
     }
     .${TOAST_CLASS} {
-      border-radius: var(--border-radius-large, 16px);
-      border-left-width: 3px;
-      border-left-style: solid;
-      font-size: 15px;
-      line-height: 1.35;
-      padding: 12px 14px;
-      pointer-events: auto;
       animation: tds-toast-in 0.2s ease;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      line-height: 1.35;
+      padding: 12px 14px 12px 40px;
+      pointer-events: auto;
+      position: relative;
+    }
+    .${TOAST_CLASS}::before {
+      border-radius: 999px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 800;
+      height: 18px;
+      left: 12px;
+      line-height: 18px;
+      position: absolute;
+      text-align: center;
+      top: 13px;
+      width: 18px;
+    }
+    /* The "/ ''" alt text keeps the icon glyph out of what screen readers announce. */
+    .${TOAST_CLASS}[data-state="success"]::before {
+      background: rgb(var(--tds-green));
+      content: "✓";
+      content: "✓" / "";
+    }
+    .${TOAST_CLASS}[data-state="error"]::before {
+      background: rgb(var(--tds-red));
+      content: "!";
+      content: "!" / "";
+    }
+    .${TOAST_CLASS}[data-state="info"]::before {
+      background: rgb(var(--tds-blue));
+      content: "…";
+      content: "…" / "";
+      line-height: 14px;
     }
     @keyframes tds-toast-in {
       from { opacity: 0; transform: translateY(8px); }

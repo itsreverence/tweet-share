@@ -1,0 +1,124 @@
+// Colors are RGB tuples ("231 233 234"), the format X publishes on :root (e.g. --color-text).
+const TDS_FONT = 'TwitterChirp, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+const TDS_RGB_PATTERN = /^\d+\s+\d+\s+\d+$/;
+
+const THEME_PALETTES = {
+  light: { surface: "255 255 255", raised: "247 249 249", text: "15 20 25", subtle: "83 100 113", border: "207 217 222", shadow: "101 119 134" },
+  dim: { surface: "21 32 43", raised: "30 39 50", text: "247 249 249", subtle: "139 152 165", border: "56 68 77", shadow: "255 255 255" },
+  dark: { surface: "0 0 0", raised: "22 24 28", text: "231 233 234", subtle: "113 118 123", border: "47 51 54", shadow: "255 255 255" }
+};
+const THEME_ACCENTS = { blue: "29 155 240", green: "0 186 124", red: "244 33 46" };
+const X_THEME_VARIABLES = {
+  surface: "--color-background",
+  text: "--color-text",
+  subtle: "--color-text-secondary",
+  border: "--color-border",
+  blue: "--color-blue",
+  green: "--color-green",
+  red: "--color-red"
+};
+
+function themeNameForBackground([red, green, blue]) {
+  const luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255;
+  if (luminance > 0.55) return "light";
+  return luminance > 0.06 ? "dim" : "dark";
+}
+
+// `variables` holds the X tokens the page defines; `pageBackground` is [r, g, b] or null.
+function resolveTheme({ variables = {}, pageBackground = null } = {}) {
+  const background = variables.surface?.split(/\s+/).map(Number) ?? pageBackground;
+  const palette = THEME_PALETTES[background ? themeNameForBackground(background) : "dark"];
+  return { ...palette, ...THEME_ACCENTS, ...variables };
+}
+
+function pageBackgroundRgb() {
+  for (const node of [document.body, document.documentElement]) {
+    if (!node) continue;
+    const match = /^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)$/.exec(getComputedStyle(node).backgroundColor);
+    if (match && Number(match[4] ?? 1) > 0) return match.slice(1, 4).map(Number);
+  }
+  return null;
+}
+
+function readThemeEnvironment() {
+  const rootStyle = getComputedStyle(document.documentElement);
+  const variables = {};
+  for (const [token, name] of Object.entries(X_THEME_VARIABLES)) {
+    const value = rootStyle.getPropertyValue(name).trim();
+    if (TDS_RGB_PATTERN.test(value)) variables[token] = value;
+  }
+  return { variables, pageBackground: pageBackgroundRgb() };
+}
+
+function applyXThemeVars(element) {
+  for (const [token, value] of Object.entries(resolveTheme(readThemeEnvironment()))) {
+    element.style.setProperty(`--tds-${token}`, value);
+  }
+}
+
+function tdsSharedSurfaceCss() {
+  return `
+    .${POPOVER_CLASS},
+    .${TOAST_CLASS},
+    .${SETTINGS_CLASS}__dialog {
+      background: rgb(var(--tds-surface));
+      border: 1px solid rgb(var(--tds-border));
+      box-shadow: rgb(var(--tds-shadow) / 0.2) 0 0 15px, rgb(var(--tds-shadow) / 0.15) 0 0 3px 1px;
+      color: rgb(var(--tds-text));
+      font-family: ${TDS_FONT};
+    }
+    .${POPOVER_CLASS} {
+      border-radius: var(--border-radius-large, 16px);
+    }
+    .${POPOVER_CLASS}__title,
+    .${SETTINGS_CLASS}__hint,
+    .${SETTINGS_CLASS}__card-id,
+    .${SETTINGS_CLASS}__empty,
+    .${SETTINGS_CLASS}__field label {
+      color: rgb(var(--tds-subtle));
+    }
+    .${POPOVER_CLASS}__item:hover,
+    .${POPOVER_CLASS}__item:focus-visible,
+    .${POPOVER_CLASS}__manage:hover,
+    .${POPOVER_CLASS}__manage:focus-visible,
+    .${SETTINGS_CLASS}__close:hover,
+    .${SETTINGS_CLASS}__btn--ghost:hover {
+      background: rgb(var(--tds-blue) / 0.1);
+    }
+    .${POPOVER_CLASS}__item[data-last="true"]::after,
+    .${POPOVER_CLASS}__manage {
+      color: rgb(var(--tds-blue));
+    }
+    .${POPOVER_CLASS}__footer,
+    .${SETTINGS_CLASS}__header,
+    .${SETTINGS_CLASS}__footer,
+    .${SETTINGS_CLASS}__card {
+      border-color: rgb(var(--tds-border));
+    }
+    .${SETTINGS_CLASS}__field input {
+      background: rgb(var(--tds-surface));
+      border: 1px solid rgb(var(--tds-border));
+      color: rgb(var(--tds-text));
+    }
+    .${SETTINGS_CLASS}__field input::placeholder {
+      color: rgb(var(--tds-subtle));
+    }
+    .${SETTINGS_CLASS}__field input:focus {
+      border-color: rgb(var(--tds-blue));
+      outline: none;
+    }
+    .${SETTINGS_CLASS}__remove {
+      color: rgb(var(--tds-red));
+    }
+    .${SETTINGS_CLASS}__remove:hover {
+      background: rgb(var(--tds-red) / 0.1);
+    }
+    .${SETTINGS_CLASS}__btn--primary {
+      background: rgb(var(--tds-blue));
+      color: #fff;
+    }
+    .${SETTINGS_CLASS}__btn--primary:hover {
+      background: rgb(var(--tds-blue) / 0.85);
+    }
+  `;
+}
