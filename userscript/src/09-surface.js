@@ -37,7 +37,7 @@ function injectStyles() {
 
     .${TOAST_HOST_CLASS} {
       position: fixed;
-      right: 16px;
+      inset-inline-end: 16px;
       bottom: 16px;
       z-index: 10001;
       display: flex;
@@ -52,7 +52,8 @@ function injectStyles() {
       font-size: 15px;
       font-weight: 600;
       line-height: 1.35;
-      padding: 12px 14px 12px 40px;
+      padding-block: 12px;
+      padding-inline: 40px 14px;
       pointer-events: auto;
       position: relative;
     }
@@ -62,7 +63,7 @@ function injectStyles() {
       font-size: 12px;
       font-weight: 800;
       height: 18px;
-      left: 12px;
+      inset-inline-start: 12px;
       line-height: 18px;
       position: absolute;
       text-align: center;
@@ -225,11 +226,17 @@ function showPanel(panel, { findAnchor, returnFocus }) {
   return activePanel;
 }
 
+// The first character a reader sees, so a flag or a family emoji stays whole.
+function firstGrapheme(text) {
+  if (!Intl.Segmenter) return [...text][0];
+  return new Intl.Segmenter().segment(text)[Symbol.iterator]().next().value?.segment;
+}
+
 function createChannelAvatar(destination) {
   const avatar = document.createElement("span");
   avatar.className = AVATAR_CLASS;
   avatar.setAttribute("aria-hidden", "true");
-  avatar.textContent = [...destination.label.trim()][0]?.toUpperCase() || "#";
+  avatar.textContent = firstGrapheme(destination.label.trim())?.toUpperCase() || "#";
   let hash = 0;
   for (const char of destination.id) hash = (hash * 31 + char.codePointAt(0)) >>> 0;
   avatar.style.setProperty("--tds-hue", String(hash % 360));

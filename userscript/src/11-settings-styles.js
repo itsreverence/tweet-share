@@ -38,7 +38,8 @@ function injectSettingsStyles() {
       border-bottom: 1px solid rgb(var(--tds-border));
       display: flex;
       gap: 12px;
-      padding: 12px 12px 12px 20px;
+      padding-block: 12px;
+      padding-inline: 20px 12px;
     }
     .${SETTINGS_CLASS}__header h2 {
       flex: 1;
@@ -250,7 +251,7 @@ function injectSettingsStyles() {
       font-size: 15px;
       font-weight: 700;
       padding: 12px;
-      text-align: left;
+      text-align: start;
     }
     .${SETTINGS_CLASS}__add-toggle:hover {
       background: rgb(var(--tds-blue) / 0.08);
@@ -272,7 +273,7 @@ function injectSettingsStyles() {
     }
     .${SETTINGS_CLASS}__empty-steps {
       margin: 0;
-      padding-left: 1.25em;
+      padding-inline-start: 1.25em;
     }
     .${SETTINGS_CLASS}__empty-steps li {
       margin: 0 0 4px;

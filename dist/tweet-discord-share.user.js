@@ -1814,7 +1814,7 @@ function injectStyles() {
 
     .${TOAST_HOST_CLASS} {
       position: fixed;
-      right: 16px;
+      inset-inline-end: 16px;
       bottom: 16px;
       z-index: 10001;
       display: flex;
@@ -1829,7 +1829,8 @@ function injectStyles() {
       font-size: 15px;
       font-weight: 600;
       line-height: 1.35;
-      padding: 12px 14px 12px 40px;
+      padding-block: 12px;
+      padding-inline: 40px 14px;
       pointer-events: auto;
       position: relative;
     }
@@ -1839,7 +1840,7 @@ function injectStyles() {
       font-size: 12px;
       font-weight: 800;
       height: 18px;
-      left: 12px;
+      inset-inline-start: 12px;
       line-height: 18px;
       position: absolute;
       text-align: center;
@@ -2002,11 +2003,17 @@ function showPanel(panel, { findAnchor, returnFocus }) {
   return activePanel;
 }
 
+// The first character a reader sees, so a flag or a family emoji stays whole.
+function firstGrapheme(text) {
+  if (!Intl.Segmenter) return [...text][0];
+  return new Intl.Segmenter().segment(text)[Symbol.iterator]().next().value?.segment;
+}
+
 function createChannelAvatar(destination) {
   const avatar = document.createElement("span");
   avatar.className = AVATAR_CLASS;
   avatar.setAttribute("aria-hidden", "true");
-  avatar.textContent = [...destination.label.trim()][0]?.toUpperCase() || "#";
+  avatar.textContent = firstGrapheme(destination.label.trim())?.toUpperCase() || "#";
   let hash = 0;
   for (const char of destination.id) hash = (hash * 31 + char.codePointAt(0)) >>> 0;
   avatar.style.setProperty("--tds-hue", String(hash % 360));
@@ -2109,7 +2116,6 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
   settingsBtn.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    closeDestinationMenu();
     openSettingsModal(returnFocus);
   });
   header.append(titleEl, settingsBtn);
@@ -2269,7 +2275,8 @@ function popoverStylesCss() {
       align-items: center;
       display: flex;
       gap: 8px;
-      padding: 10px 8px 0 16px;
+      padding-block: 10px 0;
+      padding-inline: 16px 8px;
     }
     .${POPOVER_CLASS}__title {
       flex: 1;
@@ -2351,7 +2358,7 @@ function popoverStylesCss() {
       gap: 12px;
       min-height: 52px;
       padding: 8px 12px;
-      text-align: left;
+      text-align: start;
       transition: background 0.12s ease, border-color 0.12s ease;
       width: 100%;
     }
@@ -2416,18 +2423,20 @@ function popoverStylesCss() {
       font-weight: 700;
       gap: 10px;
       padding: 10px 16px;
-      text-align: left;
+      text-align: start;
       width: 100%;
     }
     .${POPOVER_CLASS}__disclosure::before {
-      border-bottom: 4px solid transparent;
-      border-left: 5px solid currentColor;
-      border-top: 4px solid transparent;
+      border-block: 4px solid transparent;
+      border-inline-start: 5px solid currentColor;
       content: "";
       transition: transform 0.12s ease;
     }
     .${POPOVER_CLASS}__disclosure[aria-expanded="true"]::before {
       transform: rotate(90deg);
+    }
+    .${POPOVER_CLASS}__disclosure[aria-expanded="true"]:dir(rtl)::before {
+      transform: rotate(-90deg);
     }
   `;
 }
@@ -2901,7 +2910,8 @@ function injectSettingsStyles() {
       border-bottom: 1px solid rgb(var(--tds-border));
       display: flex;
       gap: 12px;
-      padding: 12px 12px 12px 20px;
+      padding-block: 12px;
+      padding-inline: 20px 12px;
     }
     .${SETTINGS_CLASS}__header h2 {
       flex: 1;
@@ -3113,7 +3123,7 @@ function injectSettingsStyles() {
       font-size: 15px;
       font-weight: 700;
       padding: 12px;
-      text-align: left;
+      text-align: start;
     }
     .${SETTINGS_CLASS}__add-toggle:hover {
       background: rgb(var(--tds-blue) / 0.08);
@@ -3135,7 +3145,7 @@ function injectSettingsStyles() {
     }
     .${SETTINGS_CLASS}__empty-steps {
       margin: 0;
-      padding-left: 1.25em;
+      padding-inline-start: 1.25em;
     }
     .${SETTINGS_CLASS}__empty-steps li {
       margin: 0 0 4px;
@@ -3959,7 +3969,8 @@ function previewStylesCss() {
       display: flex;
       flex-direction: column;
       gap: 12px;
-      padding: 12px 12px 12px 8px;
+      padding-block: 12px;
+      padding-inline: 8px 12px;
     }
     .${PREVIEW_CLASS}__empty {
       color: rgb(var(--tds-subtle));
@@ -4027,7 +4038,7 @@ function previewStylesCss() {
     .${PREVIEW_CLASS}__embed {
       background: rgb(var(--tds-surface));
       border: 1px solid rgb(var(--tds-border));
-      border-left: 4px solid var(--tds-preview-accent, #5865f2);
+      border-inline-start: 4px solid var(--tds-preview-accent, #5865f2);
       border-radius: 4px;
       display: flex;
       flex-direction: column;
@@ -4086,7 +4097,8 @@ function previewStylesCss() {
       color: rgb(var(--tds-subtle));
       font-size: 12px;
       line-height: 1.35;
-      padding: 8px 0 0 4px;
+      padding-block: 8px 0;
+      padding-inline: 4px 0;
     }
     .${PREVIEW_CLASS}__link {
       color: rgb(var(--tds-blue));

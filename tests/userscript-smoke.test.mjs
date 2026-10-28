@@ -477,6 +477,20 @@ test("arrow keys cycle through the channels and leave the quote toggle and the p
   }
 });
 
+test("a channel's avatar shows the whole first character of its name, even a flag or a family emoji", async (t) => {
+  const view = openPage(t, {
+    destinations: [
+      { ...general, id: "japan", label: "🇯🇵 Japan" },
+      { ...friends, id: "family", label: "👨‍👩‍👧 Family" },
+      { ...general, id: "eclair", label: "e\u0301clair club" }
+    ]
+  });
+
+  const panel = await openPreview(view);
+  const initials = channelButtons(panel).map((button) => button.querySelector(".tds-avatar").textContent);
+  assert.deepEqual(initials, ["🇯🇵", "👨‍👩‍👧", "E\u0301"]);
+});
+
 test("the last-used channel is the default, named by its label alone and described as Last used", async (t) => {
   const view = openPage(t, { destinations: [general, friends] });
   view.window.localStorage.setItem("tds-last-destination", "friends");
