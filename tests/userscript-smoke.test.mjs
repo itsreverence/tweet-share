@@ -746,6 +746,22 @@ test("a channel's row says Not saved yet until its webhook is stored, and Webhoo
   assert.match(rowText(reopened, "Friends"), /Webhook saved/, "once saved, the added channel says so");
 });
 
+test("Remove moves focus to the next row, else the previous row, else the Add channel form", async (t) => {
+  const third = { id: "third", label: "Third", webhookUrl: "https://discord.com/api/webhooks/789/third-QRS" };
+  const view = openPage(t, { destinations: [general, friends, third] });
+  const dialog = await openSettings(view);
+  const remove = (name) =>
+    click(view, byText(dialog, "button", "Remove").find((button) => accessibleDescription(button) === name));
+  const focused = () => view.document.activeElement;
+
+  remove("Friends");
+  assert.deepEqual([focused().textContent, accessibleDescription(focused())], ["Edit", "Third"], "focus moves to the next row");
+  remove("Third");
+  assert.deepEqual([focused().textContent, accessibleDescription(focused())], ["Edit", "General"], "with no next row, focus moves to the previous row");
+  remove("General");
+  assert.equal(focused(), fieldInput(addChannelCard(dialog), "Display name"), "with no rows left, focus moves into the Add channel form");
+});
+
 test("Edit opens one channel's form inline and becomes Done, and Done closes it", async (t) => {
   const view = openPage(t, { destinations: [general, friends] });
   const dialog = await openSettings(view);

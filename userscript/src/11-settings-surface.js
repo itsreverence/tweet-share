@@ -226,5 +226,5 @@ function createChannelRow(destination, { savedWebhookUrl, onToggleEdit, onRemove
 
   refresh();
   element.append(main, editRegion);
-  return { element, labelInput, urlInput, setEditing };
+  return { element, editBtn, labelInput, urlInput, setEditing };
 }

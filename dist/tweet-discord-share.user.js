@@ -3429,7 +3429,7 @@ function createChannelRow(destination, { savedWebhookUrl, onToggleEdit, onRemove
 
   refresh();
   element.append(main, editRegion);
-  return { element, labelInput, urlInput, setEditing };
+  return { element, editBtn, labelInput, urlInput, setEditing };
 }
 
   // --- 11-settings.js ---
@@ -3582,11 +3582,14 @@ async function openSettingsModal(returnFocus) {
     render();
   }
 
+  // Focus moves to the next row, else the previous one, else the Add form that opens when the list empties.
   function removeChannel(destination) {
+    const index = destinations.indexOf(destination);
     destinations = destinations.filter((item) => item !== destination);
     if (editingId === destination.id) editingId = null;
     render();
-    (listEl.querySelector("button") || newLabelInput).focus();
+    const neighbour = destinations[index] ?? destinations[index - 1];
+    (neighbour ? rows.get(neighbour).editBtn : newLabelInput).focus();
   }
 
   function render() {
