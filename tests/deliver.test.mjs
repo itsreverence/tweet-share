@@ -231,8 +231,7 @@ test("all skipped video media sends one playable fallback URL", async () => {
 
   assert.equal(calls.multipart.length, 0);
   assert.equal(calls.requests.length, 2);
-  assert.equal(calls.requests[1].body.content, `_Video:_\n${mainVideoUrl}`);
-  assert.equal(calls.requests[1].body.content.split(mainVideoUrl).length - 1, 1);
+  assert.equal(calls.requests[1].body.content, mainVideoUrl);
   assert.doesNotMatch(JSON.stringify(calls.requests), /Plays below|poster/);
   assert.ok(calls.toasts.some((toast) => /fallback content/i.test(toast.message)));
 });

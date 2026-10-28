@@ -131,7 +131,7 @@ test("webhook sender is branded while the embed shows the tweet author once", ()
   assert.match(payloads[0].avatar_url, /^https:\/\//);
   assert.equal(payloads[0].embeds[0].author.name, "Alice (@alice)");
   assert.equal(payloads[0].embeds[0].author.url, "https://x.com/alice");
-  assert.equal(payloads[0].embeds[0].footer.text, "x.com");
+  assert.equal(payloads[0].embeds[0].footer.text, "X");
   assert.match(payloads[0].embeds[0].author.icon_url, /profile_images/);
   assert.equal(payloads[0].embeds.filter((embed) => embed.author).length, 1, "one embed names the author");
 });
@@ -154,14 +154,14 @@ test("a quote with photos gets its own card in the same message, named and linke
   assert.equal(payloads[0].embeds[0].fields, undefined, "the main card has no quote field");
   const quoteCard = payloads[0].embeds[1];
   assert.equal(quoteCard.color, 0x536471);
-  assert.equal(quoteCard.footer.text, "Quoted post · x.com");
+  assert.equal(quoteCard.footer.text, "X");
   assert.equal(quoteCard.author.name, "Quoting Bob (@bob)");
   assert.equal(quoteCard.author.url, tweet.quote.url, "the quote card's author name opens the quoted post");
   assert.equal(quoteCard.description, "Quoted text");
   assert.equal(quoteCard.image.url, "https://pbs.twimg.com/media/q1.jpg");
 });
 
-test("quote card embed does not use quote timestamp", () => {
+test("a quote card shows the quoted post's own date", () => {
   const payloads = buildDiscordPayloads({
     ...sampleTweet,
     createdAt: "2026-06-10T21:06:19.000Z",
@@ -175,7 +175,7 @@ test("quote card embed does not use quote timestamp", () => {
   });
 
   assert.equal(payloads[0].embeds[0].timestamp, "2026-06-10T21:06:19.000Z");
-  assert.equal(payloads[0].embeds[1].timestamp, undefined);
+  assert.equal(payloads[0].embeds[1].timestamp, "2026-06-11T10:00:00.000Z");
 });
 
 test("a quote without photos stays inline in the main card, and its video follows as a link", () => {
@@ -419,7 +419,7 @@ test("a post's first photo sits on its card and the next on a same-url embed tha
   assert.equal(payloads[0].embeds[1].url, payloads[0].embeds[0].url);
 });
 
-test("single skipped video uses one playable URL and a minimal label", () => {
+test("a single skipped video follows as its bare link, with no label", () => {
   const videoUrl = "https://video.twimg.com/ext_tw_video/1/pu/vid/abc/1280x720/clip.mp4";
   const tweet = {
     ...sampleTweet,
@@ -432,9 +432,7 @@ test("single skipped video uses one playable URL and a minimal label", () => {
   assert.equal(payloads[0].content, openOnX(tweet.url));
   assert.doesNotMatch(String(payloads[1].content || ""), /\/status\/1/);
   assert.equal(payloads[0].embeds[0].image, undefined);
-  assert.equal(payloads[1].content, `_Video:_\n${videoUrl}`);
-  assert.equal(payloads[1].content.split(videoUrl).length - 1, 1);
-  assert.doesNotMatch(payloads[1].content, /Video 1|post above/);
+  assert.equal(payloads[1].content, videoUrl);
 
   const fields = payloads[0].embeds.at(-1)?.fields || [];
   assert.equal(fields.some((field) => /Video|Plays below/.test(`${field.name} ${field.value}`)), false);
@@ -504,10 +502,7 @@ test("main and quoted fallback videos identify ownership once", () => {
 
   const payloads = buildDiscordPayloads(tweet);
   assert.equal(payloads.length, 2);
-  assert.match(payloads[1].content, /_Alice · Video 1:_/);
-  assert.match(payloads[1].content, /_Bob · Video 1:_/);
-  assert.equal(payloads[1].content.split(mainVideo).length - 1, 1);
-  assert.equal(payloads[1].content.split(quoteVideo).length - 1, 1);
+  assert.equal(payloads[1].content, `-# Alice · Video 1\n${mainVideo}\n-# Bob · Video 1\n${quoteVideo}`);
 
   const mainFields = payloads[0].embeds[0]?.fields || [];
   assert.equal(mainFields.some((field) => /Video/.test(field.name)), false);
@@ -617,7 +612,7 @@ test("video, images, and quote media stay in order with no photo labels", () => 
     "https://pbs.twimg.com/media/q1.jpg"
   ]);
   assert.equal(payloads[0].embeds.some((embed) => embed.title), false);
-  assert.equal(payloads[1].content, `_Video:_\n${videoUrl}`);
+  assert.equal(payloads[1].content, videoUrl);
 });
 
 test("long tweet text splits across continuation embeds without duplicate url", () => {
@@ -658,4 +653,23 @@ test("both posts' photos keep their order across the two cards", () => {
   assert.equal(payloads[0].embeds[1].image.url, "https://pbs.twimg.com/media/main2.jpg");
   assert.equal(payloads[0].embeds[2].image.url, "https://pbs.twimg.com/media/q1.jpg");
   assert.equal(payloads[0].embeds[3].image.url, "https://pbs.twimg.com/media/q2.jpg");
+});
+
+test("long text splits at the last paragraph break, else line break, else sentence end, before cutting a word", () => {
+  const limit = 4096;
+  const words = (count) => Array.from({ length: count }, (_, index) => `w${index % 10}`).join(" ");
+  const firstChunk = (text) => buildDiscordPayloads({ ...sampleTweet, media: [], text }, { includeQuote: false })[0].embeds[0].description;
+  const paragraph = `${words(1000)}.\nA line.\n\n${words(200)}`;
+  const tail = words(600);
+
+  assert.equal(firstChunk(`${paragraph} ${tail}`), paragraph.slice(0, paragraph.indexOf("\n\n")), "paragraph break first");
+  const lines = `${words(1000)}. One sentence.\n${words(200)}. Another.`;
+  assert.equal(firstChunk(`${lines} ${tail}`), lines.slice(0, lines.lastIndexOf("\n")), "then a line break");
+  const sentences = `${words(1000)}. ${words(200)}! ${words(100)}`;
+  assert.equal(firstChunk(`${sentences} ${tail}`), sentences.slice(0, sentences.lastIndexOf("!") + 1), "then a sentence end");
+  const unbroken = words(1500);
+  const cut = firstChunk(unbroken);
+  assert.ok(cut.length <= limit && cut.length > limit / 2);
+  assert.ok(unbroken.startsWith(`${cut} `), "then the last space, so no word is cut");
+  assert.equal(firstChunk("x".repeat(5000)).length, limit, "a hard cut only when nothing else fits");
 });

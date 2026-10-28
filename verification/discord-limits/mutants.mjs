@@ -83,16 +83,16 @@ const mutants = [
   {
     name: "single video follow-up wraps its link in <> so Discord does not unfurl it",
     file: "05-format-discord.js",
-    find: "`_Video:_\\n${entries[0].url}`",
-    replace: "`_Video:_\\n<${entries[0].url}>`",
+    find: "return truncate(entries[0].url, DISCORD_LIMITS.content);",
+    replace: "return truncate(`<${entries[0].url}>`, DISCORD_LIMITS.content);",
     expect: PRESERVES
   },
   {
     name: "video follow-up wraps its links in a code block",
     file: "05-format-discord.js",
     edits: [
-      ["`_Video:_\\n${entries[0].url}`", "`_Video:_\\n\\`\\`\\`\\n${entries[0].url}\\n\\`\\`\\``"],
-      ["blocks.join(\"\\n\\n\")", "`\\`\\`\\`\\n${blocks.join(\"\\n\\n\")}\\n\\`\\`\\``"]
+      ["return truncate(entries[0].url, DISCORD_LIMITS.content);", "return truncate(`\\`\\`\\`\\n${entries[0].url}\\n\\`\\`\\``, DISCORD_LIMITS.content);"],
+      ["blocks.join(\"\\n\")", "`\\`\\`\\`\\n${blocks.join(\"\\n\")}\\n\\`\\`\\``"]
     ],
     expect: PRESERVES
   },

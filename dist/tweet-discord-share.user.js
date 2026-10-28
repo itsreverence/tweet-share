@@ -822,21 +822,6 @@ function embedAuthorBlock(tweet, name, url) {
   return block;
 }
 
-function tweetSourceLabel(tweet, kind = "main") {
-  const parts = [];
-  if (kind === "quote") parts.push("Quoted post");
-
-  const url = String(tweet.url || "").trim();
-  const hostMatch = /^https?:\/\/([^/]+)/i.exec(url);
-  if (hostMatch) parts.push(hostMatch[1].replace(/^www\./, ""));
-
-  return parts.length ? parts.join(" · ") : "x.com";
-}
-
-function embedFooterForTweet(tweet, kind = "main") {
-  return { text: truncate(tweetSourceLabel(tweet, kind), DISCORD_EMBED_LIMITS.footer) };
-}
-
 function countEmbedChars(embed) {
   let total = 0;
   if (embed.title) total += embed.title.length;
@@ -955,8 +940,8 @@ function postCard(post, kind, { images, fields = [] }) {
     text: text || (images.length || mediaLinks(post).length ? "" : "(No text found)"),
     fields,
     images,
-    date: isQuote ? undefined : discordEmbedTimestamp(post.createdAt),
-    footer: embedFooterForTweet(post, kind),
+    date: discordEmbedTimestamp(post.createdAt),
+    footer: { text: "X" },
     url: post.url || ""
   };
 }
@@ -1076,10 +1061,10 @@ function buildWebhookPayload(embeds, tweet, options = {}) {
 
 function buildVideoFollowUpContent(entries) {
   if (!entries.length) return undefined;
-  if (entries.length === 1) return truncate(`_Video:_\n${entries[0].url}`, DISCORD_LIMITS.content);
+  if (entries.length === 1) return truncate(entries[0].url, DISCORD_LIMITS.content);
 
-  const blocks = entries.map((entry) => `_${entry.caption}:_\n${entry.url}`);
-  return truncate(blocks.join("\n\n"), DISCORD_LIMITS.content);
+  const blocks = entries.map((entry) => `-# ${entry.caption}\n${entry.url}`);
+  return truncate(blocks.join("\n"), DISCORD_LIMITS.content);
 }
 
 function buildEmbedDiscordPayloads(tweet, options = {}) {
@@ -1182,19 +1167,20 @@ function splitText(text, limit) {
   let remaining = value;
 
   while (remaining.length > limit) {
-    let splitAt = Math.max(
-      remaining.lastIndexOf("\n\n", limit),
-      remaining.lastIndexOf("\n", limit),
-      remaining.lastIndexOf(" ", limit)
-    );
-    if (splitAt < Math.floor(limit * 0.5)) splitAt = limit;
-
+    const splitAt = textBreakBefore(remaining, limit);
     chunks.push(remaining.slice(0, splitAt).trim());
     remaining = remaining.slice(splitAt).trim();
   }
 
   if (remaining) chunks.push(remaining);
   return chunks;
+}
+
+// A break in the first half would leave a short chunk, so only breaks past the middle count.
+function textBreakBefore(text, limit) {
+  const sentenceEnds = [...text.slice(0, limit + 1).matchAll(/[.!?](?=\s)/g)].map((match) => match.index + 1);
+  const breaks = [text.lastIndexOf("\n\n", limit), text.lastIndexOf("\n", limit), sentenceEnds.at(-1) ?? -1, text.lastIndexOf(" ", limit)];
+  return breaks.find((index) => index >= Math.floor(limit * 0.5)) ?? limit;
 }
 
   // --- 06-syndication.js ---
