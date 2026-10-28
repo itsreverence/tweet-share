@@ -13,31 +13,33 @@ const quoteText = "Bob's quoted words";
 const photoUrl = "https://pbs.twimg.com/media/SmokePhoto?format=jpg&name=small";
 const general = { id: "general", label: "General", webhookUrl };
 const friends = { id: "friends", label: "Friends", webhookUrl: friendsWebhookUrl };
-const quoteMarkup = `<div role="link" tabindex="0">
+const quoteMarkup = (text) => `<div role="link" tabindex="0">
     <div data-testid="User-Name"><span>Bob</span><span>@bob</span></div>
     <a href="/bob/status/999"><span>Show more</span></a>
-    <div data-testid="tweetText"><span>${quoteText}</span></div>
+    <div data-testid="tweetText"><span>${text}</span></div>
   </div>`;
-const page = ({ quote }) => `<!doctype html><body><main>
+// `quote` is true for the default quoted post, or the quoted post's text.
+const page = ({ quote, text }) => `<!doctype html><body><main>
 <article data-testid="tweet">
   <div data-testid="User-Name"><a href="/alice"><span>Alice</span></a><a href="/alice"><span>@alice</span></a></div>
   <a href="/alice/status/1234567890"><time datetime="2026-06-10T21:06:19.000Z">Jun 10</time></a>
-  <div data-testid="tweetText"><span>${postText}</span></div>
+  <div data-testid="tweetText"><span>${text}</span></div>
   <div data-testid="tweetPhoto"><img alt="Image" src="${photoUrl}"></div>
-  ${quote ? quoteMarkup : ""}
+  ${quote ? quoteMarkup(quote === true ? quoteText : quote) : ""}
   <div role="group"><button data-testid="share" aria-label="Share post"><svg><path d="M0"/></svg></button></div>
 </article></main></body>`;
 
 function openPage(t, {
   destinations = [],
   quote = false,
+  text = postText,
   store = new Map([
     ["tds-destinations", destinations],
     ["tds-preferences", { alwaysShowPreview: false }]
   ]),
   discordResponse = { status: 204, responseText: "" }
 }) {
-  const dom = new JSDOM(page({ quote }), {
+  const dom = new JSDOM(page({ quote, text }), {
     url: postUrl,
     runScripts: "outside-only",
     pretendToBeVisual: true,
@@ -193,10 +195,18 @@ function expandPreview(view, menu) {
 
 // Approximates what a reader sees line by line: block boxes and preserved newlines break lines.
 function renderedLines({ window }, root) {
+  // jsdom does not inherit white-space, so take it from the nearest element that sets it.
+  const whiteSpace = (element) => {
+    for (let node = element; node; node = node.parentElement) {
+      const value = window.getComputedStyle(node).whiteSpace;
+      if (value !== "normal") return value;
+    }
+    return "normal";
+  };
   let text = "";
   const walk = (node) => {
     if (node.nodeType === node.TEXT_NODE) {
-      const preserved = /^pre/.test(window.getComputedStyle(node.parentElement).whiteSpace);
+      const preserved = /^pre/.test(whiteSpace(node.parentElement));
       text += preserved ? node.textContent : node.textContent.replace(/\s+/g, " ");
       return;
     }
@@ -361,6 +371,32 @@ test("the preview shows the post link and the quoted-post line on separate lines
     `the quoted-post line is a line of its own in ${JSON.stringify(lines)}`
   );
   assert.ok(preview.querySelector(`a[href="${postUrl}"]`), "the post URL is a link");
+});
+
+test("the preview shows where masked links in the post and the quote really go, and draws quote lines as a quote", async (t) => {
+  const phish = "https://evil.example/phish";
+  const lure = "https://lure.example/win";
+  const view = openPage(t, {
+    destinations: [general, friends],
+    text: `Security notice [x.com/settings/security](${phish}) and _new_`,
+    quote: `Claim it [x.com/rewards](${lure}) today\nSecond line`
+  });
+
+  const preview = expandPreview(view, await openPreview(view));
+  for (const href of [phish, lure]) {
+    const link = preview.querySelector(`a[href="${href}"]`);
+    assert.ok(link, `the masked link to ${href} is a link`);
+    assert.equal(link.title, href, "hovering shows the full destination");
+    assert.match(accessibleName(link), new RegExp(`\\(${new URL(href).host.replace(".", "\\.")}\\)$`), "the link names the host it opens");
+  }
+  assert.equal(preview.querySelector('a[href="https://x.com/alice/status/1234567890"]').textContent, postUrl, "a bare URL is shown as itself, with no host suffix");
+  assert.equal(leafWithText(preview, "new")?.tagName, "EM", "italics in the post text render as italics");
+
+  const lines = renderedLines(view, preview);
+  assert.ok(lines.includes("Second line"), `the quote's second line is a line of its own in ${JSON.stringify(lines)}`);
+  assert.ok(!lines.some((line) => line.startsWith(">")), `no literal "> " is shown in ${JSON.stringify(lines)}`);
+  const quotes = [...preview.querySelectorAll("blockquote")].map((quote) => quote.textContent);
+  assert.deepEqual(quotes, ["Claim it x.com/rewards (lure.example) today\nSecond line"], "the quoted post's lines sit in one block quote");
 });
 
 test("the preview starts collapsed unless Always show preview is on", async (t) => {

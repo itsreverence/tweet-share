@@ -7,19 +7,31 @@ function createPreviewLink(href, text) {
   const link = document.createElement("a");
   link.className = `${PREVIEW_CLASS}__link`;
   link.href = href;
+  link.title = href;
   link.textContent = text;
   link.target = "_blank";
   link.rel = "noopener noreferrer";
   return link;
 }
 
-// The markdown the formatter emits: masked links, bare URLs, and _italic_ captions.
-const PREVIEW_MARKDOWN_PATTERN = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>]+)|\b_([^_\n]+)_\b/g;
+// A masked link's label can name any site, so the preview also shows the host it really opens.
+function createMaskedPreviewLink(href, label) {
+  const link = createPreviewLink(href, label);
+  if (label !== href) {
+    const host = document.createElement("span");
+    host.className = `${PREVIEW_CLASS}__link-host`;
+    host.textContent = ` (${link.host})`;
+    link.append(host);
+  }
+  return link;
+}
 
-function appendPreviewMarkdown(container, value) {
-  const text = String(value || "");
+// The inline markdown the formatter emits and post text can carry: masked links, bare URLs, and _italics_.
+const PREVIEW_INLINE_PATTERN = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>]+)|\b_([^_\n]+)_\b/g;
+
+function appendPreviewInline(container, text) {
   let index = 0;
-  for (const match of text.matchAll(PREVIEW_MARKDOWN_PATTERN)) {
+  for (const match of text.matchAll(PREVIEW_INLINE_PATTERN)) {
     const [whole, maskedLabel, maskedUrl, url, italic] = match;
     container.append(text.slice(index, match.index));
     if (italic) {
@@ -27,11 +39,32 @@ function appendPreviewMarkdown(container, value) {
       emphasis.textContent = italic;
       container.append(emphasis);
     } else {
-      container.append(createPreviewLink(maskedUrl || url, maskedLabel || url));
+      container.append(maskedUrl ? createMaskedPreviewLink(maskedUrl, maskedLabel) : createPreviewLink(url, url));
     }
     index = match.index + whole.length;
   }
   container.append(text.slice(index));
+}
+
+// Discord draws a run of "> " lines as one quote with a bar beside it.
+function appendPreviewMarkdown(container, value) {
+  const runs = [];
+  for (const line of String(value || "").split("\n")) {
+    const quoted = line.startsWith("> ");
+    const text = quoted ? line.slice(2) : line;
+    if (runs.at(-1)?.quoted === quoted) runs.at(-1).lines.push(text);
+    else runs.push({ quoted, lines: [text] });
+  }
+  for (const { quoted, lines } of runs) {
+    if (!quoted) {
+      appendPreviewInline(container, lines.join("\n"));
+      continue;
+    }
+    const quote = document.createElement("blockquote");
+    quote.className = `${PREVIEW_CLASS}__quote`;
+    appendPreviewInline(quote, lines.join("\n"));
+    container.append(quote);
+  }
 }
 
 function createPreviewEmbed(embed) {
@@ -75,7 +108,7 @@ function createPreviewEmbed(embed) {
   if (embed.description) {
     const description = document.createElement("div");
     description.className = `${PREVIEW_CLASS}__description`;
-    description.textContent = embed.description;
+    appendPreviewMarkdown(description, embed.description);
     card.append(description);
   }
 
@@ -365,6 +398,15 @@ function previewStylesCss() {
     }
     .${PREVIEW_CLASS}__link:hover {
       text-decoration: underline;
+    }
+    .${PREVIEW_CLASS}__link-host {
+      color: rgb(var(--tds-subtle));
+    }
+    .${PREVIEW_CLASS}__quote {
+      border-inline-start: 4px solid rgb(var(--tds-subtle) / 0.5);
+      border-radius: 4px;
+      margin: 0;
+      padding-inline-start: 10px;
     }
   `;
 }
