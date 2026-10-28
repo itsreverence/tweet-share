@@ -659,6 +659,7 @@ for (const [where, top, expected] of [
     const inView = view.document.createElement("a");
     inView.href = "/home";
     view.document.querySelector("main").prepend(inView);
+    placeAt(inView, 100);
     for (const control of other.querySelectorAll("a, button")) placeAt(control, top, 800);
     await openPreview(view, shareOf(shared));
 
@@ -675,15 +676,34 @@ function removePost({ document }) {
 }
 
 // Each case builds the page around the post, then names where focus belongs once the post is gone.
+// A control the browser would draw gets a box; a collapsed or flat one has none.
 const postGoneCases = [
   ["the main column has a control", "focus lands on the first control in the main column", ({ document }) => {
     document.querySelector("main").insertAdjacentHTML("afterbegin", '<a href="/home" id="target">Home</a>');
+    placeAt(document.getElementById("target"), 300);
   }],
   ["the main column's first control is collapsed", "focus skips it for the first control that can take focus", ({ document }) => {
     document.querySelector("main").insertAdjacentHTML("afterbegin", '<div hidden><a href="/more">More</a></div><button id="target">Visible</button>');
+    placeAt(document.getElementById("target"), 300);
+  }],
+  ["the main column's first control is disabled", "focus skips it for the first control that can take focus", ({ document }) => {
+    document.querySelector("main").insertAdjacentHTML("afterbegin", '<button id="off" disabled>Off</button><button id="target">On</button>');
+    placeAt(document.getElementById("off"), 260);
+    placeAt(document.getElementById("target"), 300);
+  }],
+  ["the main column's first control is see-through", "focus skips it, so focus never lands where no one can see it", ({ document }) => {
+    document.querySelector("main").insertAdjacentHTML("afterbegin", '<div style="opacity: 0"><button id="ghost">Ghost</button></div><button id="target">Visible</button>');
+    placeAt(document.getElementById("ghost"), 260);
+    placeAt(document.getElementById("target"), 300);
+  }],
+  ["the main column's first control has no size", "focus skips it, so focus never lands where no one can see it", ({ document }) => {
+    document.querySelector("main").insertAdjacentHTML("afterbegin", '<button id="flat">Flat</button><button id="target">Visible</button>');
+    placeAt(document.getElementById("target"), 300);
   }],
   ["the main column's first control is hidden from assistive tech", "focus skips it, so a screen reader is never left on an unannounced control", ({ document }) => {
-    document.querySelector("main").insertAdjacentHTML("afterbegin", '<div aria-hidden="true"><a href="/more">More</a></div><button id="target">Announced</button>');
+    document.querySelector("main").insertAdjacentHTML("afterbegin", '<div aria-hidden="true"><a href="/more" id="unannounced">More</a></div><button id="target">Announced</button>');
+    placeAt(document.getElementById("unannounced"), 260);
+    placeAt(document.getElementById("target"), 300);
   }],
   ["the main column's first control is scrolled away", "focus goes to a control in view, so the next Tab does not jump the page", ({ document }) => {
     document.querySelector("main").insertAdjacentHTML("afterbegin", '<a href="/top" id="top">Top</a><a href="/near" id="target">Near</a>');
@@ -692,6 +712,7 @@ const postGoneCases = [
   }],
   ["the main column has nothing focusable", "focus goes to the first control elsewhere on the page", ({ document }) => {
     document.body.insertAdjacentHTML("afterbegin", '<nav><a href="/home" id="target">Home</a></nav>');
+    placeAt(document.getElementById("target"), 300);
   }],
   ["nothing on the page can take focus", "focus goes to the main column itself", ({ document }) => {
     document.querySelector("main").id = "target";
@@ -728,6 +749,7 @@ test("closing settings once the post is gone focuses the page, not a control of 
   const menu = await openPreview(view);
   click(view, [...menu.querySelectorAll("button")].find((button) => accessibleName(button) === "Settings"));
   const dialog = await waitFor(() => settingsDialog(view), "the settings dialog");
+  for (const control of dialog.querySelectorAll("a, button, input, select, textarea")) placeAt(control, 300);
 
   removePost(view);
   click(view, byText(dialog, "button", "Cancel")[0]);

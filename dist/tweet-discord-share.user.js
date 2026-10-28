@@ -2602,13 +2602,23 @@ function focusIfAble(target) {
   return document.activeElement === target;
 }
 
-// With the post gone, focus goes to a control in view, X's main column first, and as a last resort to main itself.
+// The browser still focuses a control with no size or no opacity, its own or an ancestor's.
+function isVisible(control) {
+  const { width, height } = control.getBoundingClientRect();
+  if (!width || !height) return false;
+  for (let node = control; node; node = node.parentElement) {
+    if (Number(getComputedStyle(node).opacity) === 0) return false;
+  }
+  return true;
+}
+
+// With the post gone, focus goes to a visible control in view, X's main column first, and as a last resort to main itself.
 function focusFallbackControl() {
   const main = document.querySelector("main");
   const controls = [...new Set([...(main?.querySelectorAll(FOCUSABLE_SELECTOR) ?? []), ...document.querySelectorAll(FOCUSABLE_SELECTOR)])];
   const viewport = visibleViewport();
   const inView = controls.filter((control) => rectsOverlap(control.getBoundingClientRect(), viewport));
-  if ([...inView, ...controls].some(focusIfAble) || !main) return;
+  if ([...inView, ...controls].some((control) => isVisible(control) && focusIfAble(control)) || !main) return;
   if (!main.hasAttribute("tabindex")) {
     main.tabIndex = -1;
     main.addEventListener("blur", () => main.removeAttribute("tabindex"), { once: true });
