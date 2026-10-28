@@ -125,7 +125,13 @@ const visibleText = (node) =>
     : node.getAttribute?.("aria-hidden") === "true"
       ? ""
       : [...node.childNodes].map(visibleText).join("");
-const accessibleName = (node) => (node.getAttribute("aria-label") || visibleText(node)).replace(/\s+/g, " ").trim();
+const accessibleName = (node) => {
+  const labelledBy = node.getAttribute("aria-labelledby");
+  const name = labelledBy
+    ? labelledBy.split(/\s+/).map((id) => visibleText(node.ownerDocument.getElementById(id))).join(" ")
+    : node.getAttribute("aria-label") || visibleText(node);
+  return name.replace(/\s+/g, " ").trim();
+};
 const accessibleDescription = (node) =>
   (node.getAttribute("aria-describedby") || "")
     .split(/\s+/)
@@ -148,9 +154,12 @@ async function openShareMenu(view) {
 
 const byText = (root, selector, text) =>
   [...root.querySelectorAll(selector)].filter((node) => node.textContent.trim() === text);
-const previewMenu = ({ document }) => document.querySelector('[role="menu"][aria-label="Share to Discord"]');
-const menuItems = (menu, name) =>
-  [...menu.querySelectorAll('[role="menuitem"]')].filter((item) => name === undefined || accessibleName(item) === name);
+const sharePanel = ({ document }) =>
+  [...document.querySelectorAll('[role="dialog"]')].find((dialog) => accessibleName(dialog) === "Share to Discord") ?? null;
+const channelButtons = (panel, name) => {
+  const group = [...panel.querySelectorAll('[role="group"]')].find((candidate) => accessibleName(candidate) === "Send to");
+  return [...group.querySelectorAll("button")].filter((button) => name === undefined || accessibleName(button) === name);
+};
 const leafWithText = (root, prefix) =>
   [...root.querySelectorAll("*")].find((node) => node.children.length === 0 && node.textContent.startsWith(prefix));
 const sentText = (requests) => requests.map((request) => JSON.stringify(postedMessage(request).payload)).join("\n");
@@ -167,9 +176,9 @@ const sentStatusIds = (requests) =>
 async function openPreview(view) {
   const [item] = await openShareMenu(view);
   click(view, item);
-  const menu = await waitFor(() => previewMenu(view), "the Share to Discord preview");
+  const menu = await waitFor(() => sharePanel(view), "the Share to Discord preview");
   await waitFor(() => {
-    const destinations = menuItems(menu);
+    const destinations = channelButtons(menu);
     return destinations.length > 0 && destinations.every((button) => !button.disabled);
   }, "the destinations to enable once the preview loads");
   return menu;
@@ -301,7 +310,7 @@ test("choosing the second destination in the preview posts only to its webhook",
   const preview = expandPreview(view, menu);
   assert.ok(preview.textContent.includes(postText), "the preview shows the post text");
   assert.ok(preview.textContent.includes(quoteText), "the preview shows the quoted post");
-  click(view, menuItems(menu, "Friends")[0]);
+  click(view, channelButtons(menu, "Friends")[0]);
 
   const success = await waitFor(() => toast(view, "success"), "the success toast");
   assert.equal(success.textContent, "Sent to Friends", "success toast names the chosen destination");
@@ -322,7 +331,7 @@ test("a quoted post opens the preview for a single destination, and unchecking t
   assert.ok(preview.textContent.includes(quoteText), "the preview starts with the quoted post");
   click(view, quoteToggle);
   assert.ok(!preview.textContent.includes(quoteText), "the preview drops the quoted post");
-  click(view, menuItems(menu, "Friends")[0]);
+  click(view, channelButtons(menu, "Friends")[0]);
 
   await waitFor(() => toast(view, "success"), "the success toast");
   const sent = sentText(view.webhookPosts(friendsWebhookUrl));
@@ -372,8 +381,8 @@ test("once the post is ready, focus is on the first channel, arrow keys move bet
   const view = openPage(t, { destinations: [general, friends] });
 
   const menu = await openPreview(view);
-  const [generalItem] = menuItems(menu, "General");
-  const [friendsItem] = menuItems(menu, "Friends");
+  const [generalItem] = channelButtons(menu, "General");
+  const [friendsItem] = channelButtons(menu, "Friends");
   await waitFor(() => view.document.activeElement === generalItem, "focus on the first channel when none was used before");
   press(view, "ArrowDown");
   assert.equal(view.document.activeElement, friendsItem, "ArrowDown moves to the next channel");
@@ -386,15 +395,30 @@ test("once the post is ready, focus is on the first channel, arrow keys move bet
   assert.equal(view.webhookPosts(friendsWebhookUrl).length, 0, "nothing is posted to the other channel");
 });
 
+test("the share panel is a non-modal dialog named by its heading, with the channels as plain buttons in a Send to group", async (t) => {
+  const view = openPage(t, { destinations: [general, friends] });
+
+  const panel = await openPreview(view);
+  assert.equal(panel.getAttribute("role"), "dialog");
+  assert.notEqual(panel.getAttribute("aria-modal"), "true", "the rest of X stays reachable while the panel is open");
+  const heading = view.document.getElementById(panel.getAttribute("aria-labelledby"));
+  assert.match(heading.tagName, /^H[1-6]$/, "the panel's name is its visible heading");
+  assert.equal(heading.textContent, "Share to Discord");
+  assert.deepEqual(channelButtons(panel).map(accessibleName), ["General", "Friends"]);
+  assert.deepEqual(channelButtons(panel).map((button) => button.getAttribute("role")), [null, null], "channels are plain buttons");
+  assert.equal(panel.querySelector('[role="menu"], [role="menuitem"]'), null, "nothing in the panel claims menu semantics");
+  assert.equal(shareItems(view).length, 1, "X's own share menu still has exactly one Share to Discord item");
+});
+
 test("the last-used channel is the default, named by its label alone and described as Last used", async (t) => {
   const view = openPage(t, { destinations: [general, friends] });
   view.window.localStorage.setItem("tds-last-destination", "friends");
 
   const menu = await openPreview(view);
-  assert.deepEqual(menuItems(menu).map(accessibleName), ["General", "Friends"], "channel buttons are named by the channel label alone");
-  const [friendsItem] = menuItems(menu, "Friends");
+  assert.deepEqual(channelButtons(menu).map(accessibleName), ["General", "Friends"], "channel buttons are named by the channel label alone");
+  const [friendsItem] = channelButtons(menu, "Friends");
   assert.equal(accessibleDescription(friendsItem), "Last used");
-  assert.equal(accessibleDescription(menuItems(menu, "General")[0]), "", "only the last-used channel carries the badge");
+  assert.equal(accessibleDescription(channelButtons(menu, "General")[0]), "", "only the last-used channel carries the badge");
   await waitFor(() => view.document.activeElement === friendsItem, "focus on the last-used channel");
 });
 
@@ -402,10 +426,10 @@ test("Escape closes the panel and returns focus to the post's Share button", asy
   const view = openPage(t, { destinations: [general, friends] });
 
   const menu = await openPreview(view);
-  await waitFor(() => menuItems(menu).includes(view.document.activeElement), "focus on a channel");
+  await waitFor(() => channelButtons(menu).includes(view.document.activeElement), "focus on a channel");
   press(view, "Escape");
 
-  assert.equal(previewMenu(view), null, "the panel closes");
+  assert.equal(sharePanel(view), null, "the panel closes");
   assert.equal(view.document.activeElement, view.document.querySelector('[data-testid="share"]'), "focus is back on Share");
 });
 
@@ -455,7 +479,7 @@ test("when the post is gone, closing the panel focuses the main column instead o
 
   view.document.querySelector("article").remove();
   press(view, "Escape");
-  assert.equal(previewMenu(view), null, "the panel closes");
+  assert.equal(sharePanel(view), null, "the panel closes");
   assert.equal(view.document.activeElement, home, "focus lands on the first control in the main column");
 });
 
@@ -475,11 +499,11 @@ test("once the panel has closed, Escape elsewhere on X leaves focus alone", asyn
   click(view, item);
   click(view, item);
   await waitFor(() => {
-    const menu = previewMenu(view);
-    return menu && menuItems(menu).every((button) => !button.disabled);
+    const menu = sharePanel(view);
+    return menu && channelButtons(menu).every((button) => !button.disabled);
   }, "the second panel's channels to enable");
   press(view, "Escape");
-  assert.equal(previewMenu(view), null, "Escape closes the panel");
+  assert.equal(sharePanel(view), null, "Escape closes the panel");
 
   composer.focus();
   press(view, "Escape");
@@ -498,7 +522,7 @@ test("Escape after Shift+Tab out of the panel belongs to what has focus", async 
   composer.focus();
   press(view, "Escape");
   assert.equal(view.document.activeElement, composer, "focus stays in the composer");
-  assert.equal(previewMenu(view), menu, "the panel stays open until dismissed from inside or by a click outside");
+  assert.equal(sharePanel(view), menu, "the panel stays open until dismissed from inside or by a click outside");
 });
 
 for (const [how, dismiss] of [
@@ -511,7 +535,7 @@ for (const [how, dismiss] of [
     await openPreview(view);
     dismiss(view);
 
-    assert.equal(previewMenu(view), null, "the preview closes");
+    assert.equal(sharePanel(view), null, "the preview closes");
     assert.equal(view.document.querySelector('[role="status"], [role="alert"]'), null, "no share starts");
     assert.equal(view.posts().length, 0, "no POST to any URL");
   });
@@ -552,7 +576,7 @@ test("a channel added with an existing channel's name still receives its own sha
 
   const reloaded = openPage(t, { store: view.store });
   const menu = await openPreview(reloaded);
-  click(reloaded, menuItems(menu, "General")[1]);
+  click(reloaded, channelButtons(menu, "General")[1]);
   await waitFor(() => toast(reloaded, "success"), "the share success toast");
   assert.equal(reloaded.webhookPosts(webhookUrl).length, 0, "nothing is posted to the first General channel");
   assert.ok(reloaded.webhookPosts(friendsWebhookUrl).length > 0, "the second General channel's webhook receives the post");
@@ -772,7 +796,7 @@ test("settings opened from the share panel return focus to Share on close", asyn
 
   click(view, [...menu.querySelectorAll("button")].find((button) => accessibleName(button) === "Settings"));
   const dialog = await waitFor(() => settingsDialog(view), "the settings dialog");
-  assert.equal(previewMenu(view), null, "the panel gives way to settings");
+  assert.equal(sharePanel(view), null, "the panel gives way to settings");
   click(view, byText(dialog, "button", "Cancel")[0]);
   assert.equal(view.document.activeElement, view.document.querySelector('[data-testid="share"]'));
 });

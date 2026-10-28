@@ -33,7 +33,6 @@ function createDestinationItem(destination, { isDefault, isLastUsed }) {
   const item = document.createElement("button");
   item.type = "button";
   item.className = `${POPOVER_CLASS}__item`;
-  item.setAttribute("role", "menuitem");
   item.disabled = true;
   if (isDefault) item.dataset.default = "true";
 
@@ -59,12 +58,12 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
   const { showQuoteOption = false, preferences = DEFAULT_PREFERENCES } = options;
   const lastUsedId = localStorage.getItem(DESTINATION_KEY);
   const defaultId = destinations.some((destination) => destination.id === lastUsedId) ? lastUsedId : destinations[0].id;
-  const menu = document.createElement("div");
-  menu.className = POPOVER_CLASS;
-  applyXThemeVars(menu);
-  menu.setAttribute("role", "menu");
-  menu.setAttribute("aria-label", "Share to Discord");
-  menu.tabIndex = -1;
+  // Non-modal on purpose. Tab may leave it, and Escape or a click outside closes it.
+  const panel = document.createElement("div");
+  panel.className = POPOVER_CLASS;
+  applyXThemeVars(panel);
+  panel.setAttribute("role", "dialog");
+  panel.tabIndex = -1;
 
   let includeQuote = true;
   let preparedTweet = null;
@@ -87,7 +86,9 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
   header.className = `${POPOVER_CLASS}__header`;
   const titleEl = document.createElement("h2");
   titleEl.className = `${POPOVER_CLASS}__title`;
+  titleEl.id = `${POPOVER_CLASS}-title`;
   titleEl.textContent = "Share to Discord";
+  panel.setAttribute("aria-labelledby", titleEl.id);
   const settingsBtn = createGearButton();
   settingsBtn.addEventListener("click", (event) => {
     event.preventDefault();
@@ -101,7 +102,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
   summary.className = `${POPOVER_CLASS}__summary`;
   summary.setAttribute("aria-live", "polite");
   summary.textContent = "Preparing post…";
-  menu.append(header, summary);
+  panel.append(header, summary);
 
   if (showQuoteOption) {
     const quoteOption = document.createElement("label");
@@ -116,7 +117,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     const quoteLabel = document.createElement("span");
     quoteLabel.textContent = "Include quoted post";
     quoteOption.append(quoteCheckbox, quoteLabel);
-    menu.append(quoteOption);
+    panel.append(quoteOption);
   }
 
   const sendLabel = document.createElement("p");
@@ -143,7 +144,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     return item;
   });
   destinationsHost.append(...destinationItems);
-  menu.append(sendLabel, destinationsHost);
+  panel.append(sendLabel, destinationsHost);
 
   const previewToggle = document.createElement("button");
   previewToggle.type = "button";
@@ -168,7 +169,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     setPreviewExpanded(previewWrap.hidden);
     lifecycle.place();
   });
-  menu.append(previewToggle, previewWrap);
+  panel.append(previewToggle, previewWrap);
 
   function renderPrepared() {
     const options = shareOptions();
@@ -187,14 +188,14 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
   async function loadPreview() {
     try {
       preparedTweet = await prepareShareTweet(article);
-      if (!menu.isConnected) return;
+      if (!panel.isConnected) return;
       renderPrepared();
       for (const item of destinationItems) item.disabled = false;
-      if (document.activeElement === menu) {
+      if (document.activeElement === panel) {
         destinationItems.find((item) => item.dataset.default === "true").focus();
       }
     } catch (error) {
-      if (!menu.isConnected) return;
+      if (!panel.isConnected) return;
       console.error(error);
       const message = error.message || "Could not build a preview for this post.";
       summary.textContent = message;
@@ -202,10 +203,10 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     }
   }
 
-  menu.addEventListener("keydown", (event) => {
+  panel.addEventListener("keydown", (event) => {
     const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
     if (!step) return;
-    const controls = [...menu.querySelectorAll("button, input")].filter((control) => {
+    const controls = [...panel.querySelectorAll("button, input")].filter((control) => {
       return !control.disabled && !control.closest("[hidden]");
     });
     const index = controls.indexOf(document.activeElement);
@@ -214,7 +215,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     controls.at(next).focus();
   });
 
-  const lifecycle = showPanel(menu, { findAnchor: () => currentShareButton(article, anchor), returnFocus });
+  const lifecycle = showPanel(panel, { findAnchor: () => currentShareButton(article, anchor), returnFocus });
   loadPreview();
 }
 
