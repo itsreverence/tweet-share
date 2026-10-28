@@ -234,7 +234,10 @@ function popoverStylesCss() {
       .${POPOVER_CLASS} {
         border-bottom-width: 0;
         border-radius: 16px 16px 0 0;
-        width: 100vw;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        width: auto;
       }
     }
     .${POPOVER_CLASS}:focus {

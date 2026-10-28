@@ -139,10 +139,10 @@ function clamp(value, min, max) {
 }
 
 // Rects and sizes are in viewport pixels; maxHeight caps the panel so only its preview scrolls.
+// A sheet has no top or left, because the narrow-viewport CSS pins it to the bottom edge, clear of the scrollbar.
 function placePanel({ anchorRect, panelSize, viewport }) {
   if (viewport.width < NARROW_VIEWPORT_WIDTH) {
-    const maxHeight = Math.round(viewport.height * 0.85);
-    return { mode: "sheet", top: Math.round(viewport.height - Math.min(panelSize.height, maxHeight)), left: 0, maxHeight };
+    return { mode: "sheet", maxHeight: Math.round(viewport.height * 0.85) };
   }
 
   const maxHeight = viewport.height - PANEL_MARGIN * 2;
@@ -177,9 +177,9 @@ function positionPopover(panel, anchorRect) {
     panelSize: { width, height },
     viewport: { width: window.innerWidth, height: window.innerHeight }
   });
-  panel.dataset.placement = placement.mode;
-  panel.style.top = `${placement.top}px`;
-  panel.style.left = `${placement.left}px`;
+  const sheet = placement.mode === "sheet";
+  panel.style.top = sheet ? "" : `${placement.top}px`;
+  panel.style.left = sheet ? "" : `${placement.left}px`;
   panel.style.maxHeight = `${placement.maxHeight}px`;
 }
 

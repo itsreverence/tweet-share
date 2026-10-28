@@ -78,22 +78,13 @@ test("a clamped panel shorter than the viewport stays as close to Share as it fi
   assertInsideViewport(placement, viewport, 420);
 });
 
-test("on a 390x844 phone the panel is a bottom sheet", () => {
+test("on a 390x844 phone the panel is a bottom sheet that leaves the top of the page visible", () => {
   const viewport = { width: 390, height: 844 };
-  const placement = placePanel({ anchorRect: shareButton(420, 330), panelSize: { width: 390, height: 300 }, viewport });
-
-  assert.equal(placement.mode, "sheet");
-  assert.equal(placement.left, 0);
-  assert.equal(placement.top + 300, viewport.height, "the sheet sits on the bottom edge");
-  assert.ok(placement.maxHeight < viewport.height, "the sheet leaves the top of the page visible");
-});
-
-test("a sheet taller than its cap sits on the bottom edge at its cap", () => {
-  const viewport = { width: 390, height: 844 };
-  const placement = placePanel({ anchorRect: shareButton(420, 330), panelSize: { width: 390, height: 2000 }, viewport });
-
-  assert.equal(placement.mode, "sheet");
-  assert.equal(placement.top + placement.maxHeight, viewport.height);
+  for (const height of [300, 2000]) {
+    const placement = placePanel({ anchorRect: shareButton(420, 330), panelSize: { width: 390, height }, viewport });
+    assert.equal(placement.mode, "sheet", `a ${height}px panel is a sheet`);
+    assert.ok(placement.maxHeight < viewport.height, `a ${height}px sheet is capped below the viewport height`);
+  }
 });
 
 test("the sheet starts below 500px wide", () => {
