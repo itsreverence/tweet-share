@@ -67,29 +67,16 @@ function tdsSharedSurfaceCss() {
       color: rgb(var(--tds-text));
       font-family: ${TDS_FONT};
     }
-    .${POPOVER_CLASS} {
-      border-radius: var(--border-radius-large, 16px);
-    }
-    .${POPOVER_CLASS}__title,
     .${SETTINGS_CLASS}__hint,
     .${SETTINGS_CLASS}__card-id,
     .${SETTINGS_CLASS}__empty,
     .${SETTINGS_CLASS}__field label {
       color: rgb(var(--tds-subtle));
     }
-    .${POPOVER_CLASS}__item:hover,
-    .${POPOVER_CLASS}__item:focus-visible,
-    .${POPOVER_CLASS}__manage:hover,
-    .${POPOVER_CLASS}__manage:focus-visible,
     .${SETTINGS_CLASS}__close:hover,
     .${SETTINGS_CLASS}__btn--ghost:hover {
       background: rgb(var(--tds-blue) / 0.1);
     }
-    .${POPOVER_CLASS}__item[data-last="true"]::after,
-    .${POPOVER_CLASS}__manage {
-      color: rgb(var(--tds-blue));
-    }
-    .${POPOVER_CLASS}__footer,
     .${SETTINGS_CLASS}__header,
     .${SETTINGS_CLASS}__footer,
     .${SETTINGS_CLASS}__card {

@@ -36,6 +36,7 @@ const DEBUG_MEDIA_EXTRACTION = false;
 const DEBUG_QUOTE_EXTRACTION = false;
 const SHARE_MENU_ITEM_CLASS = "tds-share-menu-item";
 const POPOVER_CLASS = "tds-popover";
+const AVATAR_CLASS = "tds-avatar";
 const TOAST_HOST_CLASS = "tds-toast-host";
 const TOAST_CLASS = "tds-toast";
 const SETTINGS_CLASS = "tds-settings";
@@ -149,29 +150,16 @@ function tdsSharedSurfaceCss() {
       color: rgb(var(--tds-text));
       font-family: ${TDS_FONT};
     }
-    .${POPOVER_CLASS} {
-      border-radius: var(--border-radius-large, 16px);
-    }
-    .${POPOVER_CLASS}__title,
     .${SETTINGS_CLASS}__hint,
     .${SETTINGS_CLASS}__card-id,
     .${SETTINGS_CLASS}__empty,
     .${SETTINGS_CLASS}__field label {
       color: rgb(var(--tds-subtle));
     }
-    .${POPOVER_CLASS}__item:hover,
-    .${POPOVER_CLASS}__item:focus-visible,
-    .${POPOVER_CLASS}__manage:hover,
-    .${POPOVER_CLASS}__manage:focus-visible,
     .${SETTINGS_CLASS}__close:hover,
     .${SETTINGS_CLASS}__btn--ghost:hover {
       background: rgb(var(--tds-blue) / 0.1);
     }
-    .${POPOVER_CLASS}__item[data-last="true"]::after,
-    .${POPOVER_CLASS}__manage {
-      color: rgb(var(--tds-blue));
-    }
-    .${POPOVER_CLASS}__footer,
     .${SETTINGS_CLASS}__header,
     .${SETTINGS_CLASS}__footer,
     .${SETTINGS_CLASS}__card {
@@ -1846,84 +1834,25 @@ function injectStyles() {
   const style = document.createElement("style");
   style.textContent = `
     ${tdsSharedSurfaceCss()}
+    ${popoverStylesCss()}
     ${previewStylesCss()}
 
     .${SHARE_MENU_ITEM_CLASS} {
       cursor: pointer;
     }
 
-    .${POPOVER_CLASS} {
-      position: fixed;
-      z-index: 10000;
-      min-width: 220px;
-      max-width: min(320px, calc(100vw - 16px));
-      padding: 4px;
-      font-size: 15px;
-    }
-    .${POPOVER_CLASS}__title {
-      font-size: 13px;
-      font-weight: 700;
-      padding: 8px 12px 4px;
-    }
-    .${POPOVER_CLASS}__item {
+    .${AVATAR_CLASS} {
       align-items: center;
-      background: transparent;
-      border: 0;
-      border-radius: 8px;
-      color: inherit;
-      cursor: pointer;
-      display: flex;
-      font: inherit;
-      gap: 8px;
-      padding: 10px 12px;
-      text-align: left;
-      width: 100%;
-    }
-    .${POPOVER_CLASS}__item:hover,
-    .${POPOVER_CLASS}__item:focus-visible,
-    .${POPOVER_CLASS}__manage:hover,
-    .${POPOVER_CLASS}__manage:focus-visible {
-      outline: none;
-    }
-    .${POPOVER_CLASS}__item[data-last="true"]::after {
-      content: "Last used";
-      font-size: 11px;
-      margin-left: auto;
-    }
-    .${POPOVER_CLASS}__quote-option {
-      align-items: center;
-      cursor: pointer;
-      display: flex;
-      font-size: 14px;
-      gap: 8px;
-      margin: 2px 4px 6px;
-      padding: 8px 12px;
-      user-select: none;
-    }
-    .${POPOVER_CLASS}__quote-option input {
-      accent-color: var(--color-primary, #1d9bf0);
-      cursor: pointer;
+      background: hsl(var(--tds-hue) 60% 45%);
+      border-radius: 10px;
+      color: #fff;
+      display: inline-flex;
       flex-shrink: 0;
-      height: 16px;
-      width: 16px;
-    }
-    .${POPOVER_CLASS}__footer {
-      border-top-width: 1px;
-      border-top-style: solid;
-      margin-top: 4px;
-      padding-top: 4px;
-    }
-    .${POPOVER_CLASS}__manage {
-      background: transparent;
-      border: 0;
-      border-radius: 999px;
-      cursor: pointer;
-      font: inherit;
       font-size: 15px;
-      font-weight: 400;
-      padding: 12px;
-      text-align: left;
-      width: 100%;
+      font-weight: 800;
+      height: 34px;
+      justify-content: center;
+      width: 34px;
     }
 
     .${TOAST_HOST_CLASS} {
@@ -2028,80 +1957,143 @@ function closeDestinationMenu() {
   }
 }
 
-function positionPopover(menu, anchor) {
-  const rect = anchor.getBoundingClientRect();
-  const margin = 8;
-  menu.style.visibility = "hidden";
-  menu.style.left = "0";
-  menu.style.top = "0";
-  if (!menu.isConnected) {
-    document.body.append(menu);
+const PANEL_MARGIN = 8;
+const SHEET_MAX_WIDTH = 500;
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(value, max));
+}
+
+// Rects and sizes are in viewport pixels; maxHeight caps the panel so only its preview scrolls.
+function placePanel({ anchorRect, panelSize, viewport }) {
+  if (viewport.width < SHEET_MAX_WIDTH) {
+    const maxHeight = Math.round(viewport.height * 0.85);
+    return { mode: "sheet", top: Math.round(viewport.height - Math.min(panelSize.height, maxHeight)), left: 0, maxHeight };
   }
 
-  const menuRect = menu.getBoundingClientRect();
-  let top = rect.top - menuRect.height - margin;
-  if (top < margin) {
-    top = rect.bottom + margin;
+  const maxHeight = viewport.height - PANEL_MARGIN * 2;
+  const height = Math.min(panelSize.height, maxHeight);
+  const left = clamp(
+    anchorRect.left + anchorRect.width / 2 - panelSize.width / 2,
+    PANEL_MARGIN,
+    viewport.width - panelSize.width - PANEL_MARGIN
+  );
+  let mode = "clamped";
+  let top = anchorRect.top + anchorRect.height / 2 - height / 2;
+  if (panelSize.height <= anchorRect.top - PANEL_MARGIN * 2) {
+    mode = "above";
+    top = anchorRect.top - PANEL_MARGIN - panelSize.height;
+  } else if (panelSize.height <= viewport.height - anchorRect.bottom - PANEL_MARGIN * 2) {
+    mode = "below";
+    top = anchorRect.bottom + PANEL_MARGIN;
+  }
+  top = clamp(top, PANEL_MARGIN, viewport.height - height - PANEL_MARGIN);
+  return { mode, top: Math.round(top), left: Math.round(left), maxHeight };
+}
+
+function positionPopover(panel, anchor) {
+  panel.style.maxHeight = "";
+  if (!panel.isConnected) {
+    document.body.append(panel);
   }
 
-  let left = rect.left + rect.width / 2 - menuRect.width / 2;
-  left = Math.max(margin, Math.min(left, window.innerWidth - menuRect.width - margin));
+  const { width, height } = panel.getBoundingClientRect();
+  const placement = placePanel({
+    anchorRect: anchor.getBoundingClientRect(),
+    panelSize: { width, height },
+    viewport: { width: window.innerWidth, height: window.innerHeight }
+  });
+  panel.dataset.placement = placement.mode;
+  panel.style.top = `${placement.top}px`;
+  panel.style.left = `${placement.left}px`;
+  panel.style.maxHeight = `${placement.maxHeight}px`;
+}
 
-  menu.style.top = `${Math.round(top)}px`;
-  menu.style.left = `${Math.round(left)}px`;
-  menu.style.visibility = "visible";
+function createChannelAvatar(destination) {
+  const avatar = document.createElement("span");
+  avatar.className = AVATAR_CLASS;
+  avatar.setAttribute("aria-hidden", "true");
+  avatar.textContent = [...destination.label.trim()][0]?.toUpperCase() || "#";
+  let hash = 0;
+  for (const char of destination.id) hash = (hash * 31 + char.codePointAt(0)) >>> 0;
+  avatar.style.setProperty("--tds-hue", String(hash % 360));
+  return avatar;
 }
 
   // --- 09-tweet-popover.js ---
-// Destination popover: preview, quote toggle, destination selection, and settings handoff.
-function setDestinationItemsDisabled(items, disabled) {
-  for (const item of items) {
-    item.disabled = disabled;
-    item.setAttribute("aria-disabled", disabled ? "true" : "false");
-    if (disabled) {
-      item.style.opacity = "0.55";
-      item.style.pointerEvents = "none";
-    } else {
-      item.style.opacity = "";
-      item.style.pointerEvents = "";
-    }
+// Destination popover: share summary, quote toggle, destination selection, preview, and settings handoff.
+const GEAR_ICON_PATH = "M10.54 1.75h2.92l1.57 2.36c.11.17.32.25.53.21l2.53-.59 2.17 2.17-.58 2.54c-.05.2.04.41.21.53l2.36 1.57v2.92l-2.36 1.57c-.17.12-.26.33-.21.53l.58 2.54-2.17 2.17-2.53-.59c-.21-.04-.42.04-.53.21l-1.57 2.36h-2.92l-1.58-2.36c-.11-.17-.32-.25-.52-.21l-2.54.59-2.17-2.17.58-2.54c.05-.2-.03-.41-.21-.53l-2.35-1.57v-2.92L4.1 8.97c.18-.12.26-.33.21-.53L3.73 5.9 5.9 3.73l2.54.59c.2.04.41-.04.52-.21l1.58-2.36zm1.07 2l-.98 1.47C10.05 6.08 9 6.5 7.99 6.27l-1.46-.34-.6.6.33 1.46c.24 1.01-.18 2.07-1.05 2.64l-1.46.98v.78l1.46.98c.87.57 1.29 1.63 1.05 2.64l-.33 1.46.6.6 1.46-.34c1.01-.23 2.06.19 2.64 1.05l.98 1.47h.78l.97-1.47c.58-.86 1.63-1.28 2.65-1.05l1.45.34.61-.6-.34-1.46c-.23-1.01.18-2.07 1.05-2.64l1.47-.98v-.78l-1.47-.98c-.87-.57-1.28-1.63-1.05-2.64l.34-1.46-.61-.6-1.45.34c-1.02.23-2.07-.19-2.65-1.05l-.97-1.47h-.78zM12 10.5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5c.82 0 1.5-.67 1.5-1.5s-.68-1.5-1.5-1.5zM8.5 12c0-1.93 1.56-3.5 3.5-3.5 1.93 0 3.5 1.57 3.5 3.5s-1.57 3.5-3.5 3.5c-1.94 0-3.5-1.57-3.5-3.5z";
+
+function describeShare(tweet, shareOptions, messageCount) {
+  const parts = [];
+  if (tweet.author?.username) parts.push(`Post by @${tweet.author.username}`);
+  const mediaCount = collectMediaAttachmentUrls(tweet, shareOptions).length;
+  if (mediaCount) parts.push(mediaFileCount(mediaCount));
+  if (shareOptions.includeQuote && hasQuoteTweet(tweet)) {
+    parts.push(tweet.quote.author?.username ? `quoting @${tweet.quote.author.username}` : "with quoted post");
   }
+  if (messageCount > 1) parts.push(`${messageCount} messages`);
+  return parts.join(" · ") || "Ready to send";
+}
+
+function createGearButton() {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `${POPOVER_CLASS}__icon-btn`;
+  button.setAttribute("aria-label", "Settings");
+  button.title = "Settings";
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", GEAR_ICON_PATH);
+  svg.append(path);
+  button.append(svg);
+  return button;
+}
+
+function createDestinationItem(destination, { isDefault, isLastUsed }) {
+  const item = document.createElement("button");
+  item.type = "button";
+  item.className = `${POPOVER_CLASS}__item`;
+  item.setAttribute("role", "menuitem");
+  item.disabled = true;
+  if (isDefault) item.dataset.default = "true";
+
+  const label = document.createElement("span");
+  label.className = `${POPOVER_CLASS}__item-label`;
+  label.textContent = destination.label;
+  item.append(createChannelAvatar(destination), label);
+
+  if (isLastUsed) {
+    // Announced as the button's description, so the name stays the channel's label.
+    const badge = document.createElement("span");
+    badge.className = `${POPOVER_CLASS}__badge`;
+    badge.id = `${POPOVER_CLASS}-last-used`;
+    badge.setAttribute("aria-hidden", "true");
+    badge.textContent = "Last used";
+    item.setAttribute("aria-describedby", badge.id);
+    item.append(badge);
+  }
+  return item;
 }
 
 function openDestinationMenu(anchor, article, destinations, options = {}) {
   const { showQuoteOption = false, preferences = DEFAULT_PREFERENCES } = options;
   closeDestinationMenu();
 
-  const last = localStorage.getItem(DESTINATION_KEY);
+  const lastUsedId = localStorage.getItem(DESTINATION_KEY);
+  const defaultId = destinations.some((destination) => destination.id === lastUsedId) ? lastUsedId : destinations[0].id;
   const menu = document.createElement("div");
-  menu.className = `${POPOVER_CLASS} ${POPOVER_CLASS}--with-preview`;
+  menu.className = POPOVER_CLASS;
   applyXThemeVars(menu);
   menu.setAttribute("role", "menu");
   menu.setAttribute("aria-label", "Share to Discord");
-
-  const titleEl = document.createElement("div");
-  titleEl.className = `${POPOVER_CLASS}__title`;
-  titleEl.textContent = "Share to Discord";
-  menu.append(titleEl);
-
-  const destinationsHost = document.createElement("div");
-
-  const previewWrap = document.createElement("div");
-  previewWrap.className = `${POPOVER_CLASS}__preview-wrap`;
-  const previewLabel = document.createElement("p");
-  previewLabel.className = `${POPOVER_CLASS}__preview-label`;
-  previewLabel.textContent = "Preview";
-  const previewBody = document.createElement("div");
-  const previewStatus = document.createElement("p");
-  previewStatus.className = `${POPOVER_CLASS}__preview-status`;
-  previewStatus.textContent = "Loading preview…";
-  previewBody.append(previewStatus);
-  previewWrap.append(previewLabel, previewBody);
+  menu.tabIndex = -1;
 
   let includeQuote = true;
   let preparedTweet = null;
-  let loadGeneration = 0;
-  const destinationItems = [];
+  let closed = false;
 
   function shareOptions() {
     return {
@@ -2110,122 +2102,149 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     };
   }
 
-  function previewOptions() {
-    const options = shareOptions();
-    const attachmentUrls = collectMediaAttachmentUrls(preparedTweet, options);
-    return {
-      ...options,
-      attachMedia: attachmentUrls.length > 0,
-      attachmentUrls,
-      fallbackVideoUrls: []
-    };
+  function closeAndReturnFocus() {
+    closeDestinationMenu();
+    if (anchor.isConnected) anchor.focus();
   }
 
-  function refreshPreview() {
-    if (!preparedTweet) return;
-    const attachmentUrls = collectMediaAttachmentUrls(preparedTweet, shareOptions());
-    previewBody.replaceChildren(renderDiscordPreview(
-      buildDiscordPayloads(preparedTweet, previewOptions()),
-      { hasMediaCandidates: attachmentUrls.length > 0 }
-    ));
-    positionPopover(menu, anchor);
-  }
-
-  async function loadPreview() {
-    const generation = ++loadGeneration;
-    setDestinationItemsDisabled(destinationItems, true);
-    previewBody.replaceChildren();
-    previewStatus.textContent = "Loading preview…";
-    previewBody.append(previewStatus);
-
-    try {
-      preparedTweet = await prepareShareTweet(article);
-      if (generation !== loadGeneration) return;
-      const attachmentUrls = collectMediaAttachmentUrls(preparedTweet, shareOptions());
-      previewBody.replaceChildren(renderDiscordPreview(
-        buildDiscordPayloads(preparedTweet, previewOptions()),
-        { hasMediaCandidates: attachmentUrls.length > 0 }
-      ));
-      setDestinationItemsDisabled(destinationItems, false);
-      positionPopover(menu, anchor);
-    } catch (error) {
-      if (generation !== loadGeneration) return;
-      console.error(error);
-      previewStatus.textContent = error.message || "Could not build a preview for this post.";
-      previewBody.replaceChildren(previewStatus);
-      setDestinationItemsDisabled(destinationItems, true);
-    }
-  }
-
-  if (showQuoteOption) {
-    const quoteOption = document.createElement("label");
-    quoteOption.className = `${POPOVER_CLASS}__quote-option`;
-
-    const quoteCheckbox = document.createElement("input");
-    quoteCheckbox.type = "checkbox";
-    quoteCheckbox.checked = true;
-    quoteCheckbox.addEventListener("change", () => {
-      includeQuote = quoteCheckbox.checked;
-      refreshPreview();
-    });
-
-    const quoteLabel = document.createElement("span");
-    quoteLabel.textContent = "Include quoted tweet";
-
-    quoteOption.append(quoteCheckbox, quoteLabel);
-    menu.append(quoteOption);
-  }
-
-  menu.append(previewWrap, destinationsHost);
-
-  destinations.forEach((destination) => {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = `${POPOVER_CLASS}__item`;
-    item.setAttribute("role", "menuitem");
-    item.textContent = destination.label;
-    item.disabled = true;
-    item.setAttribute("aria-disabled", "true");
-    item.style.opacity = "0.55";
-    item.style.pointerEvents = "none";
-    if (destination.id === last) {
-      item.dataset.last = "true";
-    }
-    item.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (!preparedTweet) return;
-      closeDestinationMenu();
-      localStorage.setItem(DESTINATION_KEY, destination.id);
-      runShare(article, destination.id, shareOptions(), preparedTweet);
-    });
-    destinationsHost.append(item);
-    destinationItems.push(item);
-  });
-
-  const footer = document.createElement("div");
-  footer.className = `${POPOVER_CLASS}__footer`;
-  const manageBtn = document.createElement("button");
-  manageBtn.type = "button";
-  manageBtn.className = `${POPOVER_CLASS}__manage`;
-  manageBtn.textContent = "Settings…";
-  manageBtn.addEventListener("click", (event) => {
+  const header = document.createElement("div");
+  header.className = `${POPOVER_CLASS}__header`;
+  const titleEl = document.createElement("h2");
+  titleEl.className = `${POPOVER_CLASS}__title`;
+  titleEl.textContent = "Share to Discord";
+  const settingsBtn = createGearButton();
+  settingsBtn.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
     closeDestinationMenu();
     openSettingsModal();
   });
-  footer.append(manageBtn);
-  menu.append(footer);
+  header.append(titleEl, settingsBtn);
+
+  const summary = document.createElement("p");
+  summary.className = `${POPOVER_CLASS}__summary`;
+  summary.setAttribute("aria-live", "polite");
+  summary.textContent = "Preparing post…";
+  menu.append(header, summary);
+
+  if (showQuoteOption) {
+    const quoteOption = document.createElement("label");
+    quoteOption.className = `${POPOVER_CLASS}__quote-option`;
+    const quoteCheckbox = document.createElement("input");
+    quoteCheckbox.type = "checkbox";
+    quoteCheckbox.checked = true;
+    quoteCheckbox.addEventListener("change", () => {
+      includeQuote = quoteCheckbox.checked;
+      if (preparedTweet) renderPrepared();
+    });
+    const quoteLabel = document.createElement("span");
+    quoteLabel.textContent = "Include quoted post";
+    quoteOption.append(quoteCheckbox, quoteLabel);
+    menu.append(quoteOption);
+  }
+
+  const sendLabel = document.createElement("p");
+  sendLabel.className = `${POPOVER_CLASS}__section-label`;
+  sendLabel.id = `${POPOVER_CLASS}-send-label`;
+  sendLabel.textContent = "Send to";
+  const destinationsHost = document.createElement("div");
+  destinationsHost.className = `${POPOVER_CLASS}__destinations`;
+  destinationsHost.setAttribute("role", "group");
+  destinationsHost.setAttribute("aria-labelledby", sendLabel.id);
+  const destinationItems = destinations.map((destination) => {
+    const item = createDestinationItem(destination, {
+      isDefault: destination.id === defaultId,
+      isLastUsed: destination.id === lastUsedId
+    });
+    item.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!preparedTweet) return;
+      closeAndReturnFocus();
+      localStorage.setItem(DESTINATION_KEY, destination.id);
+      runShare(article, destination.id, shareOptions(), preparedTweet);
+    });
+    return item;
+  });
+  destinationsHost.append(...destinationItems);
+  menu.append(sendLabel, destinationsHost);
+
+  const previewToggle = document.createElement("button");
+  previewToggle.type = "button";
+  previewToggle.className = `${POPOVER_CLASS}__disclosure`;
+  previewToggle.textContent = "Preview message";
+  const previewWrap = document.createElement("div");
+  previewWrap.className = `${POPOVER_CLASS}__preview-wrap`;
+  previewWrap.id = `${POPOVER_CLASS}-preview`;
+  previewToggle.setAttribute("aria-controls", previewWrap.id);
+  const previewStatus = document.createElement("p");
+  previewStatus.className = `${POPOVER_CLASS}__preview-status`;
+  previewStatus.textContent = "Loading preview…";
+  previewWrap.append(previewStatus);
+
+  function setPreviewExpanded(expanded) {
+    previewToggle.setAttribute("aria-expanded", String(expanded));
+    previewWrap.hidden = !expanded;
+  }
+  setPreviewExpanded(preferences.alwaysShowPreview);
+  previewToggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setPreviewExpanded(previewWrap.hidden);
+    positionPopover(menu, anchor);
+  });
+  menu.append(previewToggle, previewWrap);
+
+  function renderPrepared() {
+    const options = shareOptions();
+    const attachmentUrls = collectMediaAttachmentUrls(preparedTweet, options);
+    const payloads = buildDiscordPayloads(preparedTweet, {
+      ...options,
+      attachMedia: attachmentUrls.length > 0,
+      attachmentUrls,
+      fallbackVideoUrls: []
+    });
+    previewWrap.replaceChildren(renderDiscordPreview(payloads, { attachmentCount: attachmentUrls.length }));
+    summary.textContent = describeShare(preparedTweet, options, payloads.length);
+    positionPopover(menu, anchor);
+  }
+
+  async function loadPreview() {
+    try {
+      preparedTweet = await prepareShareTweet(article);
+      if (closed) return;
+      renderPrepared();
+      for (const item of destinationItems) item.disabled = false;
+      if (document.activeElement === menu) {
+        destinationItems.find((item) => item.dataset.default === "true").focus();
+      }
+    } catch (error) {
+      if (closed) return;
+      console.error(error);
+      const message = error.message || "Could not build a preview for this post.";
+      summary.textContent = message;
+      previewStatus.textContent = message;
+    }
+  }
 
   positionPopover(menu, anchor);
   activePopover = menu;
+  menu.focus({ preventScroll: true });
   loadPreview();
 
   const onKeyDown = (event) => {
     if (event.key === "Escape") {
-      closeDestinationMenu();
+      closeAndReturnFocus();
+      return;
     }
+    const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
+    if (!step || !menu.contains(document.activeElement)) return;
+    const controls = [...menu.querySelectorAll("button, input")].filter((control) => {
+      return !control.disabled && !control.closest("[hidden]");
+    });
+    const index = controls.indexOf(document.activeElement);
+    const next = index === -1 ? (step > 0 ? 0 : -1) : (index + step) % controls.length;
+    event.preventDefault();
+    controls.at(next).focus();
   };
 
   const onPointerDown = (event) => {
@@ -2240,10 +2259,206 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
   }, 0);
 
   activePopoverCleanup = () => {
-    loadGeneration += 1;
+    closed = true;
     document.removeEventListener("keydown", onKeyDown);
     document.removeEventListener("pointerdown", onPointerDown, true);
   };
+}
+
+function popoverStylesCss() {
+  return `
+    .${POPOVER_CLASS} {
+      border-radius: 16px;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      font-size: 15px;
+      overflow-y: auto;
+      position: fixed;
+      width: min(360px, calc(100vw - ${PANEL_MARGIN * 2}px));
+      z-index: 10000;
+    }
+    @media (max-width: ${SHEET_MAX_WIDTH - 0.02}px) {
+      .${POPOVER_CLASS} {
+        border-bottom-width: 0;
+        border-radius: 16px 16px 0 0;
+        width: 100vw;
+      }
+    }
+    .${POPOVER_CLASS}:focus {
+      outline: none;
+    }
+    .${POPOVER_CLASS} > :not(.${POPOVER_CLASS}__preview-wrap) {
+      flex-shrink: 0;
+    }
+    .${POPOVER_CLASS} [hidden] {
+      display: none;
+    }
+    .${POPOVER_CLASS}__header {
+      align-items: center;
+      display: flex;
+      gap: 8px;
+      padding: 10px 8px 0 16px;
+    }
+    .${POPOVER_CLASS}__title {
+      flex: 1;
+      font-size: 17px;
+      font-weight: 800;
+      margin: 0;
+    }
+    .${POPOVER_CLASS}__icon-btn {
+      align-items: center;
+      background: transparent;
+      border: 0;
+      border-radius: 999px;
+      color: rgb(var(--tds-subtle));
+      cursor: pointer;
+      display: inline-flex;
+      height: 34px;
+      justify-content: center;
+      padding: 0;
+      width: 34px;
+    }
+    .${POPOVER_CLASS}__icon-btn svg {
+      fill: currentColor;
+      height: 18px;
+      width: 18px;
+    }
+    .${POPOVER_CLASS}__summary {
+      color: rgb(var(--tds-subtle));
+      font-size: 13px;
+      line-height: 1.4;
+      margin: 0;
+      overflow: hidden;
+      padding: 0 16px 8px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .${POPOVER_CLASS}__quote-option {
+      align-items: center;
+      border-radius: 12px;
+      cursor: pointer;
+      display: flex;
+      font-size: 14px;
+      gap: 10px;
+      margin: 0 8px 4px;
+      padding: 8px;
+      user-select: none;
+    }
+    .${POPOVER_CLASS}__quote-option input {
+      accent-color: rgb(var(--tds-blue));
+      cursor: pointer;
+      flex-shrink: 0;
+      height: 18px;
+      margin: 0;
+      width: 18px;
+    }
+    .${POPOVER_CLASS}__section-label {
+      color: rgb(var(--tds-subtle));
+      font-size: 13px;
+      font-weight: 700;
+      margin: 0;
+      padding: 6px 16px;
+    }
+    .${POPOVER_CLASS}__destinations {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 0 12px 12px;
+    }
+    .${POPOVER_CLASS}__item {
+      align-items: center;
+      background: transparent;
+      border: 1px solid rgb(var(--tds-border));
+      border-radius: 12px;
+      box-sizing: border-box;
+      color: inherit;
+      cursor: pointer;
+      display: flex;
+      font: inherit;
+      font-weight: 700;
+      gap: 12px;
+      min-height: 52px;
+      padding: 8px 12px;
+      text-align: left;
+      transition: background 0.12s ease, border-color 0.12s ease;
+      width: 100%;
+    }
+    .${POPOVER_CLASS}__item-label {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .${POPOVER_CLASS}__item:hover:not(:disabled) {
+      background: rgb(var(--tds-blue) / 0.1);
+      border-color: rgb(var(--tds-blue));
+    }
+    .${POPOVER_CLASS}__item[data-default="true"] {
+      background: rgb(var(--tds-blue));
+      border-color: rgb(var(--tds-blue));
+      color: #fff;
+    }
+    .${POPOVER_CLASS}__item[data-default="true"]:hover:not(:disabled) {
+      background: rgb(var(--tds-blue) / 0.85);
+    }
+    .${POPOVER_CLASS}__item:disabled {
+      cursor: progress;
+      opacity: 0.5;
+    }
+    .${POPOVER_CLASS}__badge {
+      background: rgb(var(--tds-blue) / 0.15);
+      border-radius: 999px;
+      color: rgb(var(--tds-blue));
+      flex-shrink: 0;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 3px 8px;
+    }
+    .${POPOVER_CLASS}__item[data-default="true"] .${POPOVER_CLASS}__badge {
+      background: rgb(255 255 255 / 0.2);
+      color: #fff;
+    }
+    .${POPOVER_CLASS}__item:focus-visible,
+    .${POPOVER_CLASS}__icon-btn:focus-visible,
+    .${POPOVER_CLASS}__disclosure:focus-visible,
+    .${POPOVER_CLASS}__quote-option:focus-within {
+      outline: 2px solid rgb(var(--tds-blue));
+      outline-offset: 2px;
+    }
+    .${POPOVER_CLASS}__icon-btn:hover,
+    .${POPOVER_CLASS}__quote-option:hover,
+    .${POPOVER_CLASS}__disclosure:hover {
+      background: rgb(var(--tds-text) / 0.07);
+    }
+    .${POPOVER_CLASS}__disclosure {
+      align-items: center;
+      background: transparent;
+      border: 0;
+      border-top: 1px solid rgb(var(--tds-border));
+      color: rgb(var(--tds-subtle));
+      cursor: pointer;
+      display: flex;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      gap: 10px;
+      padding: 10px 16px;
+      text-align: left;
+      width: 100%;
+    }
+    .${POPOVER_CLASS}__disclosure::before {
+      border-bottom: 4px solid transparent;
+      border-left: 5px solid currentColor;
+      border-top: 4px solid transparent;
+      content: "";
+      transition: transform 0.12s ease;
+    }
+    .${POPOVER_CLASS}__disclosure[aria-expanded="true"]::before {
+      transform: rotate(90deg);
+    }
+  `;
 }
 
   // --- 09-ui.js ---
@@ -2417,7 +2632,8 @@ function wireDiscordMenuItem(item) {
       showToast("Could not find the post. Try opening Share again.", "error");
       return;
     }
-    startDiscordShare(article, item);
+    // X removes its menu, and this item with it, so the panel anchors to the post's Share button.
+    startDiscordShare(article, findShareButton(article) || item);
   });
 
   item.addEventListener("keydown", (event) => {
@@ -3270,34 +3486,35 @@ function embedColorCss(color) {
   return `#${(color >>> 0).toString(16).padStart(6, "0").slice(-6)}`;
 }
 
-function appendLinkText(container, value) {
-  const text = String(value || "").trim();
-  if (!text) return;
+function createPreviewLink(href, text) {
+  const link = document.createElement("a");
+  link.className = `${PREVIEW_CLASS}__link`;
+  link.href = href;
+  link.textContent = text;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  return link;
+}
 
-  const masked = /^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/i.exec(text);
-  if (masked) {
-    const link = document.createElement("a");
-    link.className = `${PREVIEW_CLASS}__link`;
-    link.href = masked[2];
-    link.textContent = masked[1];
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    container.append(link);
-    return;
+// The markdown the formatter emits: masked links, bare URLs, and _italic_ captions.
+const PREVIEW_MARKDOWN_PATTERN = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>]+)|\b_([^_\n]+)_\b/g;
+
+function appendPreviewMarkdown(container, value) {
+  const text = String(value || "");
+  let index = 0;
+  for (const match of text.matchAll(PREVIEW_MARKDOWN_PATTERN)) {
+    const [whole, maskedLabel, maskedUrl, url, italic] = match;
+    container.append(text.slice(index, match.index));
+    if (italic) {
+      const emphasis = document.createElement("em");
+      emphasis.textContent = italic;
+      container.append(emphasis);
+    } else {
+      container.append(createPreviewLink(maskedUrl || url, maskedLabel || url));
+    }
+    index = match.index + whole.length;
   }
-
-  if (/^https?:\/\//i.test(text)) {
-    const link = document.createElement("a");
-    link.className = `${PREVIEW_CLASS}__link`;
-    link.href = text;
-    link.textContent = text;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    container.append(link);
-    return;
-  }
-
-  container.textContent = text;
+  container.append(text.slice(index));
 }
 
 function createPreviewEmbed(embed) {
@@ -3322,13 +3539,7 @@ function createPreviewEmbed(embed) {
     const name = document.createElement("span");
     name.className = `${PREVIEW_CLASS}__author-name`;
     if (embed.author.url) {
-      const link = document.createElement("a");
-      link.className = `${PREVIEW_CLASS}__link`;
-      link.href = embed.author.url;
-      link.textContent = embed.author.name;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      name.append(link);
+      name.append(createPreviewLink(embed.author.url, embed.author.name));
     } else {
       name.textContent = embed.author.name;
     }
@@ -3374,7 +3585,7 @@ function createPreviewEmbed(embed) {
 
     const value = document.createElement("div");
     value.className = `${PREVIEW_CLASS}__field-value`;
-    appendLinkText(value, field.value);
+    appendPreviewMarkdown(value, field.value);
 
     fieldEl.append(name, value);
     card.append(fieldEl);
@@ -3397,35 +3608,6 @@ function previewMessageLabel(payload, index, total) {
   return `Message ${index + 1} of ${total} · Tweet`;
 }
 
-function appendPreviewContent(message, content) {
-  const blocks = String(content || "").split("\n\n").filter(Boolean);
-  for (const block of blocks) {
-    const blockEl = document.createElement("div");
-    blockEl.className = `${PREVIEW_CLASS}__content-block`;
-
-    const lines = block.split("\n");
-    const titleMatch = /^\*\*(.+)\*\*$/.exec(lines[0] || "");
-    if (titleMatch && lines[1] && /^https?:\/\//i.test(lines[1].trim())) {
-      const title = document.createElement("div");
-      title.className = `${PREVIEW_CLASS}__content-title`;
-      title.textContent = titleMatch[1];
-      blockEl.append(title);
-
-      const link = document.createElement("a");
-      link.className = `${PREVIEW_CLASS}__link`;
-      link.href = lines[1].trim();
-      link.textContent = lines[1].trim();
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      blockEl.append(link);
-    } else {
-      blockEl.textContent = block;
-    }
-
-    message.append(blockEl);
-  }
-}
-
 function createPreviewMessage(payload, index, total) {
   const message = document.createElement("div");
   message.className = `${PREVIEW_CLASS}__message`;
@@ -3438,36 +3620,43 @@ function createPreviewMessage(payload, index, total) {
     message.append(label);
   }
 
-  if (payload.username || payload.avatar_url) {
-    const header = document.createElement("div");
-    header.className = `${PREVIEW_CLASS}__webhook`;
+  const avatar = document.createElement("img");
+  avatar.className = `${PREVIEW_CLASS}__webhook-avatar`;
+  avatar.alt = "";
+  avatar.loading = "lazy";
+  avatar.referrerPolicy = "no-referrer";
+  if (payload.avatar_url) avatar.src = payload.avatar_url;
 
-    if (payload.avatar_url) {
-      const avatar = document.createElement("img");
-      avatar.className = `${PREVIEW_CLASS}__webhook-avatar`;
-      avatar.src = payload.avatar_url;
-      avatar.alt = "";
-      avatar.loading = "lazy";
-      avatar.referrerPolicy = "no-referrer";
-      header.append(avatar);
-    }
-
-    const name = document.createElement("span");
-    name.className = `${PREVIEW_CLASS}__webhook-name`;
-    name.textContent = payload.username || WEBHOOK_SENDER_NAME;
-    header.append(name);
-    message.append(header);
-  }
+  const body = document.createElement("div");
+  body.className = `${PREVIEW_CLASS}__message-body`;
+  const header = document.createElement("div");
+  header.className = `${PREVIEW_CLASS}__webhook`;
+  const name = document.createElement("span");
+  name.className = `${PREVIEW_CLASS}__webhook-name`;
+  name.textContent = payload.username || WEBHOOK_SENDER_NAME;
+  const badge = document.createElement("span");
+  badge.className = `${PREVIEW_CLASS}__app-badge`;
+  badge.textContent = "APP";
+  header.append(name, badge);
+  body.append(header);
 
   if (payload.content) {
-    appendPreviewContent(message, payload.content);
+    const content = document.createElement("div");
+    content.className = `${PREVIEW_CLASS}__content`;
+    appendPreviewMarkdown(content, payload.content);
+    body.append(content);
   }
 
   for (const embed of payload.embeds || []) {
-    message.append(createPreviewEmbed(embed));
+    body.append(createPreviewEmbed(embed));
   }
 
+  message.append(avatar, body);
   return message;
+}
+
+function mediaFileCount(count) {
+  return count === 1 ? "1 media file" : `${count} media files`;
 }
 
 function renderDiscordPreview(payloads, options = {}) {
@@ -3487,10 +3676,10 @@ function renderDiscordPreview(payloads, options = {}) {
     host.append(createPreviewMessage(payload, index, list.length));
   });
 
-  if (options.hasMediaCandidates) {
+  if (options.attachmentCount) {
     const hint = document.createElement("div");
     hint.className = `${PREVIEW_CLASS}__attachment-hint`;
-    hint.textContent = "Media uploads when eligible; unavailable or oversized video is sent as a playable link.";
+    hint.textContent = `${mediaFileCount(options.attachmentCount)} attached on send. Video too large for Discord goes as a link.`;
     host.append(hint);
   }
 
@@ -3499,91 +3688,101 @@ function renderDiscordPreview(payloads, options = {}) {
 
 function previewStylesCss() {
   return `
-    .${POPOVER_CLASS}--with-preview {
-      min-width: min(320px, calc(100vw - 16px));
-      max-width: min(400px, calc(100vw - 16px));
-    }
     .${POPOVER_CLASS}__preview-wrap {
-      border-top-width: 1px;
-      border-top-style: solid;
-      border-color: rgb(var(--tds-border, 47 51 54));
-      margin: 4px 4px 8px;
-      max-height: min(42vh, 360px);
+      flex: 1 1 auto;
+      min-height: 72px;
       overflow: auto;
-      padding: 8px 8px 4px;
-    }
-    .${POPOVER_CLASS}__preview-label {
-      color: rgb(var(--tds-subtle, 113 118 123));
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.02em;
-      margin: 0 0 8px;
-      text-transform: uppercase;
+      overscroll-behavior: contain;
+      padding: 4px 12px 12px;
     }
     .${POPOVER_CLASS}__preview-status {
-      color: rgb(var(--tds-subtle, 113 118 123));
+      color: rgb(var(--tds-subtle));
       font-size: 14px;
       line-height: 1.4;
       margin: 0;
-      padding: 8px 4px 12px;
+      padding: 8px 4px;
     }
     .${PREVIEW_CLASS} {
+      background: rgb(var(--tds-raised));
+      border-radius: 12px;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 12px;
+      padding: 12px 12px 12px 8px;
     }
     .${PREVIEW_CLASS}__empty {
-      color: rgb(var(--tds-subtle, 113 118 123));
+      color: rgb(var(--tds-subtle));
       font-size: 14px;
       line-height: 1.4;
       margin: 0;
     }
     .${PREVIEW_CLASS}__message {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
+      column-gap: 10px;
+      display: grid;
+      grid-template-columns: 32px minmax(0, 1fr);
     }
     .${PREVIEW_CLASS}__message-label {
-      color: rgb(var(--tds-subtle, 113 118 123));
-      font-size: 12px;
-      font-weight: 600;
+      color: rgb(var(--tds-subtle));
+      font-size: 11px;
+      font-weight: 700;
+      grid-column: 1 / -1;
+      letter-spacing: 0.02em;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+    }
+    .${PREVIEW_CLASS}__webhook-avatar {
+      background: #5865f2;
+      border-radius: 50%;
+      height: 32px;
+      object-fit: cover;
+      width: 32px;
+    }
+    .${PREVIEW_CLASS}__message-body {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
     }
     .${PREVIEW_CLASS}__webhook {
       align-items: center;
       display: flex;
-      gap: 8px;
-    }
-    .${PREVIEW_CLASS}__webhook-avatar {
-      border-radius: 50%;
-      height: 20px;
-      object-fit: cover;
-      width: 20px;
+      gap: 6px;
+      line-height: 1.2;
     }
     .${PREVIEW_CLASS}__webhook-name {
-      color: rgb(var(--tds-text, 231 233 234));
-      font-size: 13px;
-      font-weight: 600;
-    }
-    .${PREVIEW_CLASS}__content-block {
-      color: rgb(var(--tds-text, 231 233 234));
-      display: flex;
-      flex-direction: column;
       font-size: 14px;
-      gap: 4px;
-      line-height: 1.45;
-      word-break: break-word;
-    }
-    .${PREVIEW_CLASS}__content-title {
       font-weight: 700;
     }
+    .${PREVIEW_CLASS}__app-badge {
+      background: #5865f2;
+      border-radius: 3px;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 4px;
+    }
+    .${PREVIEW_CLASS}__content,
+    .${PREVIEW_CLASS}__description,
+    .${PREVIEW_CLASS}__field-value {
+      line-height: 1.4;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .${PREVIEW_CLASS}__content,
+    .${PREVIEW_CLASS}__description,
+    .${PREVIEW_CLASS}__title {
+      font-size: 14px;
+    }
     .${PREVIEW_CLASS}__embed {
-      background: rgb(var(--tds-text, 231 233 234) / 0.06);
+      background: rgb(var(--tds-surface));
+      border: 1px solid rgb(var(--tds-border));
       border-left: 4px solid var(--tds-preview-accent, #5865f2);
       border-radius: 4px;
       display: flex;
       flex-direction: column;
       gap: 6px;
-      padding: 8px 10px 10px 8px;
+      margin-top: 4px;
+      padding: 8px 10px 10px;
     }
     .${PREVIEW_CLASS}__author {
       align-items: center;
@@ -3596,22 +3795,16 @@ function previewStylesCss() {
       object-fit: cover;
       width: 20px;
     }
-    .${PREVIEW_CLASS}__author-name {
-      color: rgb(var(--tds-text, 231 233 234));
+    .${PREVIEW_CLASS}__author-name,
+    .${PREVIEW_CLASS}__field-name {
       font-size: 13px;
-      font-weight: 600;
-    }
-    .${PREVIEW_CLASS}__title {
-      color: rgb(var(--tds-text, 231 233 234));
-      font-size: 14px;
       font-weight: 700;
     }
-    .${PREVIEW_CLASS}__description {
-      color: rgb(var(--tds-text, 231 233 234));
-      font-size: 14px;
-      line-height: 1.45;
-      white-space: pre-wrap;
-      word-break: break-word;
+    .${PREVIEW_CLASS}__author-name .${PREVIEW_CLASS}__link {
+      color: inherit;
+    }
+    .${PREVIEW_CLASS}__title {
+      font-weight: 700;
     }
     .${PREVIEW_CLASS}__image-wrap {
       margin-top: 2px;
@@ -3629,28 +3822,23 @@ function previewStylesCss() {
       flex-direction: column;
       gap: 2px;
     }
-    .${PREVIEW_CLASS}__field-name {
-      color: rgb(var(--tds-text, 231 233 234));
-      font-size: 13px;
-      font-weight: 700;
-    }
     .${PREVIEW_CLASS}__field-value {
-      color: rgb(var(--tds-subtle, 113 118 123));
+      color: rgb(var(--tds-subtle));
       font-size: 13px;
-      line-height: 1.4;
-      word-break: break-word;
     }
     .${PREVIEW_CLASS}__footer {
-      color: rgb(var(--tds-subtle, 113 118 123));
+      color: rgb(var(--tds-subtle));
       font-size: 12px;
     }
     .${PREVIEW_CLASS}__attachment-hint {
-      color: rgb(var(--tds-subtle, 113 118 123));
+      border-top: 1px solid rgb(var(--tds-border));
+      color: rgb(var(--tds-subtle));
       font-size: 12px;
       line-height: 1.35;
+      padding: 8px 0 0 4px;
     }
     .${PREVIEW_CLASS}__link {
-      color: rgb(var(--tds-blue, 29 155 240));
+      color: rgb(var(--tds-blue));
       text-decoration: none;
       word-break: break-all;
     }

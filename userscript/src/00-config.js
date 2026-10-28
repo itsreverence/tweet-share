@@ -3,6 +3,7 @@ const DEBUG_MEDIA_EXTRACTION = false;
 const DEBUG_QUOTE_EXTRACTION = false;
 const SHARE_MENU_ITEM_CLASS = "tds-share-menu-item";
 const POPOVER_CLASS = "tds-popover";
+const AVATAR_CLASS = "tds-avatar";
 const TOAST_HOST_CLASS = "tds-toast-host";
 const TOAST_CLASS = "tds-toast";
 const SETTINGS_CLASS = "tds-settings";

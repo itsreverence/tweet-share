@@ -168,7 +168,8 @@ function wireDiscordMenuItem(item) {
       showToast("Could not find the post. Try opening Share again.", "error");
       return;
     }
-    startDiscordShare(article, item);
+    // X removes its menu, and this item with it, so the panel anchors to the post's Share button.
+    startDiscordShare(article, findShareButton(article) || item);
   });
 
   item.addEventListener("keydown", (event) => {

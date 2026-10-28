@@ -97,7 +97,36 @@ async function waitFor(condition, what, timeoutMs = 3000) {
   }
 }
 
-const click = ({ window }, node) => node.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+function assertInteractable({ window }, node) {
+  for (let element = node; element; element = element.parentElement) {
+    const style = window.getComputedStyle(element);
+    assert.ok(
+      !element.hidden && style.display !== "none" && style.visibility !== "hidden",
+      `<${node.tagName.toLowerCase()}> "${node.textContent.trim() || node.value}" sits in a collapsed or hidden region; open it first, as a user would`
+    );
+  }
+}
+
+function click(view, node) {
+  assertInteractable(view, node);
+  node.dispatchEvent(new view.window.MouseEvent("click", { bubbles: true }));
+}
+
+const press = ({ window, document }, key) =>
+  (document.activeElement || document).dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true }));
+const visibleText = (node) =>
+  node.nodeType === node.TEXT_NODE
+    ? node.textContent
+    : node.getAttribute?.("aria-hidden") === "true"
+      ? ""
+      : [...node.childNodes].map(visibleText).join("");
+const accessibleName = (node) => (node.getAttribute("aria-label") || visibleText(node)).replace(/\s+/g, " ").trim();
+const accessibleDescription = (node) =>
+  (node.getAttribute("aria-describedby") || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((id) => node.ownerDocument.getElementById(id).textContent)
+    .join(" ");
 const shareItems = ({ document }) =>
   [...document.querySelectorAll('[role="menuitem"]')].filter((item) => item.textContent.trim() === "Share to Discord");
 const toast = ({ document }, state) => document.querySelector(`.tds-toast[data-state="${state}"]`);
@@ -115,6 +144,10 @@ async function openShareMenu(view) {
 const byText = (root, selector, text) =>
   [...root.querySelectorAll(selector)].filter((node) => node.textContent.trim() === text);
 const previewMenu = ({ document }) => document.querySelector('[role="menu"][aria-label="Share to Discord"]');
+const menuItems = (menu, name) =>
+  [...menu.querySelectorAll('[role="menuitem"]')].filter((item) => name === undefined || accessibleName(item) === name);
+const leafWithText = (root, prefix) =>
+  [...root.querySelectorAll("*")].find((node) => node.children.length === 0 && node.textContent.startsWith(prefix));
 const sentText = (requests) => requests.map((request) => JSON.stringify(postedMessage(request).payload)).join("\n");
 const stringsIn = (value) =>
   typeof value === "string" ? [value] : value && typeof value === "object" ? Object.values(value).flatMap(stringsIn) : [];
@@ -131,10 +164,36 @@ async function openPreview(view) {
   click(view, item);
   const menu = await waitFor(() => previewMenu(view), "the Share to Discord preview");
   await waitFor(() => {
-    const destinations = [...menu.querySelectorAll('[role="menuitem"]')];
+    const destinations = menuItems(menu);
     return destinations.length > 0 && destinations.every((button) => !button.disabled);
   }, "the destinations to enable once the preview loads");
   return menu;
+}
+
+function expandPreview(view, menu) {
+  const toggle = byText(menu, "button", "Preview message")[0];
+  if (toggle.getAttribute("aria-expanded") !== "true") click(view, toggle);
+  assert.equal(toggle.getAttribute("aria-expanded"), "true", "the Preview message disclosure is expanded");
+  return view.document.getElementById(toggle.getAttribute("aria-controls"));
+}
+
+// Approximates what a reader sees line by line: block boxes and preserved newlines break lines.
+function renderedLines({ window }, root) {
+  let text = "";
+  const walk = (node) => {
+    if (node.nodeType === node.TEXT_NODE) {
+      const preserved = /^pre/.test(window.getComputedStyle(node.parentElement).whiteSpace);
+      text += preserved ? node.textContent : node.textContent.replace(/\s+/g, " ");
+      return;
+    }
+    if (node.nodeType !== node.ELEMENT_NODE) return;
+    const block = !/^inline/.test(window.getComputedStyle(node).display);
+    if (block) text += "\n";
+    node.childNodes.forEach(walk);
+    if (block) text += "\n";
+  };
+  walk(root);
+  return text.split("\n").map((line) => line.trim()).filter(Boolean);
 }
 
 const settingsDialog = ({ document }) =>
@@ -145,9 +204,10 @@ const fieldInput = (container, label) => byText(container, "label", label)[0].co
 const channelNames = (dialog) =>
   byText(channelList(dialog), "label", "Display name").map((label) => label.control.value);
 
-function type({ window }, input, value) {
+function type(view, input, value) {
+  assertInteractable(view, input);
   input.value = value;
-  input.dispatchEvent(new window.Event("input", { bubbles: true }));
+  input.dispatchEvent(new view.window.Event("input", { bubbles: true }));
 }
 
 async function openSettings(view) {
@@ -206,9 +266,10 @@ test("choosing the second destination in the preview posts only to its webhook",
   const view = openPage(t, { destinations: [general, friends], quote: true });
 
   const menu = await openPreview(view);
-  assert.ok(menu.textContent.includes(postText), "the preview shows the post text");
-  assert.ok(menu.textContent.includes(quoteText), "the preview shows the quoted post");
-  click(view, byText(menu, '[role="menuitem"]', "Friends")[0]);
+  const preview = expandPreview(view, menu);
+  assert.ok(preview.textContent.includes(postText), "the preview shows the post text");
+  assert.ok(preview.textContent.includes(quoteText), "the preview shows the quoted post");
+  click(view, menuItems(menu, "Friends")[0]);
 
   const success = await waitFor(() => toast(view, "success"), "the success toast");
   assert.equal(success.textContent, "Sent to Friends", "success toast names the chosen destination");
@@ -223,17 +284,97 @@ test("a quoted post opens the preview for a single destination, and unchecking t
   const view = openPage(t, { destinations: [friends], quote: true });
 
   const menu = await openPreview(view);
-  const [quoteToggle] = byText(menu, "label", "Include quoted tweet");
+  const preview = expandPreview(view, menu);
+  const [quoteToggle] = byText(menu, "label", "Include quoted post");
   assert.ok(quoteToggle, "the preview offers the quote toggle");
+  assert.ok(preview.textContent.includes(quoteText), "the preview starts with the quoted post");
   click(view, quoteToggle);
-  assert.ok(!menu.textContent.includes(quoteText), "the preview drops the quoted post");
-  click(view, byText(menu, '[role="menuitem"]', "Friends")[0]);
+  assert.ok(!preview.textContent.includes(quoteText), "the preview drops the quoted post");
+  click(view, menuItems(menu, "Friends")[0]);
 
   await waitFor(() => toast(view, "success"), "the success toast");
   const sent = sentText(view.webhookPosts(friendsWebhookUrl));
   assert.ok(sent.includes(postText), "the post text is still sent");
   assert.ok(!sent.includes(quoteText), "the quote text is not sent");
   assert.ok(!sentStatusIds(view.webhookPosts(friendsWebhookUrl)).has(quoteId), "no link to the quoted post is sent");
+});
+
+test("the summary line names the post, its media, and the quote, and follows the quote toggle", async (t) => {
+  const view = openPage(t, { destinations: [general, friends], quote: true });
+
+  const menu = await openPreview(view);
+  const summary = leafWithText(menu, "Post by @alice");
+  assert.equal(summary?.textContent, "Post by @alice · 1 media file · quoting @bob");
+  click(view, byText(menu, "label", "Include quoted post")[0]);
+  assert.equal(summary.textContent, "Post by @alice · 1 media file", "unchecking the quote drops it from the summary");
+});
+
+test("the preview shows the post link and the quoted-post line on separate lines", async (t) => {
+  const view = openPage(t, { destinations: [general, friends], quote: true });
+
+  const preview = expandPreview(view, await openPreview(view));
+  const lines = renderedLines(view, preview);
+  assert.ok(lines.includes(postUrl), `the post URL is a line of its own in ${JSON.stringify(lines)}`);
+  assert.ok(
+    lines.includes("↳ 📑 Quoted post: https://x.com/bob/status/999"),
+    `the quoted-post line is a line of its own in ${JSON.stringify(lines)}`
+  );
+  assert.ok(preview.querySelector(`a[href="${postUrl}"]`), "the post URL is a link");
+});
+
+test("the preview starts collapsed unless Always show preview is on", async (t) => {
+  for (const alwaysShowPreview of [false, true]) {
+    const view = openPage(t, {
+      store: new Map([["tds-destinations", [general]], ["tds-preferences", { alwaysShowPreview }]]),
+      quote: true
+    });
+    const menu = await openPreview(view);
+    const toggle = byText(menu, "button", "Preview message")[0];
+    const preview = view.document.getElementById(toggle.getAttribute("aria-controls"));
+    assert.equal(toggle.getAttribute("aria-expanded"), String(alwaysShowPreview), `aria-expanded with alwaysShowPreview ${alwaysShowPreview}`);
+    assert.equal(preview.hidden, !alwaysShowPreview, `preview visibility with alwaysShowPreview ${alwaysShowPreview}`);
+  }
+});
+
+test("once the post is ready, focus is on the first channel, arrow keys move between channels, and activating it sends there", async (t) => {
+  const view = openPage(t, { destinations: [general, friends] });
+
+  const menu = await openPreview(view);
+  const [generalItem] = menuItems(menu, "General");
+  const [friendsItem] = menuItems(menu, "Friends");
+  await waitFor(() => view.document.activeElement === generalItem, "focus on the first channel when none was used before");
+  press(view, "ArrowDown");
+  assert.equal(view.document.activeElement, friendsItem, "ArrowDown moves to the next channel");
+  press(view, "ArrowUp");
+  assert.equal(view.document.activeElement, generalItem, "ArrowUp moves back");
+
+  click(view, view.document.activeElement);
+  const success = await waitFor(() => toast(view, "success"), "the success toast");
+  assert.equal(success.textContent, "Sent to General", "the focused channel is the one that receives the share");
+  assert.equal(view.webhookPosts(friendsWebhookUrl).length, 0, "nothing is posted to the other channel");
+});
+
+test("the last-used channel is the default, named by its label alone and described as Last used", async (t) => {
+  const view = openPage(t, { destinations: [general, friends] });
+  view.window.localStorage.setItem("tds-last-destination", "friends");
+
+  const menu = await openPreview(view);
+  assert.deepEqual(menuItems(menu).map(accessibleName), ["General", "Friends"], "channel buttons are named by the channel label alone");
+  const [friendsItem] = menuItems(menu, "Friends");
+  assert.equal(accessibleDescription(friendsItem), "Last used");
+  assert.equal(accessibleDescription(menuItems(menu, "General")[0]), "", "only the last-used channel carries the badge");
+  await waitFor(() => view.document.activeElement === friendsItem, "focus on the last-used channel");
+});
+
+test("Escape closes the panel and returns focus to the post's Share button", async (t) => {
+  const view = openPage(t, { destinations: [general, friends] });
+
+  const menu = await openPreview(view);
+  await waitFor(() => menuItems(menu).includes(view.document.activeElement), "focus on a channel");
+  press(view, "Escape");
+
+  assert.equal(previewMenu(view), null, "the panel closes");
+  assert.equal(view.document.activeElement, view.document.querySelector('[data-testid="share"]'), "focus is back on Share");
 });
 
 for (const [how, dismiss] of [
@@ -287,7 +428,7 @@ test("a channel added with an existing channel's name still receives its own sha
 
   const reloaded = openPage(t, { store: view.store });
   const menu = await openPreview(reloaded);
-  click(reloaded, byText(menu, '[role="menuitem"]', "General")[1]);
+  click(reloaded, menuItems(menu, "General")[1]);
   await waitFor(() => toast(reloaded, "success"), "the share success toast");
   assert.equal(reloaded.webhookPosts(webhookUrl).length, 0, "nothing is posted to the first General channel");
   assert.ok(reloaded.webhookPosts(friendsWebhookUrl).length > 0, "the second General channel's webhook receives the post");

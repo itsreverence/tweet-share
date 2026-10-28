@@ -3,34 +3,35 @@ function embedColorCss(color) {
   return `#${(color >>> 0).toString(16).padStart(6, "0").slice(-6)}`;
 }
 
-function appendLinkText(container, value) {
-  const text = String(value || "").trim();
-  if (!text) return;
+function createPreviewLink(href, text) {
+  const link = document.createElement("a");
+  link.className = `${PREVIEW_CLASS}__link`;
+  link.href = href;
+  link.textContent = text;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  return link;
+}
 
-  const masked = /^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/i.exec(text);
-  if (masked) {
-    const link = document.createElement("a");
-    link.className = `${PREVIEW_CLASS}__link`;
-    link.href = masked[2];
-    link.textContent = masked[1];
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    container.append(link);
-    return;
+// The markdown the formatter emits: masked links, bare URLs, and _italic_ captions.
+const PREVIEW_MARKDOWN_PATTERN = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>]+)|\b_([^_\n]+)_\b/g;
+
+function appendPreviewMarkdown(container, value) {
+  const text = String(value || "");
+  let index = 0;
+  for (const match of text.matchAll(PREVIEW_MARKDOWN_PATTERN)) {
+    const [whole, maskedLabel, maskedUrl, url, italic] = match;
+    container.append(text.slice(index, match.index));
+    if (italic) {
+      const emphasis = document.createElement("em");
+      emphasis.textContent = italic;
+      container.append(emphasis);
+    } else {
+      container.append(createPreviewLink(maskedUrl || url, maskedLabel || url));
+    }
+    index = match.index + whole.length;
   }
-
-  if (/^https?:\/\//i.test(text)) {
-    const link = document.createElement("a");
-    link.className = `${PREVIEW_CLASS}__link`;
-    link.href = text;
-    link.textContent = text;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    container.append(link);
-    return;
-  }
-
-  container.textContent = text;
+  container.append(text.slice(index));
 }
 
 function createPreviewEmbed(embed) {
@@ -55,13 +56,7 @@ function createPreviewEmbed(embed) {
     const name = document.createElement("span");
     name.className = `${PREVIEW_CLASS}__author-name`;
     if (embed.author.url) {
-      const link = document.createElement("a");
-      link.className = `${PREVIEW_CLASS}__link`;
-      link.href = embed.author.url;
-      link.textContent = embed.author.name;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      name.append(link);
+      name.append(createPreviewLink(embed.author.url, embed.author.name));
     } else {
       name.textContent = embed.author.name;
     }
@@ -107,7 +102,7 @@ function createPreviewEmbed(embed) {
 
     const value = document.createElement("div");
     value.className = `${PREVIEW_CLASS}__field-value`;
-    appendLinkText(value, field.value);
+    appendPreviewMarkdown(value, field.value);
 
     fieldEl.append(name, value);
     card.append(fieldEl);
@@ -130,35 +125,6 @@ function previewMessageLabel(payload, index, total) {
   return `Message ${index + 1} of ${total} · Tweet`;
 }
 
-function appendPreviewContent(message, content) {
-  const blocks = String(content || "").split("\n\n").filter(Boolean);
-  for (const block of blocks) {
-    const blockEl = document.createElement("div");
-    blockEl.className = `${PREVIEW_CLASS}__content-block`;
-
-    const lines = block.split("\n");
-    const titleMatch = /^\*\*(.+)\*\*$/.exec(lines[0] || "");
-    if (titleMatch && lines[1] && /^https?:\/\//i.test(lines[1].trim())) {
-      const title = document.createElement("div");
-      title.className = `${PREVIEW_CLASS}__content-title`;
-      title.textContent = titleMatch[1];
-      blockEl.append(title);
-
-      const link = document.createElement("a");
-      link.className = `${PREVIEW_CLASS}__link`;
-      link.href = lines[1].trim();
-      link.textContent = lines[1].trim();
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      blockEl.append(link);
-    } else {
-      blockEl.textContent = block;
-    }
-
-    message.append(blockEl);
-  }
-}
-
 function createPreviewMessage(payload, index, total) {
   const message = document.createElement("div");
   message.className = `${PREVIEW_CLASS}__message`;
@@ -171,36 +137,43 @@ function createPreviewMessage(payload, index, total) {
     message.append(label);
   }
 
-  if (payload.username || payload.avatar_url) {
-    const header = document.createElement("div");
-    header.className = `${PREVIEW_CLASS}__webhook`;
+  const avatar = document.createElement("img");
+  avatar.className = `${PREVIEW_CLASS}__webhook-avatar`;
+  avatar.alt = "";
+  avatar.loading = "lazy";
+  avatar.referrerPolicy = "no-referrer";
+  if (payload.avatar_url) avatar.src = payload.avatar_url;
 
-    if (payload.avatar_url) {
-      const avatar = document.createElement("img");
-      avatar.className = `${PREVIEW_CLASS}__webhook-avatar`;
-      avatar.src = payload.avatar_url;
-      avatar.alt = "";
-      avatar.loading = "lazy";
-      avatar.referrerPolicy = "no-referrer";
-      header.append(avatar);
-    }
-
-    const name = document.createElement("span");
-    name.className = `${PREVIEW_CLASS}__webhook-name`;
-    name.textContent = payload.username || WEBHOOK_SENDER_NAME;
-    header.append(name);
-    message.append(header);
-  }
+  const body = document.createElement("div");
+  body.className = `${PREVIEW_CLASS}__message-body`;
+  const header = document.createElement("div");
+  header.className = `${PREVIEW_CLASS}__webhook`;
+  const name = document.createElement("span");
+  name.className = `${PREVIEW_CLASS}__webhook-name`;
+  name.textContent = payload.username || WEBHOOK_SENDER_NAME;
+  const badge = document.createElement("span");
+  badge.className = `${PREVIEW_CLASS}__app-badge`;
+  badge.textContent = "APP";
+  header.append(name, badge);
+  body.append(header);
 
   if (payload.content) {
-    appendPreviewContent(message, payload.content);
+    const content = document.createElement("div");
+    content.className = `${PREVIEW_CLASS}__content`;
+    appendPreviewMarkdown(content, payload.content);
+    body.append(content);
   }
 
   for (const embed of payload.embeds || []) {
-    message.append(createPreviewEmbed(embed));
+    body.append(createPreviewEmbed(embed));
   }
 
+  message.append(avatar, body);
   return message;
+}
+
+function mediaFileCount(count) {
+  return count === 1 ? "1 media file" : `${count} media files`;
 }
 
 function renderDiscordPreview(payloads, options = {}) {
@@ -220,10 +193,10 @@ function renderDiscordPreview(payloads, options = {}) {
     host.append(createPreviewMessage(payload, index, list.length));
   });
 
-  if (options.hasMediaCandidates) {
+  if (options.attachmentCount) {
     const hint = document.createElement("div");
     hint.className = `${PREVIEW_CLASS}__attachment-hint`;
-    hint.textContent = "Media uploads when eligible; unavailable or oversized video is sent as a playable link.";
+    hint.textContent = `${mediaFileCount(options.attachmentCount)} attached on send. Video too large for Discord goes as a link.`;
     host.append(hint);
   }
 
@@ -232,91 +205,101 @@ function renderDiscordPreview(payloads, options = {}) {
 
 function previewStylesCss() {
   return `
-    .${POPOVER_CLASS}--with-preview {
-      min-width: min(320px, calc(100vw - 16px));
-      max-width: min(400px, calc(100vw - 16px));
-    }
     .${POPOVER_CLASS}__preview-wrap {
-      border-top-width: 1px;
-      border-top-style: solid;
-      border-color: rgb(var(--tds-border, 47 51 54));
-      margin: 4px 4px 8px;
-      max-height: min(42vh, 360px);
+      flex: 1 1 auto;
+      min-height: 72px;
       overflow: auto;
-      padding: 8px 8px 4px;
-    }
-    .${POPOVER_CLASS}__preview-label {
-      color: rgb(var(--tds-subtle, 113 118 123));
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.02em;
-      margin: 0 0 8px;
-      text-transform: uppercase;
+      overscroll-behavior: contain;
+      padding: 4px 12px 12px;
     }
     .${POPOVER_CLASS}__preview-status {
-      color: rgb(var(--tds-subtle, 113 118 123));
+      color: rgb(var(--tds-subtle));
       font-size: 14px;
       line-height: 1.4;
       margin: 0;
-      padding: 8px 4px 12px;
+      padding: 8px 4px;
     }
     .${PREVIEW_CLASS} {
+      background: rgb(var(--tds-raised));
+      border-radius: 12px;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 12px;
+      padding: 12px 12px 12px 8px;
     }
     .${PREVIEW_CLASS}__empty {
-      color: rgb(var(--tds-subtle, 113 118 123));
+      color: rgb(var(--tds-subtle));
       font-size: 14px;
       line-height: 1.4;
       margin: 0;
     }
     .${PREVIEW_CLASS}__message {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
+      column-gap: 10px;
+      display: grid;
+      grid-template-columns: 32px minmax(0, 1fr);
     }
     .${PREVIEW_CLASS}__message-label {
-      color: rgb(var(--tds-subtle, 113 118 123));
-      font-size: 12px;
-      font-weight: 600;
+      color: rgb(var(--tds-subtle));
+      font-size: 11px;
+      font-weight: 700;
+      grid-column: 1 / -1;
+      letter-spacing: 0.02em;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+    }
+    .${PREVIEW_CLASS}__webhook-avatar {
+      background: #5865f2;
+      border-radius: 50%;
+      height: 32px;
+      object-fit: cover;
+      width: 32px;
+    }
+    .${PREVIEW_CLASS}__message-body {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
     }
     .${PREVIEW_CLASS}__webhook {
       align-items: center;
       display: flex;
-      gap: 8px;
-    }
-    .${PREVIEW_CLASS}__webhook-avatar {
-      border-radius: 50%;
-      height: 20px;
-      object-fit: cover;
-      width: 20px;
+      gap: 6px;
+      line-height: 1.2;
     }
     .${PREVIEW_CLASS}__webhook-name {
-      color: rgb(var(--tds-text, 231 233 234));
-      font-size: 13px;
-      font-weight: 600;
-    }
-    .${PREVIEW_CLASS}__content-block {
-      color: rgb(var(--tds-text, 231 233 234));
-      display: flex;
-      flex-direction: column;
       font-size: 14px;
-      gap: 4px;
-      line-height: 1.45;
-      word-break: break-word;
-    }
-    .${PREVIEW_CLASS}__content-title {
       font-weight: 700;
     }
+    .${PREVIEW_CLASS}__app-badge {
+      background: #5865f2;
+      border-radius: 3px;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 4px;
+    }
+    .${PREVIEW_CLASS}__content,
+    .${PREVIEW_CLASS}__description,
+    .${PREVIEW_CLASS}__field-value {
+      line-height: 1.4;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .${PREVIEW_CLASS}__content,
+    .${PREVIEW_CLASS}__description,
+    .${PREVIEW_CLASS}__title {
+      font-size: 14px;
+    }
     .${PREVIEW_CLASS}__embed {
-      background: rgb(var(--tds-text, 231 233 234) / 0.06);
+      background: rgb(var(--tds-surface));
+      border: 1px solid rgb(var(--tds-border));
       border-left: 4px solid var(--tds-preview-accent, #5865f2);
       border-radius: 4px;
       display: flex;
       flex-direction: column;
       gap: 6px;
-      padding: 8px 10px 10px 8px;
+      margin-top: 4px;
+      padding: 8px 10px 10px;
     }
     .${PREVIEW_CLASS}__author {
       align-items: center;
@@ -329,22 +312,16 @@ function previewStylesCss() {
       object-fit: cover;
       width: 20px;
     }
-    .${PREVIEW_CLASS}__author-name {
-      color: rgb(var(--tds-text, 231 233 234));
+    .${PREVIEW_CLASS}__author-name,
+    .${PREVIEW_CLASS}__field-name {
       font-size: 13px;
-      font-weight: 600;
-    }
-    .${PREVIEW_CLASS}__title {
-      color: rgb(var(--tds-text, 231 233 234));
-      font-size: 14px;
       font-weight: 700;
     }
-    .${PREVIEW_CLASS}__description {
-      color: rgb(var(--tds-text, 231 233 234));
-      font-size: 14px;
-      line-height: 1.45;
-      white-space: pre-wrap;
-      word-break: break-word;
+    .${PREVIEW_CLASS}__author-name .${PREVIEW_CLASS}__link {
+      color: inherit;
+    }
+    .${PREVIEW_CLASS}__title {
+      font-weight: 700;
     }
     .${PREVIEW_CLASS}__image-wrap {
       margin-top: 2px;
@@ -362,28 +339,23 @@ function previewStylesCss() {
       flex-direction: column;
       gap: 2px;
     }
-    .${PREVIEW_CLASS}__field-name {
-      color: rgb(var(--tds-text, 231 233 234));
-      font-size: 13px;
-      font-weight: 700;
-    }
     .${PREVIEW_CLASS}__field-value {
-      color: rgb(var(--tds-subtle, 113 118 123));
+      color: rgb(var(--tds-subtle));
       font-size: 13px;
-      line-height: 1.4;
-      word-break: break-word;
     }
     .${PREVIEW_CLASS}__footer {
-      color: rgb(var(--tds-subtle, 113 118 123));
+      color: rgb(var(--tds-subtle));
       font-size: 12px;
     }
     .${PREVIEW_CLASS}__attachment-hint {
-      color: rgb(var(--tds-subtle, 113 118 123));
+      border-top: 1px solid rgb(var(--tds-border));
+      color: rgb(var(--tds-subtle));
       font-size: 12px;
       line-height: 1.35;
+      padding: 8px 0 0 4px;
     }
     .${PREVIEW_CLASS}__link {
-      color: rgb(var(--tds-blue, 29 155 240));
+      color: rgb(var(--tds-blue));
       text-decoration: none;
       word-break: break-all;
     }

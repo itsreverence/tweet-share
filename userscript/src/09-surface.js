@@ -15,84 +15,25 @@ function injectStyles() {
   const style = document.createElement("style");
   style.textContent = `
     ${tdsSharedSurfaceCss()}
+    ${popoverStylesCss()}
     ${previewStylesCss()}
 
     .${SHARE_MENU_ITEM_CLASS} {
       cursor: pointer;
     }
 
-    .${POPOVER_CLASS} {
-      position: fixed;
-      z-index: 10000;
-      min-width: 220px;
-      max-width: min(320px, calc(100vw - 16px));
-      padding: 4px;
-      font-size: 15px;
-    }
-    .${POPOVER_CLASS}__title {
-      font-size: 13px;
-      font-weight: 700;
-      padding: 8px 12px 4px;
-    }
-    .${POPOVER_CLASS}__item {
+    .${AVATAR_CLASS} {
       align-items: center;
-      background: transparent;
-      border: 0;
-      border-radius: 8px;
-      color: inherit;
-      cursor: pointer;
-      display: flex;
-      font: inherit;
-      gap: 8px;
-      padding: 10px 12px;
-      text-align: left;
-      width: 100%;
-    }
-    .${POPOVER_CLASS}__item:hover,
-    .${POPOVER_CLASS}__item:focus-visible,
-    .${POPOVER_CLASS}__manage:hover,
-    .${POPOVER_CLASS}__manage:focus-visible {
-      outline: none;
-    }
-    .${POPOVER_CLASS}__item[data-last="true"]::after {
-      content: "Last used";
-      font-size: 11px;
-      margin-left: auto;
-    }
-    .${POPOVER_CLASS}__quote-option {
-      align-items: center;
-      cursor: pointer;
-      display: flex;
-      font-size: 14px;
-      gap: 8px;
-      margin: 2px 4px 6px;
-      padding: 8px 12px;
-      user-select: none;
-    }
-    .${POPOVER_CLASS}__quote-option input {
-      accent-color: var(--color-primary, #1d9bf0);
-      cursor: pointer;
+      background: hsl(var(--tds-hue) 60% 45%);
+      border-radius: 10px;
+      color: #fff;
+      display: inline-flex;
       flex-shrink: 0;
-      height: 16px;
-      width: 16px;
-    }
-    .${POPOVER_CLASS}__footer {
-      border-top-width: 1px;
-      border-top-style: solid;
-      margin-top: 4px;
-      padding-top: 4px;
-    }
-    .${POPOVER_CLASS}__manage {
-      background: transparent;
-      border: 0;
-      border-radius: 999px;
-      cursor: pointer;
-      font: inherit;
       font-size: 15px;
-      font-weight: 400;
-      padding: 12px;
-      text-align: left;
-      width: 100%;
+      font-weight: 800;
+      height: 34px;
+      justify-content: center;
+      width: 34px;
     }
 
     .${TOAST_HOST_CLASS} {
@@ -197,26 +138,65 @@ function closeDestinationMenu() {
   }
 }
 
-function positionPopover(menu, anchor) {
-  const rect = anchor.getBoundingClientRect();
-  const margin = 8;
-  menu.style.visibility = "hidden";
-  menu.style.left = "0";
-  menu.style.top = "0";
-  if (!menu.isConnected) {
-    document.body.append(menu);
+const PANEL_MARGIN = 8;
+const SHEET_MAX_WIDTH = 500;
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(value, max));
+}
+
+// Rects and sizes are in viewport pixels; maxHeight caps the panel so only its preview scrolls.
+function placePanel({ anchorRect, panelSize, viewport }) {
+  if (viewport.width < SHEET_MAX_WIDTH) {
+    const maxHeight = Math.round(viewport.height * 0.85);
+    return { mode: "sheet", top: Math.round(viewport.height - Math.min(panelSize.height, maxHeight)), left: 0, maxHeight };
   }
 
-  const menuRect = menu.getBoundingClientRect();
-  let top = rect.top - menuRect.height - margin;
-  if (top < margin) {
-    top = rect.bottom + margin;
+  const maxHeight = viewport.height - PANEL_MARGIN * 2;
+  const height = Math.min(panelSize.height, maxHeight);
+  const left = clamp(
+    anchorRect.left + anchorRect.width / 2 - panelSize.width / 2,
+    PANEL_MARGIN,
+    viewport.width - panelSize.width - PANEL_MARGIN
+  );
+  let mode = "clamped";
+  let top = anchorRect.top + anchorRect.height / 2 - height / 2;
+  if (panelSize.height <= anchorRect.top - PANEL_MARGIN * 2) {
+    mode = "above";
+    top = anchorRect.top - PANEL_MARGIN - panelSize.height;
+  } else if (panelSize.height <= viewport.height - anchorRect.bottom - PANEL_MARGIN * 2) {
+    mode = "below";
+    top = anchorRect.bottom + PANEL_MARGIN;
+  }
+  top = clamp(top, PANEL_MARGIN, viewport.height - height - PANEL_MARGIN);
+  return { mode, top: Math.round(top), left: Math.round(left), maxHeight };
+}
+
+function positionPopover(panel, anchor) {
+  panel.style.maxHeight = "";
+  if (!panel.isConnected) {
+    document.body.append(panel);
   }
 
-  let left = rect.left + rect.width / 2 - menuRect.width / 2;
-  left = Math.max(margin, Math.min(left, window.innerWidth - menuRect.width - margin));
+  const { width, height } = panel.getBoundingClientRect();
+  const placement = placePanel({
+    anchorRect: anchor.getBoundingClientRect(),
+    panelSize: { width, height },
+    viewport: { width: window.innerWidth, height: window.innerHeight }
+  });
+  panel.dataset.placement = placement.mode;
+  panel.style.top = `${placement.top}px`;
+  panel.style.left = `${placement.left}px`;
+  panel.style.maxHeight = `${placement.maxHeight}px`;
+}
 
-  menu.style.top = `${Math.round(top)}px`;
-  menu.style.left = `${Math.round(left)}px`;
-  menu.style.visibility = "visible";
+function createChannelAvatar(destination) {
+  const avatar = document.createElement("span");
+  avatar.className = AVATAR_CLASS;
+  avatar.setAttribute("aria-hidden", "true");
+  avatar.textContent = [...destination.label.trim()][0]?.toUpperCase() || "#";
+  let hash = 0;
+  for (const char of destination.id) hash = (hash * 31 + char.codePointAt(0)) >>> 0;
+  avatar.style.setProperty("--tds-hue", String(hash % 360));
+  return avatar;
 }
