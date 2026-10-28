@@ -614,6 +614,22 @@ for (const [where, otherTop] of [["far out of view", -2000], ["also in view", 50
   });
 }
 
+test("when X re-renders the shared copy after the page scrolled it out of view, Escape still focuses its new Share button", async (t) => {
+  const view = openPage(t, { destinations: [general, friends] });
+  const { shared, shareOf } = pageWithTwoCopies(view);
+  await openPreview(view, shareOf(shared));
+  view.document.querySelector("main").prepend(Object.assign(view.document.createElement("a"), { href: "/home" }));
+
+  placeAt(shareOf(shared), -900, 800);
+  view.window.dispatchEvent(new view.window.Event("resize"));
+  const rerendered = shared.cloneNode(true);
+  shared.replaceWith(rerendered);
+  placeAt(shareOf(rerendered), -900, 800);
+  press(view, "Escape");
+  assert.equal(sharePanel(view), null, "the panel closes");
+  assert.equal(view.document.activeElement, shareOf(rerendered), "the copy where Share last was stands in for it, in view or not");
+});
+
 for (const [where, top, expected] of [
   ["far out of view", -2000, "a control in view"],
   ["in view", 500, "the other copy's Share button"]
@@ -646,6 +662,9 @@ const postGoneCases = [
   }],
   ["the main column's first control is collapsed", "focus skips it for the first control that can take focus", ({ document }) => {
     document.querySelector("main").insertAdjacentHTML("afterbegin", '<div hidden><a href="/more">More</a></div><button id="target">Visible</button>');
+  }],
+  ["the main column's first control is hidden from assistive tech", "focus skips it, so a screen reader is never left on an unannounced control", ({ document }) => {
+    document.querySelector("main").insertAdjacentHTML("afterbegin", '<div aria-hidden="true"><a href="/more">More</a></div><button id="target">Announced</button>');
   }],
   ["the main column's first control is scrolled away", "focus goes to a control in view, so the next Tab does not jump the page", ({ document }) => {
     document.querySelector("main").insertAdjacentHTML("afterbegin", '<a href="/top" id="top">Top</a><a href="/near" id="target">Near</a>');
