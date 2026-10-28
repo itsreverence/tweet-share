@@ -704,11 +704,8 @@ test("focusing the main column as a last resort leaves it unfocusable again once
   assert.equal(main.hasAttribute("tabindex"), false, "X's main column is left as it was");
 });
 
-test("closing settings once the post is gone focuses the page, not a control of the closed dialog", async (t) => {
+test("closing settings once the post is gone focuses the page, not a control of the closing dialog", async (t) => {
   const view = openPage(t, { destinations: [general, friends] });
-  const home = view.document.createElement("a");
-  home.href = "/home";
-  view.document.querySelector("main").prepend(home);
   const menu = await openPreview(view);
   click(view, [...menu.querySelectorAll("button")].find((button) => accessibleName(button) === "Settings"));
   const dialog = await waitFor(() => settingsDialog(view), "the settings dialog");
@@ -716,7 +713,7 @@ test("closing settings once the post is gone focuses the page, not a control of 
   removePost(view);
   click(view, byText(dialog, "button", "Cancel")[0]);
   assert.equal(settingsDialog(view), null, "settings close");
-  assert.equal(view.document.activeElement, home, "focus is on the page's first control");
+  assert.equal(view.document.activeElement, view.document.querySelector("main"), "with nothing else to take it, focus is on the main column");
 });
 
 function addComposer({ document }) {
