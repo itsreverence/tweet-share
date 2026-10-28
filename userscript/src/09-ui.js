@@ -73,7 +73,7 @@ function findShareButton(root) {
 }
 
 // X can re-render a post while the panel or settings are open, which replaces its Share button.
-// Returns a finder for the post's current Share button, which remembers where the button last was.
+// The finder remembers where the button last was, to tell copies of the post apart.
 function trackShareButton(article, anchor) {
   const postUrl = tweetUrlFromArticle(article);
   let lastRect = anchor.getBoundingClientRect();
@@ -86,8 +86,8 @@ function trackShareButton(article, anchor) {
   };
 }
 
-// The same post can be on the page twice, as in a repost far down the timeline. Only a copy where the
-// Share button last was, or one in view, can stand in for it, so focusing it never jumps the page.
+// The same post can be on the page twice, as in a repost. Only a copy where the Share button last was,
+// or one in view, can stand in for it, so focusing it never jumps the page.
 function nearestShareButtonCopy(postUrl, lastRect) {
   const viewport = visibleViewport();
   const distance = ({ rect }) => Math.hypot(rect.x - lastRect.x, rect.y - lastRect.y);

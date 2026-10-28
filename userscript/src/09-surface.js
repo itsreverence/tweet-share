@@ -152,7 +152,7 @@ function rectsOverlap(a, b) {
 
 // Rects and sizes are in viewport pixels, and `viewport` is the part of the page the user sees.
 // maxHeight caps the panel so only its preview scrolls.
-// A sheet spans that width and its top is that bottom edge: its CSS lifts it by its own height, so it needs no measuring.
+// A sheet spans that width, and its top is that bottom edge. Its CSS lifts it by its own height, so placing it needs no measuring.
 function placePanel({ anchorRect, panelSize, viewport }) {
   if (viewport.width < NARROW_VIEWPORT_WIDTH) {
     return { mode: "sheet", top: viewport.bottom, left: viewport.left, width: viewport.width, maxHeight: Math.round(viewport.height * 0.85) };
