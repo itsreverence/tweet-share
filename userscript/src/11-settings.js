@@ -7,7 +7,7 @@ async function openSettingsModal(returnFocus) {
   const preferences = await loadPreferences();
   // One channel form is open at a time; the Add form is forced open while there are no channels.
   let editingId = null;
-  let addForm = "collapsed";
+  let addFormOpen = false;
   let rows = new Map();
 
   const backdrop = document.createElement("div");
@@ -68,7 +68,7 @@ async function openSettingsModal(returnFocus) {
   addToggle.textContent = "+ Add channel";
   addToggle.setAttribute("aria-controls", addCard.id);
   addToggle.addEventListener("click", () => {
-    addForm = "open";
+    addFormOpen = true;
     render();
     newLabelInput.focus();
   });
@@ -91,7 +91,7 @@ async function openSettingsModal(returnFocus) {
   function collapseAddForm() {
     newLabelInput.value = "";
     newUrlInput.value = "";
-    addForm = "collapsed";
+    addFormOpen = false;
     render();
     addToggle.focus();
   }
@@ -141,106 +141,30 @@ async function openSettingsModal(returnFocus) {
   hint.textContent = "Channels are stored only in Violentmonkey or Tampermonkey and survive script updates. Treat webhook URLs like passwords: anyone with one can post to that channel.";
   body.append(channelsSection, sharingSection, hint);
 
-  function createChannelRow(destination) {
-    const element = document.createElement("li");
-    element.className = `${SETTINGS_CLASS}__row`;
+  function toggleEdit(destination) {
+    editingId = editingId === destination.id ? null : destination.id;
+    render();
+  }
 
-    const main = document.createElement("div");
-    main.className = `${SETTINGS_CLASS}__row-main`;
-    let avatar = createChannelAvatar(destination);
-    const text = document.createElement("div");
-    text.className = `${SETTINGS_CLASS}__row-text`;
-    const title = document.createElement("div");
-    title.className = `${SETTINGS_CLASS}__row-title`;
-    title.id = nextSettingsId();
-    const status = document.createElement("div");
-    status.className = `${SETTINGS_CLASS}__row-status`;
-    text.append(title, status);
-
-    function refresh() {
-      const label = destination.label.trim();
-      const valid = Boolean(sanitizeDestination(destination));
-      title.textContent = label || "Untitled channel";
-      status.textContent = valid ? "Webhook saved" : label ? "Needs a valid webhook URL" : "Needs a display name";
-      status.dataset.invalid = String(!valid);
-      const freshAvatar = createChannelAvatar(destination);
-      avatar.replaceWith(freshAvatar);
-      avatar = freshAvatar;
-    }
-
-    const editRegion = document.createElement("div");
-    editRegion.className = `${SETTINGS_CLASS}__row-edit`;
-    editRegion.id = nextSettingsId();
-
-    const editBtn = createSettingsButton("Edit");
-    editBtn.setAttribute("aria-controls", editRegion.id);
-    editBtn.setAttribute("aria-describedby", title.id);
-    editBtn.addEventListener("click", () => {
-      const opening = editingId !== destination.id;
-      editingId = opening ? destination.id : null;
-      render();
-      (opening ? labelInput : editBtn).focus();
-    });
-
-    function setEditing(open) {
-      editRegion.hidden = !open;
-      editBtn.textContent = open ? "Done" : "Edit";
-      editBtn.setAttribute("aria-expanded", String(open));
-    }
-
-    const removeBtn = createSettingsButton("Remove", "danger");
-    removeBtn.setAttribute("aria-describedby", title.id);
-    removeBtn.addEventListener("click", () => {
-      destinations = destinations.filter((item) => item !== destination);
-      if (editingId === destination.id) editingId = null;
-      render();
-      (listEl.querySelector("button") || newLabelInput).focus();
-    });
-
-    const actions = document.createElement("div");
-    actions.className = `${SETTINGS_CLASS}__actions`;
-    actions.append(editBtn, removeBtn);
-    main.append(avatar, text, actions);
-
-    const labelInput = document.createElement("input");
-    labelInput.type = "text";
-    labelInput.value = destination.label;
-    labelInput.addEventListener("input", () => {
-      destination.label = labelInput.value;
-      refresh();
-    });
-
-    const urlInput = document.createElement("input");
-    urlInput.placeholder = "https://discord.com/api/webhooks/...";
-    urlInput.value = destination.webhookUrl;
-    urlInput.addEventListener("input", () => {
-      destination.webhookUrl = urlInput.value.trim();
-      refresh();
-    });
-
-    const editActions = document.createElement("div");
-    editActions.className = `${SETTINGS_CLASS}__actions`;
-    editActions.append(createTestWebhookButton(() => destination.webhookUrl));
-    editRegion.append(
-      createSettingsField("Display name", labelInput),
-      createWebhookUrlField(urlInput),
-      editActions
-    );
-
-    refresh();
-    element.append(main, editRegion);
-    return { element, labelInput, urlInput, setEditing };
+  function removeChannel(destination) {
+    destinations = destinations.filter((item) => item !== destination);
+    if (editingId === destination.id) editingId = null;
+    render();
+    (listEl.querySelector("button") || newLabelInput).focus();
   }
 
   function render() {
-    rows = new Map(destinations.map((destination) => [destination, rows.get(destination) ?? createChannelRow(destination)]));
+    rows = new Map(destinations.map((destination) => [destination, rows.get(destination) ?? createChannelRow(destination, {
+      onToggleEdit: () => toggleEdit(destination),
+      onRemove: () => removeChannel(destination)
+    })]));
     listEl.replaceChildren(...[...rows.values()].map((row) => row.element));
     for (const [destination, row] of rows) row.setEditing(destination.id === editingId);
     listEl.hidden = destinations.length === 0;
     emptyState.hidden = destinations.length > 0;
     channelCount.textContent = destinations.length ? String(destinations.length) : "";
 
-    const addOpen = addForm === "open" || destinations.length === 0;
+    const addOpen = addFormOpen || destinations.length === 0;
     addCard.hidden = !addOpen;
     addToggle.hidden = addOpen;
     addToggle.setAttribute("aria-expanded", String(addOpen));
