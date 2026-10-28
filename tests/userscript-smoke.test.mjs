@@ -118,7 +118,7 @@ function click(view, node) {
 }
 
 const press = ({ window, document }, key, modifiers = {}) =>
-  (document.activeElement || document).dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true, ...modifiers }));
+  (document.activeElement || document).dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...modifiers }));
 const visibleText = (node) =>
   node.nodeType === node.TEXT_NODE
     ? node.textContent
@@ -408,6 +408,37 @@ test("the share panel is a non-modal dialog named by its heading, with the chann
   assert.deepEqual(channelButtons(panel).map((button) => button.getAttribute("role")), [null, null], "channels are plain buttons");
   assert.equal(panel.querySelector('[role="menu"], [role="menuitem"]'), null, "nothing in the panel claims menu semantics");
   assert.equal(shareItems(view).length, 1, "X's own share menu still has exactly one Share to Discord item");
+});
+
+test("arrow keys cycle through the channels and leave the quote toggle and the preview to the browser", async (t) => {
+  const view = openPage(t, { destinations: [general, friends], quote: true });
+
+  const panel = await openPreview(view);
+  const [generalButton, friendsButton] = channelButtons(panel);
+  await waitFor(() => view.document.activeElement === generalButton, "focus on the first channel");
+  press(view, "ArrowDown");
+  assert.equal(view.document.activeElement, friendsButton, "ArrowDown moves to the next channel");
+  press(view, "ArrowDown");
+  assert.equal(view.document.activeElement, generalButton, "ArrowDown from the last channel wraps to the first");
+  press(view, "ArrowUp");
+  assert.equal(view.document.activeElement, friendsButton, "ArrowUp from the first channel wraps to the last");
+
+  const quoteToggle = byText(panel, "label", "Include quoted post")[0].control;
+  quoteToggle.focus();
+  assert.equal(press(view, "ArrowDown"), true, "ArrowDown on the quote toggle is not taken over");
+  assert.equal(view.document.activeElement, quoteToggle);
+
+  const preview = expandPreview(view, panel);
+  assert.equal(preview.getAttribute("role"), "region");
+  assert.equal(accessibleName(preview), "Message preview");
+  assert.equal(preview.tabIndex, 0, "Tab reaches the preview, so the keyboard can scroll it");
+  for (const target of [preview, preview.querySelector("a")]) {
+    target.focus();
+    for (const key of ["ArrowDown", "ArrowUp"]) {
+      assert.equal(press(view, key), true, `${key} on the preview's <${target.tagName.toLowerCase()}> is left to the browser to scroll`);
+      assert.equal(view.document.activeElement, target, `${key} keeps focus in the preview`);
+    }
+  }
 });
 
 test("the last-used channel is the default, named by its label alone and described as Last used", async (t) => {

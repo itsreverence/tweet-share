@@ -144,6 +144,13 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     return item;
   });
   destinationsHost.append(...destinationItems);
+  destinationsHost.addEventListener("keydown", (event) => {
+    const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
+    const index = destinationItems.indexOf(event.target);
+    if (!step || index === -1) return;
+    event.preventDefault();
+    destinationItems[(index + step + destinationItems.length) % destinationItems.length].focus();
+  });
   panel.append(sendLabel, destinationsHost);
 
   const previewToggle = document.createElement("button");
@@ -153,6 +160,9 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
   const previewWrap = document.createElement("div");
   previewWrap.className = `${POPOVER_CLASS}__preview-wrap`;
   previewWrap.id = `${POPOVER_CLASS}-preview`;
+  previewWrap.tabIndex = 0;
+  previewWrap.setAttribute("role", "region");
+  previewWrap.setAttribute("aria-label", "Message preview");
   previewToggle.setAttribute("aria-controls", previewWrap.id);
   const previewStatus = document.createElement("p");
   previewStatus.className = `${POPOVER_CLASS}__preview-status`;
@@ -202,18 +212,6 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
       previewStatus.textContent = message;
     }
   }
-
-  panel.addEventListener("keydown", (event) => {
-    const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
-    if (!step) return;
-    const controls = [...panel.querySelectorAll("button, input")].filter((control) => {
-      return !control.disabled && !control.closest("[hidden]");
-    });
-    const index = controls.indexOf(document.activeElement);
-    const next = index === -1 ? (step > 0 ? 0 : -1) : (index + step) % controls.length;
-    event.preventDefault();
-    controls.at(next).focus();
-  });
 
   const lifecycle = showPanel(panel, { findAnchor: () => currentShareButton(article, anchor), returnFocus });
   loadPreview();

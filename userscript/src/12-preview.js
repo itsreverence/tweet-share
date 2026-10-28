@@ -212,6 +212,10 @@ function previewStylesCss() {
       overscroll-behavior: contain;
       padding: 4px 12px 12px;
     }
+    .${POPOVER_CLASS}__preview-wrap:focus-visible {
+      outline: 2px solid rgb(var(--tds-blue));
+      outline-offset: -2px;
+    }
     .${POPOVER_CLASS}__preview-status {
       color: rgb(var(--tds-subtle));
       font-size: 14px;
