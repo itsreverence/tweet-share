@@ -155,7 +155,7 @@ const mutants = [
   {
     name: "attachments hidden from embeds are never uploaded",
     file: "08-deliver.js",
-    find: "attachments.map((attachment, fileIndex)",
+    find: "files.map((attachment, fileIndex)",
     replace: "[].map((attachment, fileIndex)",
     expect: PRESERVES
   },

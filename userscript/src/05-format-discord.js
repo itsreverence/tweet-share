@@ -455,7 +455,12 @@ function buildWebhookPayload(embeds, tweet, options = {}) {
   if (embeds.length) payload.embeds = embeds;
   if (options.content) payload.content = options.content;
   if (options.messageLabel) payload._messageLabel = options.messageLabel;
+  if (options.files?.length) payload._files = options.files;
   return payload;
+}
+
+function attachmentFilenames(options = {}) {
+  return (options.attachments || []).map((file) => file.filename);
 }
 
 function buildVideoFollowUpContent(entries) {
@@ -497,7 +502,8 @@ function buildEmbedDiscordPayloads(tweet, options = {}) {
   const messages = packed.map((group, index) =>
     buildWebhookPayload(group, tweet, {
       content: index === 0 ? buildShareContentLines(tweet, shareOptions) : undefined,
-      messageLabel: packed.length > 1 ? `Tweet embeds ${index + 1}/${packed.length}` : undefined
+      messageLabel: packed.length > 1 ? `Tweet embeds ${index + 1}/${packed.length}` : undefined,
+      files: index === 0 ? attachmentFilenames(options) : undefined
     })
   );
 
@@ -545,12 +551,14 @@ function buildPlainFallbackPayloads(tweet, options = {}) {
   const body = buildCompactPlainBody(tweet, options);
   const chunks = splitText(body, MESSAGE_CHUNK_LIMIT);
   const parts = chunks.length ? chunks : [body || formatAuthor(tweet)];
+  const files = attachmentFilenames(options);
 
-  return parts.map((content) => ({
+  return parts.map((content, index) => ({
     username: webhookSenderName(),
     avatar_url: webhookSenderAvatarUrl(),
     content: truncate(content, DISCORD_LIMITS.content),
-    allowed_mentions: { parse: [] }
+    allowed_mentions: { parse: [] },
+    ...(index === 0 && files.length ? { _files: files } : {})
   }));
 }
 

@@ -1142,7 +1142,12 @@ function buildWebhookPayload(embeds, tweet, options = {}) {
   if (embeds.length) payload.embeds = embeds;
   if (options.content) payload.content = options.content;
   if (options.messageLabel) payload._messageLabel = options.messageLabel;
+  if (options.files?.length) payload._files = options.files;
   return payload;
+}
+
+function attachmentFilenames(options = {}) {
+  return (options.attachments || []).map((file) => file.filename);
 }
 
 function buildVideoFollowUpContent(entries) {
@@ -1184,7 +1189,8 @@ function buildEmbedDiscordPayloads(tweet, options = {}) {
   const messages = packed.map((group, index) =>
     buildWebhookPayload(group, tweet, {
       content: index === 0 ? buildShareContentLines(tweet, shareOptions) : undefined,
-      messageLabel: packed.length > 1 ? `Tweet embeds ${index + 1}/${packed.length}` : undefined
+      messageLabel: packed.length > 1 ? `Tweet embeds ${index + 1}/${packed.length}` : undefined,
+      files: index === 0 ? attachmentFilenames(options) : undefined
     })
   );
 
@@ -1232,12 +1238,14 @@ function buildPlainFallbackPayloads(tweet, options = {}) {
   const body = buildCompactPlainBody(tweet, options);
   const chunks = splitText(body, MESSAGE_CHUNK_LIMIT);
   const parts = chunks.length ? chunks : [body || formatAuthor(tweet)];
+  const files = attachmentFilenames(options);
 
-  return parts.map((content) => ({
+  return parts.map((content, index) => ({
     username: webhookSenderName(),
     avatar_url: webhookSenderAvatarUrl(),
     content: truncate(content, DISCORD_LIMITS.content),
-    allowed_mentions: { parse: [] }
+    allowed_mentions: { parse: [] },
+    ...(index === 0 && files.length ? { _files: files } : {})
   }));
 }
 
@@ -1733,7 +1741,7 @@ function extractTweet(article) {
 
   // --- 08-deliver.js ---
 function sanitizeWebhookPayload(payload) {
-  const { _messageLabel, ...discordPayload } = payload;
+  const { _messageLabel, _files, ...discordPayload } = payload;
   return discordPayload;
 }
 
@@ -1768,22 +1776,28 @@ async function shareToDestination(destinationId, tweet, options = {}) {
     ...options,
     attachMedia: attachments.length > 0,
     attachmentUrls: resolved.urls,
+    attachments: attachments.map(({ filename, sourceUrl }) => ({ filename, sourceUrl })),
     fallbackVideoUrls
   });
+  const messages = payloads.map((payload) => ({
+    payload: sanitizeWebhookPayload(payload),
+    files: attachments.filter((attachment) => payload._files?.includes(attachment.filename))
+  }));
+  const uploadedCount = messages.reduce((count, message) => count + message.files.length, 0);
 
   if (resolved.skipped.length > 0 && attachments.length === 0) {
     const skippedSummary = summarizeSkippedMedia(resolved.skipped);
     showToast(`Media could not upload (${skippedSummary}); sent available fallback content.`, "info");
   }
 
-  for (let index = 0; index < payloads.length; index += 1) {
-    const payload = sanitizeWebhookPayload(payloads[index]);
+  for (let index = 0; index < messages.length; index += 1) {
+    const { payload, files } = messages[index];
     try {
-      if (index === 0 && attachments.length > 0) {
+      if (files.length > 0) {
         await requestMultipart(
           destination.webhookUrl,
           payload,
-          attachments.map((attachment, fileIndex) => ({
+          files.map((attachment, fileIndex) => ({
             name: `files[${fileIndex}]`,
             filename: attachment.filename,
             bytes: attachment.bytes,
@@ -1796,18 +1810,18 @@ async function shareToDestination(destinationId, tweet, options = {}) {
     } catch (error) {
       if (index === 0) throw error;
       throw new Error(
-        `Sent ${index} of ${payloads.length} Discord messages before delivery failed: ${error.message}`,
+        `Sent ${index} of ${messages.length} Discord messages before delivery failed: ${error.message}`,
         { cause: error }
       );
     }
-    if (index < payloads.length - 1) {
+    if (index < messages.length - 1) {
       await delay(WEBHOOK_SEND_DELAY_MS);
     }
   }
 
-  if (attachments.length > 0 && resolved.skipped.length > 0) {
+  if (uploadedCount > 0 && resolved.skipped.length > 0) {
     const skippedSummary = summarizeSkippedMedia(resolved.skipped);
-    showToast(`Uploaded ${attachments.length} file${attachments.length === 1 ? "" : "s"}; ${skippedSummary}.`, "info");
+    showToast(`Uploaded ${uploadedCount} file${uploadedCount === 1 ? "" : "s"}; ${skippedSummary}.`, "info");
   }
 }
 

@@ -1,5 +1,5 @@
 function sanitizeWebhookPayload(payload) {
-  const { _messageLabel, ...discordPayload } = payload;
+  const { _messageLabel, _files, ...discordPayload } = payload;
   return discordPayload;
 }
 
@@ -34,22 +34,28 @@ async function shareToDestination(destinationId, tweet, options = {}) {
     ...options,
     attachMedia: attachments.length > 0,
     attachmentUrls: resolved.urls,
+    attachments: attachments.map(({ filename, sourceUrl }) => ({ filename, sourceUrl })),
     fallbackVideoUrls
   });
+  const messages = payloads.map((payload) => ({
+    payload: sanitizeWebhookPayload(payload),
+    files: attachments.filter((attachment) => payload._files?.includes(attachment.filename))
+  }));
+  const uploadedCount = messages.reduce((count, message) => count + message.files.length, 0);
 
   if (resolved.skipped.length > 0 && attachments.length === 0) {
     const skippedSummary = summarizeSkippedMedia(resolved.skipped);
     showToast(`Media could not upload (${skippedSummary}); sent available fallback content.`, "info");
   }
 
-  for (let index = 0; index < payloads.length; index += 1) {
-    const payload = sanitizeWebhookPayload(payloads[index]);
+  for (let index = 0; index < messages.length; index += 1) {
+    const { payload, files } = messages[index];
     try {
-      if (index === 0 && attachments.length > 0) {
+      if (files.length > 0) {
         await requestMultipart(
           destination.webhookUrl,
           payload,
-          attachments.map((attachment, fileIndex) => ({
+          files.map((attachment, fileIndex) => ({
             name: `files[${fileIndex}]`,
             filename: attachment.filename,
             bytes: attachment.bytes,
@@ -62,17 +68,17 @@ async function shareToDestination(destinationId, tweet, options = {}) {
     } catch (error) {
       if (index === 0) throw error;
       throw new Error(
-        `Sent ${index} of ${payloads.length} Discord messages before delivery failed: ${error.message}`,
+        `Sent ${index} of ${messages.length} Discord messages before delivery failed: ${error.message}`,
         { cause: error }
       );
     }
-    if (index < payloads.length - 1) {
+    if (index < messages.length - 1) {
       await delay(WEBHOOK_SEND_DELAY_MS);
     }
   }
 
-  if (attachments.length > 0 && resolved.skipped.length > 0) {
+  if (uploadedCount > 0 && resolved.skipped.length > 0) {
     const skippedSummary = summarizeSkippedMedia(resolved.skipped);
-    showToast(`Uploaded ${attachments.length} file${attachments.length === 1 ? "" : "s"}; ${skippedSummary}.`, "info");
+    showToast(`Uploaded ${uploadedCount} file${uploadedCount === 1 ? "" : "s"}; ${skippedSummary}.`, "info");
   }
 }
