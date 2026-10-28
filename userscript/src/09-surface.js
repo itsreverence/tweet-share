@@ -151,48 +151,47 @@ function rectsOverlap(a, b) {
   return a.left <= b.right && b.left <= a.right && a.top <= b.bottom && b.top <= a.bottom;
 }
 
-// Rects and sizes are in viewport pixels; maxHeight caps the panel so only its preview scrolls.
-// A sheet has no top or left, because the narrow-viewport CSS pins it to the bottom edge, clear of the scrollbar.
+// Rects and sizes are in viewport pixels, and `viewport` is the part of the page the user sees.
+// maxHeight caps the panel so only its preview scrolls.
+// A sheet spans that width and its top is that bottom edge: its CSS lifts it by its own height, so it needs no measuring.
 function placePanel({ anchorRect, panelSize, viewport }) {
   if (viewport.width < NARROW_VIEWPORT_WIDTH) {
-    return { mode: "sheet", maxHeight: Math.round(viewport.height * 0.85) };
+    return { mode: "sheet", top: viewport.bottom, left: viewport.left, width: viewport.width, maxHeight: Math.round(viewport.height * 0.85) };
   }
 
   const maxHeight = viewport.height - PANEL_MARGIN * 2;
   const height = Math.min(panelSize.height, maxHeight);
   const left = clamp(
     anchorRect.left + anchorRect.width / 2 - panelSize.width / 2,
-    PANEL_MARGIN,
-    viewport.width - panelSize.width - PANEL_MARGIN
+    viewport.left + PANEL_MARGIN,
+    viewport.right - panelSize.width - PANEL_MARGIN
   );
   let mode = "clamped";
   let top = anchorRect.top + anchorRect.height / 2 - height / 2;
-  if (panelSize.height <= anchorRect.top - PANEL_MARGIN * 2) {
+  if (panelSize.height <= anchorRect.top - viewport.top - PANEL_MARGIN * 2) {
     mode = "above";
     top = anchorRect.top - PANEL_MARGIN - panelSize.height;
-  } else if (panelSize.height <= viewport.height - anchorRect.bottom - PANEL_MARGIN * 2) {
+  } else if (panelSize.height <= viewport.bottom - anchorRect.bottom - PANEL_MARGIN * 2) {
     mode = "below";
     top = anchorRect.bottom + PANEL_MARGIN;
   }
-  top = clamp(top, PANEL_MARGIN, viewport.height - height - PANEL_MARGIN);
+  top = clamp(top, viewport.top + PANEL_MARGIN, viewport.bottom - height - PANEL_MARGIN);
   return { mode, top: Math.round(top), left: Math.round(left), maxHeight };
 }
 
 function positionPopover(panel, anchorRect) {
   panel.style.maxHeight = "";
+  panel.style.width = "";
   if (!panel.isConnected) {
     document.body.append(panel);
   }
 
   const { width, height } = panel.getBoundingClientRect();
-  const placement = placePanel({
-    anchorRect,
-    panelSize: { width, height },
-    viewport: { width: window.innerWidth, height: window.innerHeight }
-  });
-  const sheet = placement.mode === "sheet";
-  panel.style.top = sheet ? "" : `${placement.top}px`;
-  panel.style.left = sheet ? "" : `${placement.left}px`;
+  const placement = placePanel({ anchorRect, panelSize: { width, height }, viewport: visibleViewport() });
+  panel.classList.toggle(`${POPOVER_CLASS}--sheet`, placement.mode === "sheet");
+  panel.style.top = `${placement.top}px`;
+  panel.style.left = `${placement.left}px`;
+  panel.style.width = placement.width === undefined ? "" : `${placement.width}px`;
   panel.style.maxHeight = `${placement.maxHeight}px`;
 }
 
@@ -219,7 +218,8 @@ function showPanel(panel, { findAnchor, returnFocus }) {
     [document, "pointerdown", onPointerDown, true],
     [window, "resize", place, false],
     [window, "orientationchange", place, false],
-    [window.visualViewport, "resize", place, false]
+    [window.visualViewport, "resize", place, false],
+    [window.visualViewport, "scroll", place, false]
   ].filter(([target]) => target);
 
   function close() {

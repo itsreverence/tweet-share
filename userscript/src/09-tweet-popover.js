@@ -230,15 +230,10 @@ function popoverStylesCss() {
       width: min(360px, calc(100vw - ${PANEL_MARGIN * 2}px));
       z-index: 10000;
     }
-    @media ${NARROW_VIEWPORT_MEDIA} {
-      .${POPOVER_CLASS} {
-        border-bottom-width: 0;
-        border-radius: 16px 16px 0 0;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        width: auto;
-      }
+    .${POPOVER_CLASS}--sheet {
+      border-bottom-width: 0;
+      border-radius: 16px 16px 0 0;
+      transform: translateY(-100%);
     }
     .${POPOVER_CLASS}:focus {
       outline: none;
