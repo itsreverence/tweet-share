@@ -1961,10 +1961,8 @@ function positionPopover(panel, anchorRect) {
   panel.style.maxHeight = `${placement.maxHeight}px`;
 }
 
-// Everything the open panel listens to outside itself is added here and removed by close().
-// It re-places itself whenever the viewport changes size or orientation, next to the Share button
-// findAnchor() returns, or where that button last was once X has re-rendered the post away.
 // Escape is the panel's only while focus is in it, on its Share button, or nowhere, so Escape elsewhere on X is left alone.
+// When X re-renders the post away, the panel keeps the place its Share button last had.
 function showPanel(panel, { findAnchor, returnFocus }) {
   closeDestinationMenu();
   let anchorRect = new DOMRect();
@@ -3357,7 +3355,6 @@ function trapFocus(dialog, event) {
 }
 
 // A channel's summary row and its inline edit form. Edits write straight to `destination`.
-// savedWebhookUrl is the URL storage holds for this channel, if any.
 function createChannelRow(destination, { savedWebhookUrl, onToggleEdit, onRemove }) {
   const element = document.createElement("li");
   element.className = `${SETTINGS_CLASS}__row`;
@@ -3593,7 +3590,7 @@ async function openSettingsModal(returnFocus) {
     render();
   }
 
-  // Focus moves to the next row, else the previous one, else the Add form that opens when the list empties.
+  // With no rows left the Add form is forced open, so its name field takes focus.
   function removeChannel(destination) {
     const index = destinations.indexOf(destination);
     destinations = destinations.filter((item) => item !== destination);

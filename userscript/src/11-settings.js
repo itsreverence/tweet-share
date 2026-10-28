@@ -147,7 +147,7 @@ async function openSettingsModal(returnFocus) {
     render();
   }
 
-  // Focus moves to the next row, else the previous one, else the Add form that opens when the list empties.
+  // With no rows left the Add form is forced open, so its name field takes focus.
   function removeChannel(destination) {
     const index = destinations.indexOf(destination);
     destinations = destinations.filter((item) => item !== destination);

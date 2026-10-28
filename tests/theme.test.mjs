@@ -12,7 +12,6 @@ const context = {};
 runInNewContext(`${themeSource}\nthis.resolveTheme = resolveTheme;`, context);
 const resolveTheme = (environment) => ({ ...context.resolveTheme(environment) });
 
-// The theme the userscript reads off a page, as X would paint it.
 function themeOnPage(t, html) {
   const { window } = new JSDOM(html, { runScripts: "outside-only", pretendToBeVisual: true });
   t.after(() => window.close());

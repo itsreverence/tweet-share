@@ -143,7 +143,6 @@ function trapFocus(dialog, event) {
 }
 
 // A channel's summary row and its inline edit form. Edits write straight to `destination`.
-// savedWebhookUrl is the URL storage holds for this channel, if any.
 function createChannelRow(destination, { savedWebhookUrl, onToggleEdit, onRemove }) {
   const element = document.createElement("li");
   element.className = `${SETTINGS_CLASS}__row`;
