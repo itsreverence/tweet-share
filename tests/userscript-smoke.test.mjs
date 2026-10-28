@@ -409,6 +409,48 @@ test("Escape closes the panel and returns focus to the post's Share button", asy
   assert.equal(view.document.activeElement, view.document.querySelector('[data-testid="share"]'), "focus is back on Share");
 });
 
+function addComposer({ document }) {
+  const composer = document.createElement("textarea");
+  composer.setAttribute("aria-label", "Post text");
+  document.querySelector("main").append(composer);
+  return composer;
+}
+
+test("once the panel has closed, Escape elsewhere on X leaves focus alone", async (t) => {
+  const view = openPage(t, { destinations: [general, friends] });
+  const composer = addComposer(view);
+
+  // Two activations in one task, as when X's menu and the item's own key handler both act on Enter.
+  const [item] = await openShareMenu(view);
+  click(view, item);
+  click(view, item);
+  await waitFor(() => {
+    const menu = previewMenu(view);
+    return menu && menuItems(menu).every((button) => !button.disabled);
+  }, "the second panel's channels to enable");
+  press(view, "Escape");
+  assert.equal(previewMenu(view), null, "Escape closes the panel");
+
+  composer.focus();
+  press(view, "Escape");
+  press(view, "Escape");
+  assert.equal(view.document.activeElement, composer, "focus stays in the composer");
+  composer.blur();
+  press(view, "Escape");
+  assert.equal(view.document.activeElement, view.document.body, "with nothing focused, Escape does not pull focus to Share");
+});
+
+test("Escape after Shift+Tab out of the panel belongs to what has focus", async (t) => {
+  const view = openPage(t, { destinations: [general, friends] });
+  const composer = addComposer(view);
+
+  const menu = await openPreview(view);
+  composer.focus();
+  press(view, "Escape");
+  assert.equal(view.document.activeElement, composer, "focus stays in the composer");
+  assert.equal(previewMenu(view), menu, "the panel stays open until dismissed from inside or by a click outside");
+});
+
 for (const [how, dismiss] of [
   ["pressing Escape", (view) => view.document.dispatchEvent(new view.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }))],
   ["clicking outside", (view) => view.document.querySelector("main").dispatchEvent(new view.window.PointerEvent("pointerdown", { bubbles: true }))]

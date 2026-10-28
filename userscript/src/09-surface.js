@@ -1,6 +1,5 @@
 // Shared UI surface helpers: styles, toasts, and popover positioning.
-let activePopover = null;
-let activePopoverCleanup = null;
+let activePanel = null;
 
 function appendWhenReady(node) {
   if (document.documentElement) {
@@ -128,14 +127,7 @@ function closeXOverlay() {
 }
 
 function closeDestinationMenu() {
-  if (activePopoverCleanup) {
-    activePopoverCleanup();
-    activePopoverCleanup = null;
-  }
-  if (activePopover) {
-    activePopover.remove();
-    activePopover = null;
-  }
+  activePanel?.close();
 }
 
 const PANEL_MARGIN = 8;
@@ -189,6 +181,39 @@ function positionPopover(panel, anchor) {
   panel.style.top = `${placement.top}px`;
   panel.style.left = `${placement.left}px`;
   panel.style.maxHeight = `${placement.maxHeight}px`;
+}
+
+// Everything the open panel listens to outside itself is added here and removed by close().
+// Escape is the panel's only while focus is in it, on its Share button, or nowhere, so Escape elsewhere on X is left alone.
+function showPanel(panel, { anchor, returnFocus }) {
+  closeDestinationMenu();
+  const place = () => positionPopover(panel, anchor);
+  const onKeyDown = (event) => {
+    const focus = document.activeElement;
+    const ownsFocus = panel.contains(focus) || focus === anchor || focus === document.body;
+    if (event.key !== "Escape" || event.defaultPrevented || !ownsFocus) return;
+    close();
+    returnFocus();
+  };
+  const onPointerDown = (event) => {
+    if (!panel.contains(event.target) && !anchor.contains(event.target)) close();
+  };
+  const listeners = [
+    [document, "keydown", onKeyDown, false],
+    [document, "pointerdown", onPointerDown, true]
+  ];
+
+  function close() {
+    for (const [target, type, listener, capture] of listeners) target.removeEventListener(type, listener, capture);
+    panel.remove();
+    activePanel = null;
+  }
+
+  for (const [target, type, listener, capture] of listeners) target.addEventListener(type, listener, capture);
+  place();
+  panel.focus({ preventScroll: true });
+  activePanel = { place, close };
+  return activePanel;
 }
 
 function createChannelAvatar(destination) {

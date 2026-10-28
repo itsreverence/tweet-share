@@ -57,8 +57,6 @@ function createDestinationItem(destination, { isDefault, isLastUsed }) {
 
 function openDestinationMenu(anchor, article, destinations, options = {}) {
   const { showQuoteOption = false, preferences = DEFAULT_PREFERENCES } = options;
-  closeDestinationMenu();
-
   const lastUsedId = localStorage.getItem(DESTINATION_KEY);
   const defaultId = destinations.some((destination) => destination.id === lastUsedId) ? lastUsedId : destinations[0].id;
   const menu = document.createElement("div");
@@ -70,7 +68,6 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
 
   let includeQuote = true;
   let preparedTweet = null;
-  let closed = false;
 
   function shareOptions() {
     return {
@@ -79,9 +76,13 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     };
   }
 
+  function returnFocus() {
+    if (anchor.isConnected) anchor.focus({ preventScroll: true });
+  }
+
   function closeAndReturnFocus() {
     closeDestinationMenu();
-    if (anchor.isConnected) anchor.focus();
+    returnFocus();
   }
 
   const header = document.createElement("div");
@@ -167,7 +168,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
   previewToggle.addEventListener("click", (event) => {
     event.stopPropagation();
     setPreviewExpanded(previewWrap.hidden);
-    positionPopover(menu, anchor);
+    lifecycle.place();
   });
   menu.append(previewToggle, previewWrap);
 
@@ -182,20 +183,20 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     });
     previewWrap.replaceChildren(renderDiscordPreview(payloads, { attachmentCount: attachmentUrls.length }));
     summary.textContent = describeShare(preparedTweet, options, payloads.length);
-    positionPopover(menu, anchor);
+    lifecycle.place();
   }
 
   async function loadPreview() {
     try {
       preparedTweet = await prepareShareTweet(article);
-      if (closed) return;
+      if (!menu.isConnected) return;
       renderPrepared();
       for (const item of destinationItems) item.disabled = false;
       if (document.activeElement === menu) {
         destinationItems.find((item) => item.dataset.default === "true").focus();
       }
     } catch (error) {
-      if (closed) return;
+      if (!menu.isConnected) return;
       console.error(error);
       const message = error.message || "Could not build a preview for this post.";
       summary.textContent = message;
@@ -203,18 +204,9 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     }
   }
 
-  positionPopover(menu, anchor);
-  activePopover = menu;
-  menu.focus({ preventScroll: true });
-  loadPreview();
-
-  const onKeyDown = (event) => {
-    if (event.key === "Escape") {
-      closeAndReturnFocus();
-      return;
-    }
+  menu.addEventListener("keydown", (event) => {
     const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
-    if (!step || !menu.contains(document.activeElement)) return;
+    if (!step) return;
     const controls = [...menu.querySelectorAll("button, input")].filter((control) => {
       return !control.disabled && !control.closest("[hidden]");
     });
@@ -222,24 +214,10 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     const next = index === -1 ? (step > 0 ? 0 : -1) : (index + step) % controls.length;
     event.preventDefault();
     controls.at(next).focus();
-  };
+  });
 
-  const onPointerDown = (event) => {
-    if (!menu.contains(event.target) && event.target !== anchor && !anchor.contains?.(event.target)) {
-      closeDestinationMenu();
-    }
-  };
-
-  window.setTimeout(() => {
-    document.addEventListener("keydown", onKeyDown);
-    document.addEventListener("pointerdown", onPointerDown, true);
-  }, 0);
-
-  activePopoverCleanup = () => {
-    closed = true;
-    document.removeEventListener("keydown", onKeyDown);
-    document.removeEventListener("pointerdown", onPointerDown, true);
-  };
+  const lifecycle = showPanel(menu, { anchor, returnFocus });
+  loadPreview();
 }
 
 function popoverStylesCss() {
