@@ -141,9 +141,9 @@ const settingsDialog = ({ document }) =>
   document.querySelector('[role="dialog"][aria-label="Tweet Discord Share settings"]');
 const channelList = (dialog) => dialog.querySelector(".tds-settings__list");
 const addChannelCard = (dialog) => byText(dialog, "div", "Add channel")[0].parentElement;
-const fieldInput = (container, label) => byText(container, "label", label)[0].parentElement.querySelector("input");
+const fieldInput = (container, label) => byText(container, "label", label)[0].control;
 const channelNames = (dialog) =>
-  byText(channelList(dialog), "label", "Display name").map((label) => label.parentElement.querySelector("input").value);
+  byText(channelList(dialog), "label", "Display name").map((label) => label.control.value);
 
 function type({ window }, input, value) {
   input.value = value;
@@ -385,4 +385,15 @@ test("a Save blocked by an invalid channel leaves the channel being added in the
     "the Add channel form keeps the typed channel"
   );
   assert.deepEqual([...view.store], stored, "storage is unchanged");
+});
+
+test("every settings input is named by its label", async (t) => {
+  const view = openPage(t, { destinations: [general] });
+  const dialog = await openSettings(view);
+
+  const inputs = [...dialog.querySelectorAll("input")];
+  assert.ok(inputs.length >= 5, "settings show the channel, Add channel, and preference inputs");
+  for (const input of inputs) {
+    assert.ok(input.labels.length > 0, `the ${input.type} input with value "${input.value}" has a label`);
+  }
 });

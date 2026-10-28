@@ -1,5 +1,6 @@
 // Settings modal surface helpers: styles and small DOM builders.
 let settingsModalCleanup = null;
+let settingsFieldCount = 0;
 
 function injectSettingsStyles() {
   if (document.getElementById("tds-settings-style")) return;
@@ -257,12 +258,15 @@ function closeSettingsModal() {
   document.querySelector(`.${SETTINGS_CLASS}__backdrop`)?.remove();
 }
 
-function createSettingsField(labelText, input) {
+function createSettingsField(labelText, control) {
   const fieldEl = document.createElement("div");
   fieldEl.className = `${SETTINGS_CLASS}__field`;
+  const input = control.matches("input") ? control : control.querySelector("input");
+  input.id ||= `${SETTINGS_CLASS}-field-${++settingsFieldCount}`;
   const label = document.createElement("label");
   label.textContent = labelText;
-  fieldEl.append(label, input);
+  label.htmlFor = input.id;
+  fieldEl.append(label, control);
   return fieldEl;
 }
 
