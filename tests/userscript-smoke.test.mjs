@@ -1058,6 +1058,18 @@ test("settings opened from the share panel return focus to Share on close", asyn
   assert.equal(view.document.activeElement, view.document.querySelector('[data-testid="share"]'));
 });
 
+test("settings opened from the userscript menu while the panel has focus return focus to Share on close", async (t) => {
+  const view = openPage(t, { destinations: [general, friends] });
+  const menu = await openPreview(view);
+  await waitFor(() => channelButtons(menu).includes(view.document.activeElement), "focus on a channel");
+
+  await openSettings(view);
+  assert.equal(sharePanel(view), null, "settings close the panel");
+  press(view, "Escape");
+  assert.equal(settingsDialog(view), null, "settings close");
+  assert.equal(view.document.activeElement, view.document.querySelector('[data-testid="share"]'), "focus is back on Share");
+});
+
 test("every settings input is named by its label", async (t) => {
   const view = openPage(t, { destinations: [general] });
   const dialog = await openSettings(view);

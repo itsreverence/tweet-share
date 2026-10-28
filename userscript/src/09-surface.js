@@ -231,7 +231,7 @@ function showPanel(panel, { findAnchor, returnFocus }) {
   for (const [target, type, listener, capture] of listeners) target.addEventListener(type, listener, capture);
   place();
   panel.focus({ preventScroll: true });
-  activePanel = { place, close };
+  activePanel = { place, close, ownsFocus, returnFocus };
   return activePanel;
 }
 

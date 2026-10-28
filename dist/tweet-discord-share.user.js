@@ -2008,7 +2008,7 @@ function showPanel(panel, { findAnchor, returnFocus }) {
   for (const [target, type, listener, capture] of listeners) target.addEventListener(type, listener, capture);
   place();
   panel.focus({ preventScroll: true });
-  activePanel = { place, close };
+  activePanel = { place, close, ownsFocus, returnFocus };
   return activePanel;
 }
 
@@ -3748,7 +3748,11 @@ function registerSettingsMenuCommand() {
   if (!register) return;
   register("Tweet Discord Share settings…", () => {
     const previousFocus = document.activeElement;
-    openSettingsModal(() => previousFocus?.focus({ preventScroll: true }));
+    // Settings closes the share panel, so focus the panel owned goes back to the post instead.
+    const returnFocus = activePanel?.ownsFocus(previousFocus)
+      ? activePanel.returnFocus
+      : () => previousFocus?.focus({ preventScroll: true });
+    openSettingsModal(returnFocus);
   });
 }
 

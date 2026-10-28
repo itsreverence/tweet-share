@@ -252,7 +252,11 @@ function registerSettingsMenuCommand() {
   if (!register) return;
   register("Tweet Discord Share settings…", () => {
     const previousFocus = document.activeElement;
-    openSettingsModal(() => previousFocus?.focus({ preventScroll: true }));
+    // Settings closes the share panel, so focus the panel owned goes back to the post instead.
+    const returnFocus = activePanel?.ownsFocus(previousFocus)
+      ? activePanel.returnFocus
+      : () => previousFocus?.focus({ preventScroll: true });
+    openSettingsModal(returnFocus);
   });
 }
 
