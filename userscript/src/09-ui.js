@@ -1,7 +1,9 @@
-// Simple person outline (head + shoulders), readable at menu size.
-const PERSON_ICON_PATHS = [
-  "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2",
-  "M12 11a4 4 0 0 1 0-8 4 4 0 0 1 0 8z",
+// A filled "#" channel glyph, drawn like X's own filled menu icons.
+const CHANNEL_ICON_PATHS = [
+  "M9.1 3.5h2l-2.2 17h-2z",
+  "M15.1 3.5h2l-2.2 17h-2z",
+  "M3.5 8h17v2h-17z",
+  "M3.5 14h17v2h-17z"
 ];
 
 let pendingShareArticle = null;
@@ -42,8 +44,9 @@ async function runShare(article, destinationId, options = {}, preparedTweet = nu
 async function startDiscordShare(article, anchor) {
   const [destinations, preferences] = await Promise.all([getDestinations(), loadPreferences()]);
   if (destinations.length === 0) {
+    const findPostShareButton = trackShareButton(article, anchor);
     closeXOverlay();
-    openSettingsModal();
+    openSettingsModal(() => returnFocusToPost(findPostShareButton));
     return;
   }
 
@@ -67,6 +70,76 @@ async function startDiscordShare(article, anchor) {
 function findShareButton(root) {
   return root.querySelector('[data-testid="share"]')
     || [...root.querySelectorAll("button")].find((button) => /share/i.test(button.getAttribute("aria-label") || ""));
+}
+
+// X can re-render a post while the panel or settings are open, which replaces its Share button.
+// The finder remembers where on the page the button last was, to tell copies of the post apart.
+function trackShareButton(article, anchor) {
+  const postUrl = tweetUrlFromArticle(article);
+  let lastRect = toPageRect(anchor.getBoundingClientRect());
+  return () => {
+    const button = anchor.isConnected ? anchor
+      : article.isConnected ? findShareButton(article)
+        : nearestShareButtonCopy(postUrl, lastRect);
+    if (button) lastRect = toPageRect(button.getBoundingClientRect());
+    return button;
+  };
+}
+
+// Scrolling the page moves a rect in the viewport, so another copy of the post can scroll into where Share was.
+function toPageRect({ x, y, width, height }) {
+  return new DOMRect(x + window.scrollX, y + window.scrollY, width, height);
+}
+
+// The same post can be on the page twice, as in a repost. Only a copy where the Share button last was,
+// or one in view, can stand in for it, so focusing it never jumps the page.
+function nearestShareButtonCopy(postUrl, lastRect) {
+  const viewport = toPageRect(visibleViewport());
+  const distance = ({ rect }) => Math.hypot(rect.x - lastRect.x, rect.y - lastRect.y);
+  return [...document.querySelectorAll("article")]
+    .filter((candidate) => !candidate.closest(`.${POPOVER_CLASS}`) && tweetUrlFromArticle(candidate) === postUrl)
+    .map(findShareButton)
+    .filter(Boolean)
+    .map((button) => ({ button, rect: toPageRect(button.getBoundingClientRect()) }))
+    .filter(({ rect }) => rectsOverlap(rect, lastRect) || rectsOverlap(rect, viewport))
+    .sort((a, b) => distance(a) - distance(b))[0]?.button ?? null;
+}
+
+const FOCUSABLE_SELECTOR = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+// The browser refuses focus to hidden, inert, and disabled controls, so a target counts once focus actually lands.
+function focusIfAble(target) {
+  if (!target || target.closest('[aria-hidden="true"]')) return false;
+  target.focus({ preventScroll: true });
+  return document.activeElement === target;
+}
+
+// The browser still focuses a control with no size or no opacity, its own or an ancestor's.
+function isVisible(control) {
+  const { width, height } = control.getBoundingClientRect();
+  if (!width || !height) return false;
+  for (let node = control; node; node = node.parentElement) {
+    if (Number(getComputedStyle(node).opacity) === 0) return false;
+  }
+  return true;
+}
+
+// With the post gone, focus goes to a visible control in view, X's main column first, and as a last resort to main itself.
+function focusFallbackControl() {
+  const main = document.querySelector("main");
+  const controls = [...new Set([...(main?.querySelectorAll(FOCUSABLE_SELECTOR) ?? []), ...document.querySelectorAll(FOCUSABLE_SELECTOR)])];
+  const viewport = visibleViewport();
+  const inView = controls.filter((control) => rectsOverlap(control.getBoundingClientRect(), viewport));
+  if ([...inView, ...controls].some((control) => isVisible(control) && focusIfAble(control)) || !main) return;
+  if (!main.hasAttribute("tabindex")) {
+    main.tabIndex = -1;
+    main.addEventListener("blur", () => main.removeAttribute("tabindex"), { once: true });
+  }
+  main.focus({ preventScroll: true });
+}
+
+function returnFocusToPost(findPostShareButton) {
+  if (!focusIfAble(findPostShareButton())) focusFallbackControl();
 }
 
 function captureShareArticle(event) {
@@ -113,44 +186,18 @@ function findMenuItemLabelElement(item, referenceItem) {
   return itemSpans.find((node) => node.children.length === 0) || itemSpans[0] || null;
 }
 
-function applyPersonIconToSvg(svg, referenceSvg) {
-  const refPath = referenceSvg?.querySelector("path");
-  if (!svg) return false;
+function replaceMenuItemIcon(item) {
+  const svg = item.querySelector("svg");
+  if (!svg) return;
 
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("aria-hidden", "true");
-  svg.replaceChildren();
-
-  for (const d of PERSON_ICON_PATHS) {
+  svg.replaceChildren(...CHANNEL_ICON_PATHS.map((d) => {
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", d);
-    if (refPath) {
-      for (const attr of ["fill", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin"]) {
-        const val = refPath.getAttribute(attr);
-        if (val != null) path.setAttribute(attr, val);
-      }
-    } else {
-      path.setAttribute("fill", "none");
-      path.setAttribute("stroke", "currentColor");
-      path.setAttribute("stroke-width", "2");
-      path.setAttribute("stroke-linecap", "round");
-      path.setAttribute("stroke-linejoin", "round");
-    }
-    svg.append(path);
-  }
-
-  if (referenceSvg) {
-    for (const attr of ["fill", "stroke", "stroke-width"]) {
-      const val = referenceSvg.getAttribute(attr);
-      if (val != null) svg.setAttribute(attr, val);
-    }
-  }
-
-  return true;
-}
-
-function replaceMenuItemIcon(item, referenceItem) {
-  return applyPersonIconToSvg(item.querySelector("svg"), referenceItem?.querySelector("svg"));
+    path.setAttribute("fill", "currentColor");
+    return path;
+  }));
 }
 
 function replaceMenuItemText(item, text, referenceItem) {
@@ -192,7 +239,8 @@ function wireDiscordMenuItem(item) {
       showToast("Could not find the post. Try opening Share again.", "error");
       return;
     }
-    startDiscordShare(article, item);
+    // X removes its menu, and this item with it, so the panel anchors to the post's Share button.
+    startDiscordShare(article, findShareButton(article) || item);
   });
 
   item.addEventListener("keydown", (event) => {
@@ -210,7 +258,7 @@ function createDiscordMenuItem(template) {
   item.classList.add(SHARE_MENU_ITEM_CLASS);
 
   replaceMenuItemText(item, "Share to Discord", template);
-  replaceMenuItemIcon(item, template);
+  replaceMenuItemIcon(item);
 
   wireDiscordMenuItem(item);
   return item;

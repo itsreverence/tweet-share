@@ -36,6 +36,7 @@ const DEBUG_MEDIA_EXTRACTION = false;
 const DEBUG_QUOTE_EXTRACTION = false;
 const SHARE_MENU_ITEM_CLASS = "tds-share-menu-item";
 const POPOVER_CLASS = "tds-popover";
+const AVATAR_CLASS = "tds-avatar";
 const TOAST_HOST_CLASS = "tds-toast-host";
 const TOAST_CLASS = "tds-toast";
 const SETTINGS_CLASS = "tds-settings";
@@ -79,39 +80,98 @@ function trimCache(cache, maxEntries = CACHE_MAX_ENTRIES) {
   }
 }
 
-// X.com exposes RGB tuples on :root (e.g. --color-text: 231 233 234).
+  // --- 00-theme.js ---
+// Colors are RGB tuples ("231 233 234"), the format X publishes on :root (e.g. --color-text).
 const TDS_FONT = 'TwitterChirp, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
 const TDS_RGB_PATTERN = /^\d+\s+\d+\s+\d+$/;
 
-function readXRgb(variableName, fallback) {
-  const value = getComputedStyle(document.documentElement).getPropertyValue(variableName).trim();
-  return TDS_RGB_PATTERN.test(value) ? value : fallback;
+// X's colours, moved only as far as needed for 4.5:1 on every background each one meets, hover tints included:
+// subtle (muted text), link (blue text), danger and success (red and green text and icons), and accent (filled under white text).
+const THEME_PALETTES = {
+  light: {
+    surface: "255 255 255", raised: "247 249 249", text: "15 20 25", subtle: "83 100 113", border: "207 217 222", shadow: "101 119 134",
+    link: "12 113 181", danger: "210 10 23", success: "0 132 88", accent: "13 120 192"
+  },
+  dim: {
+    surface: "21 32 43", raised: "30 39 50", text: "247 249 249", subtle: "139 152 165", border: "56 68 77", shadow: "255 255 255",
+    link: "29 155 240", danger: "247 89 99", success: "0 186 124", accent: "13 120 192"
+  },
+  dark: {
+    surface: "0 0 0", raised: "22 24 28", text: "231 233 234", subtle: "125 131 136", border: "47 51 54", shadow: "255 255 255",
+    link: "29 155 240", danger: "244 33 46", success: "0 186 124", accent: "13 120 192"
+  }
+};
+// The blue of focus rings and borders, which carry no text.
+const THEME_ACCENTS = { blue: "29 155 240" };
+// The page background picks the palette. X's variables refine only its text colour and that blue,
+// so none of them can pull a colour text is drawn in or on below 4.5:1.
+const X_THEME_VARIABLES = {
+  text: "--color-text",
+  blue: "--color-blue"
+};
+
+function themeNameForBackground([red, green, blue]) {
+  const luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255;
+  if (luminance > 0.55) return "light";
+  return luminance > 0.06 ? "dim" : "dark";
 }
 
-function subtleTextRgb(backgroundRgb) {
-  const secondary = getComputedStyle(document.documentElement).getPropertyValue("--color-text-secondary").trim();
-  if (TDS_RGB_PATTERN.test(secondary)) return secondary;
+// `variables` holds the X tokens the page defines; `pageBackground` is [r, g, b] or null.
+function resolveTheme({ variables = {}, pageBackground = null } = {}) {
+  const palette = THEME_PALETTES[pageBackground ? themeNameForBackground(pageBackground) : "dark"];
+  return { ...palette, ...THEME_ACCENTS, ...variables };
+}
 
-  const [red, green, blue] = backgroundRgb.split(/\s+/).map(Number);
-  const luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255;
-  return luminance > 0.55 ? "83 100 113" : "113 118 123";
+function pageBackgroundRgb() {
+  for (const node of [document.body, document.documentElement]) {
+    if (!node) continue;
+    const match = /^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)$/.exec(getComputedStyle(node).backgroundColor);
+    if (match && Number(match[4] ?? 1) > 0) return match.slice(1, 4).map(Number);
+  }
+  return null;
+}
+
+function readThemeEnvironment() {
+  const rootStyle = getComputedStyle(document.documentElement);
+  const variables = {};
+  for (const [token, name] of Object.entries(X_THEME_VARIABLES)) {
+    const value = rootStyle.getPropertyValue(name).trim();
+    if (TDS_RGB_PATTERN.test(value)) variables[token] = value;
+  }
+  return { variables, pageBackground: pageBackgroundRgb() };
+}
+
+function relativeLuminance([red, green, blue]) {
+  const linear = (channel) => {
+    const value = channel / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue);
+}
+
+function hslToRgb(hue, saturation, lightness) {
+  const chroma = (saturation / 100) * Math.min(lightness / 100, 1 - lightness / 100);
+  const channel = (offset) => {
+    const k = (offset + hue / 30) % 12;
+    return Math.round(255 * (lightness / 100 - chroma * Math.max(-1, Math.min(k - 3, 9 - k, 1))));
+  };
+  return [channel(0), channel(8), channel(4)];
+}
+
+// Yellows and greens are bright at any given lightness, so each hue darkens only until white initials reach 4.5:1.
+function avatarColor(hue) {
+  let rgb;
+  for (let lightness = 45; lightness > 0; lightness -= 1) {
+    rgb = hslToRgb(hue, 60, lightness);
+    if (1.05 / (relativeLuminance(rgb) + 0.05) >= 4.5) break;
+  }
+  return `rgb(${rgb.join(" ")})`;
 }
 
 function applyXThemeVars(element) {
-  const surface = readXRgb("--color-background", "0 0 0");
-  const text = readXRgb("--color-text", "231 233 234");
-  const border = readXRgb("--color-border", "47 51 54");
-  const blue = readXRgb("--color-blue", "29 155 240");
-  const green = readXRgb("--color-green", "0 186 124");
-  const red = readXRgb("--color-red", "244 33 46");
-
-  element.style.setProperty("--tds-surface", surface);
-  element.style.setProperty("--tds-text", text);
-  element.style.setProperty("--tds-subtle", subtleTextRgb(surface));
-  element.style.setProperty("--tds-border", border);
-  element.style.setProperty("--tds-blue", blue);
-  element.style.setProperty("--tds-green", green);
-  element.style.setProperty("--tds-red", red);
+  for (const [token, value] of Object.entries(resolveTheme(readThemeEnvironment()))) {
+    element.style.setProperty(`--tds-${token}`, value);
+  }
 }
 
 function tdsSharedSurfaceCss() {
@@ -119,80 +179,11 @@ function tdsSharedSurfaceCss() {
     .${POPOVER_CLASS},
     .${TOAST_CLASS},
     .${SETTINGS_CLASS}__dialog {
-      background: rgb(var(--tds-surface, 0 0 0));
-      border: 1px solid rgb(var(--tds-border, 47 51 54));
-      color: rgb(var(--tds-text, 231 233 234));
+      background: rgb(var(--tds-surface));
+      border: 1px solid rgb(var(--tds-border));
+      box-shadow: rgb(var(--tds-shadow) / 0.2) 0 0 15px, rgb(var(--tds-shadow) / 0.15) 0 0 3px 1px;
+      color: rgb(var(--tds-text));
       font-family: ${TDS_FONT};
-    }
-    .${POPOVER_CLASS} {
-      border-radius: var(--border-radius-large, 16px);
-      box-shadow: var(--box-shadow-elevated, rgb(101 119 134 / 20%) 0 0 15px);
-    }
-    .${POPOVER_CLASS}__title,
-    .${SETTINGS_CLASS}__hint,
-    .${SETTINGS_CLASS}__card-id,
-    .${SETTINGS_CLASS}__empty,
-    .${SETTINGS_CLASS}__field label {
-      color: rgb(var(--tds-subtle, 113 118 123));
-    }
-    .${POPOVER_CLASS}__item:hover,
-    .${POPOVER_CLASS}__item:focus-visible,
-    .${POPOVER_CLASS}__manage:hover,
-    .${POPOVER_CLASS}__manage:focus-visible,
-    .${SETTINGS_CLASS}__close:hover,
-    .${SETTINGS_CLASS}__btn--ghost:hover {
-      background: rgb(var(--tds-blue, 29 155 240) / 0.1);
-    }
-    .${POPOVER_CLASS}__item[data-last="true"]::after,
-    .${POPOVER_CLASS}__manage {
-      color: rgb(var(--tds-blue, 29 155 240));
-    }
-    .${POPOVER_CLASS}__footer,
-    .${SETTINGS_CLASS}__header,
-    .${SETTINGS_CLASS}__footer,
-    .${SETTINGS_CLASS}__card {
-      border-color: rgb(var(--tds-border, 47 51 54));
-    }
-    .${TOAST_CLASS} {
-      border-radius: var(--border-radius-large, 16px);
-      box-shadow: var(--box-shadow-elevated, rgb(101 119 134 / 20%) 0 0 15px);
-    }
-    .${TOAST_CLASS}[data-state="success"] {
-      border-left: 3px solid rgb(var(--tds-green, 0 186 124));
-    }
-    .${TOAST_CLASS}[data-state="error"] {
-      border-left: 3px solid rgb(var(--tds-red, 244 33 46));
-    }
-    .${TOAST_CLASS}[data-state="info"] {
-      border-left: 3px solid rgb(var(--tds-blue, 29 155 240));
-    }
-    .${SETTINGS_CLASS}__dialog {
-      box-shadow: var(--box-shadow-elevated, rgb(101 119 134 / 20%) 0 0 15px);
-    }
-    .${SETTINGS_CLASS}__field input {
-      background: rgb(var(--tds-surface, 0 0 0));
-      border: 1px solid rgb(var(--tds-border, 47 51 54));
-      color: rgb(var(--tds-text, 231 233 234));
-    }
-    .${SETTINGS_CLASS}__field input::placeholder {
-      color: rgb(var(--tds-subtle, 113 118 123));
-    }
-    .${SETTINGS_CLASS}__field input:focus {
-      border-color: rgb(var(--tds-blue, 29 155 240));
-      outline: none;
-    }
-    .${SETTINGS_CLASS}__remove {
-      color: rgb(var(--tds-red, 244 33 46));
-    }
-    .${SETTINGS_CLASS}__remove:hover {
-      background: rgb(var(--tds-red, 244 33 46) / 0.1);
-    }
-    .${SETTINGS_CLASS}__btn--primary {
-      background: rgb(var(--tds-blue, 29 155 240));
-      color: #fff;
-    }
-    .${SETTINGS_CLASS}__btn--primary:hover {
-      background: rgb(var(--tds-blue, 29 155 240) / 0.85);
     }
   `;
 }
@@ -1822,8 +1813,7 @@ async function shareToDestination(destinationId, tweet, options = {}) {
 
   // --- 09-surface.js ---
 // Shared UI surface helpers: styles, toasts, and popover positioning.
-let activePopover = null;
-let activePopoverCleanup = null;
+let activePanel = null;
 
 function appendWhenReady(node) {
   if (document.documentElement) {
@@ -1838,89 +1828,29 @@ function injectStyles() {
   const style = document.createElement("style");
   style.textContent = `
     ${tdsSharedSurfaceCss()}
+    ${popoverStylesCss()}
     ${previewStylesCss()}
 
     .${SHARE_MENU_ITEM_CLASS} {
       cursor: pointer;
     }
 
-    .${POPOVER_CLASS} {
-      position: fixed;
-      z-index: 10000;
-      min-width: 220px;
-      max-width: min(320px, calc(100vw - 16px));
-      padding: 4px;
-      font-size: 15px;
-    }
-    .${POPOVER_CLASS}__title {
-      font-size: 13px;
-      font-weight: 700;
-      padding: 8px 12px 4px;
-    }
-    .${POPOVER_CLASS}__item {
+    .${AVATAR_CLASS} {
       align-items: center;
-      background: transparent;
-      border: 0;
-      border-radius: 8px;
-      color: inherit;
-      cursor: pointer;
-      display: flex;
-      font: inherit;
-      gap: 8px;
-      padding: 10px 12px;
-      text-align: left;
-      width: 100%;
-    }
-    .${POPOVER_CLASS}__item:hover,
-    .${POPOVER_CLASS}__item:focus-visible,
-    .${POPOVER_CLASS}__manage:hover,
-    .${POPOVER_CLASS}__manage:focus-visible {
-      outline: none;
-    }
-    .${POPOVER_CLASS}__item[data-last="true"]::after {
-      content: "Last used";
-      font-size: 11px;
-      margin-left: auto;
-    }
-    .${POPOVER_CLASS}__quote-option {
-      align-items: center;
-      cursor: pointer;
-      display: flex;
-      font-size: 14px;
-      gap: 8px;
-      margin: 2px 4px 6px;
-      padding: 8px 12px;
-      user-select: none;
-    }
-    .${POPOVER_CLASS}__quote-option input {
-      accent-color: var(--color-primary, #1d9bf0);
-      cursor: pointer;
+      border-radius: 10px;
+      color: #fff;
+      display: inline-flex;
       flex-shrink: 0;
-      height: 16px;
-      width: 16px;
-    }
-    .${POPOVER_CLASS}__footer {
-      border-top-width: 1px;
-      border-top-style: solid;
-      margin-top: 4px;
-      padding-top: 4px;
-    }
-    .${POPOVER_CLASS}__manage {
-      background: transparent;
-      border: 0;
-      border-radius: 999px;
-      cursor: pointer;
-      font: inherit;
       font-size: 15px;
-      font-weight: 400;
-      padding: 12px;
-      text-align: left;
-      width: 100%;
+      font-weight: 800;
+      height: 34px;
+      justify-content: center;
+      width: 34px;
     }
 
     .${TOAST_HOST_CLASS} {
       position: fixed;
-      right: 16px;
+      inset-inline-end: 16px;
       bottom: 16px;
       z-index: 10001;
       display: flex;
@@ -1930,14 +1860,45 @@ function injectStyles() {
       max-width: min(360px, calc(100vw - 32px));
     }
     .${TOAST_CLASS} {
-      border-radius: var(--border-radius-large, 16px);
-      border-left-width: 3px;
-      border-left-style: solid;
-      font-size: 15px;
-      line-height: 1.35;
-      padding: 12px 14px;
-      pointer-events: auto;
       animation: tds-toast-in 0.2s ease;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      line-height: 1.35;
+      padding-block: 12px;
+      padding-inline: 40px 14px;
+      pointer-events: auto;
+      position: relative;
+    }
+    .${TOAST_CLASS}::before {
+      border-radius: 999px;
+      color: rgb(var(--tds-surface));
+      font-size: 12px;
+      font-weight: 800;
+      height: 18px;
+      inset-inline-start: 12px;
+      line-height: 18px;
+      position: absolute;
+      text-align: center;
+      top: 13px;
+      width: 18px;
+    }
+    /* The "/ ''" alt text keeps the icon glyph out of what screen readers announce. */
+    .${TOAST_CLASS}[data-state="success"]::before {
+      background: rgb(var(--tds-success));
+      content: "✓";
+      content: "✓" / "";
+    }
+    .${TOAST_CLASS}[data-state="error"]::before {
+      background: rgb(var(--tds-danger));
+      content: "!";
+      content: "!" / "";
+    }
+    .${TOAST_CLASS}[data-state="info"]::before {
+      background: rgb(var(--tds-link));
+      content: "…";
+      content: "…" / "";
+      line-height: 14px;
     }
     @keyframes tds-toast-in {
       from { opacity: 0; transform: translateY(8px); }
@@ -1980,90 +1941,205 @@ function closeXOverlay() {
 }
 
 function closeDestinationMenu() {
-  if (activePopoverCleanup) {
-    activePopoverCleanup();
-    activePopoverCleanup = null;
-  }
-  if (activePopover) {
-    activePopover.remove();
-    activePopover = null;
-  }
+  activePanel?.close();
 }
 
-function positionPopover(menu, anchor) {
-  const rect = anchor.getBoundingClientRect();
-  const margin = 8;
-  menu.style.visibility = "hidden";
-  menu.style.left = "0";
-  menu.style.top = "0";
-  if (!menu.isConnected) {
-    document.body.append(menu);
+const PANEL_MARGIN = 8;
+const NARROW_VIEWPORT_WIDTH = 500;
+const NARROW_VIEWPORT_MEDIA = `(max-width: ${NARROW_VIEWPORT_WIDTH - 0.02}px)`;
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(value, max));
+}
+
+// What the user sees, in the coordinates of getBoundingClientRect and fixed positioning. Pinch zoom shrinks and moves it.
+function visibleViewport() {
+  const visual = window.visualViewport;
+  return visual
+    ? new DOMRect(visual.offsetLeft, visual.offsetTop, visual.width, visual.height)
+    : new DOMRect(0, 0, window.innerWidth, window.innerHeight);
+}
+
+function rectsOverlap(a, b) {
+  return a.left <= b.right && b.left <= a.right && a.top <= b.bottom && b.top <= a.bottom;
+}
+
+// Rects and sizes are in viewport pixels, and `viewport` is the part of the page the user sees.
+// maxHeight caps the panel so only its preview scrolls.
+// A sheet spans that width, and its top is that bottom edge. Its CSS lifts it by its own height, so placing it needs no measuring.
+function placePanel({ anchorRect, panelSize, viewport }) {
+  if (viewport.width < NARROW_VIEWPORT_WIDTH) {
+    return { mode: "sheet", top: viewport.bottom, left: viewport.left, width: viewport.width, maxHeight: Math.round(viewport.height * 0.85) };
   }
 
-  const menuRect = menu.getBoundingClientRect();
-  let top = rect.top - menuRect.height - margin;
-  if (top < margin) {
-    top = rect.bottom + margin;
+  const maxHeight = viewport.height - PANEL_MARGIN * 2;
+  const height = Math.min(panelSize.height, maxHeight);
+  const left = clamp(
+    anchorRect.left + anchorRect.width / 2 - panelSize.width / 2,
+    viewport.left + PANEL_MARGIN,
+    viewport.right - panelSize.width - PANEL_MARGIN
+  );
+  let mode = "clamped";
+  let top = anchorRect.top + anchorRect.height / 2 - height / 2;
+  if (panelSize.height <= anchorRect.top - viewport.top - PANEL_MARGIN * 2) {
+    mode = "above";
+    top = anchorRect.top - PANEL_MARGIN - panelSize.height;
+  } else if (panelSize.height <= viewport.bottom - anchorRect.bottom - PANEL_MARGIN * 2) {
+    mode = "below";
+    top = anchorRect.bottom + PANEL_MARGIN;
+  }
+  top = clamp(top, viewport.top + PANEL_MARGIN, viewport.bottom - height - PANEL_MARGIN);
+  return { mode, top: Math.round(top), left: Math.round(left), maxHeight };
+}
+
+// The panel is measured with none of a sheet's styles, which change its width and border.
+// Measured at full height, the panel and its preview lose where they were scrolled to, so that is put back.
+function positionPopover(panel, anchorRect) {
+  const scrolled = [panel, ...panel.children].map((node) => [node, node.scrollTop]);
+  panel.style.maxHeight = "";
+  panel.style.width = "";
+  panel.classList.remove(`${POPOVER_CLASS}--sheet`);
+  if (!panel.isConnected) {
+    document.body.append(panel);
   }
 
-  let left = rect.left + rect.width / 2 - menuRect.width / 2;
-  left = Math.max(margin, Math.min(left, window.innerWidth - menuRect.width - margin));
+  const { width, height } = panel.getBoundingClientRect();
+  const placement = placePanel({ anchorRect, panelSize: { width, height }, viewport: visibleViewport() });
+  panel.classList.toggle(`${POPOVER_CLASS}--sheet`, placement.mode === "sheet");
+  panel.style.top = `${placement.top}px`;
+  panel.style.left = `${placement.left}px`;
+  panel.style.width = placement.width === undefined ? "" : `${placement.width}px`;
+  panel.style.maxHeight = `${placement.maxHeight}px`;
+  for (const [node, scrollTop] of scrolled) node.scrollTop = scrollTop;
+}
 
-  menu.style.top = `${Math.round(top)}px`;
-  menu.style.left = `${Math.round(left)}px`;
-  menu.style.visibility = "visible";
+// Escape is the panel's only while focus is in it, on its Share button, or nowhere, so Escape elsewhere on X is left alone.
+// When X re-renders the post away, the panel keeps the place its Share button last had.
+function showPanel(panel, { findAnchor, returnFocus }) {
+  closeDestinationMenu();
+  let anchorRect = new DOMRect();
+  const place = () => {
+    anchorRect = findAnchor()?.getBoundingClientRect() ?? anchorRect;
+    positionPopover(panel, anchorRect);
+  };
+  const ownsFocus = (node) => node === document.body || panel.contains(node) || node === findAnchor();
+  const onKeyDown = (event) => {
+    if (event.key !== "Escape" || event.defaultPrevented || !ownsFocus(document.activeElement)) return;
+    close();
+    returnFocus();
+  };
+  const onPointerDown = (event) => {
+    if (!panel.contains(event.target) && !findAnchor()?.contains(event.target)) close();
+  };
+  const listeners = [
+    [document, "keydown", onKeyDown, false],
+    [document, "pointerdown", onPointerDown, true],
+    [window, "resize", place, false],
+    [window, "orientationchange", place, false],
+    [window.visualViewport, "resize", place, false],
+    [window.visualViewport, "scroll", place, false]
+  ].filter(([target]) => target);
+
+  function close() {
+    for (const [target, type, listener, capture] of listeners) target.removeEventListener(type, listener, capture);
+    panel.remove();
+    activePanel = null;
+  }
+
+  for (const [target, type, listener, capture] of listeners) target.addEventListener(type, listener, capture);
+  place();
+  panel.focus({ preventScroll: true });
+  activePanel = { place, close, ownsFocus, returnFocus };
+  return activePanel;
+}
+
+// The first character a reader sees, so a flag or a family emoji stays whole.
+function firstGrapheme(text) {
+  if (!Intl.Segmenter) return [...text][0];
+  return new Intl.Segmenter().segment(text)[Symbol.iterator]().next().value?.segment;
+}
+
+function createChannelAvatar(destination) {
+  const avatar = document.createElement("span");
+  avatar.className = AVATAR_CLASS;
+  avatar.setAttribute("aria-hidden", "true");
+  avatar.textContent = firstGrapheme(destination.label.trim())?.toUpperCase() || "#";
+  let hash = 0;
+  for (const char of destination.id) hash = (hash * 31 + char.codePointAt(0)) >>> 0;
+  avatar.style.background = avatarColor(hash % 360);
+  return avatar;
 }
 
   // --- 09-tweet-popover.js ---
-// Destination popover: preview, quote toggle, destination selection, and settings handoff.
-function setDestinationItemsDisabled(items, disabled) {
-  for (const item of items) {
-    item.disabled = disabled;
-    item.setAttribute("aria-disabled", disabled ? "true" : "false");
-    if (disabled) {
-      item.style.opacity = "0.55";
-      item.style.pointerEvents = "none";
-    } else {
-      item.style.opacity = "";
-      item.style.pointerEvents = "";
-    }
+// Destination popover: share summary, quote toggle, destination selection, preview, and settings handoff.
+const GEAR_ICON_PATH = "M10.54 1.75h2.92l1.57 2.36c.11.17.32.25.53.21l2.53-.59 2.17 2.17-.58 2.54c-.05.2.04.41.21.53l2.36 1.57v2.92l-2.36 1.57c-.17.12-.26.33-.21.53l.58 2.54-2.17 2.17-2.53-.59c-.21-.04-.42.04-.53.21l-1.57 2.36h-2.92l-1.58-2.36c-.11-.17-.32-.25-.52-.21l-2.54.59-2.17-2.17.58-2.54c.05-.2-.03-.41-.21-.53l-2.35-1.57v-2.92L4.1 8.97c.18-.12.26-.33.21-.53L3.73 5.9 5.9 3.73l2.54.59c.2.04.41-.04.52-.21l1.58-2.36zm1.07 2l-.98 1.47C10.05 6.08 9 6.5 7.99 6.27l-1.46-.34-.6.6.33 1.46c.24 1.01-.18 2.07-1.05 2.64l-1.46.98v.78l1.46.98c.87.57 1.29 1.63 1.05 2.64l-.33 1.46.6.6 1.46-.34c1.01-.23 2.06.19 2.64 1.05l.98 1.47h.78l.97-1.47c.58-.86 1.63-1.28 2.65-1.05l1.45.34.61-.6-.34-1.46c-.23-1.01.18-2.07 1.05-2.64l1.47-.98v-.78l-1.47-.98c-.87-.57-1.28-1.63-1.05-2.64l.34-1.46-.61-.6-1.45.34c-1.02.23-2.07-.19-2.65-1.05l-.97-1.47h-.78zM12 10.5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5c.82 0 1.5-.67 1.5-1.5s-.68-1.5-1.5-1.5zM8.5 12c0-1.93 1.56-3.5 3.5-3.5 1.93 0 3.5 1.57 3.5 3.5s-1.57 3.5-3.5 3.5c-1.94 0-3.5-1.57-3.5-3.5z";
+
+function describeShare(tweet, shareOptions, messageCount) {
+  const parts = [];
+  if (tweet.author?.username) parts.push(`Post by @${tweet.author.username}`);
+  const mediaCount = collectMediaAttachmentUrls(tweet, shareOptions).length;
+  if (mediaCount) parts.push(mediaFileCount(mediaCount));
+  if (shareOptions.includeQuote && hasQuoteTweet(tweet)) {
+    parts.push(tweet.quote.author?.username ? `quoting @${tweet.quote.author.username}` : "with quoted post");
   }
+  if (messageCount > 1) parts.push(`${messageCount} messages`);
+  return parts.join(" · ") || "Ready to send";
+}
+
+function createGearButton() {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `${POPOVER_CLASS}__icon-btn`;
+  button.setAttribute("aria-label", "Settings");
+  button.title = "Settings";
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", GEAR_ICON_PATH);
+  svg.append(path);
+  button.append(svg);
+  return button;
+}
+
+function createDestinationItem(destination, { isDefault, isLastUsed }) {
+  const item = document.createElement("button");
+  item.type = "button";
+  item.className = `${POPOVER_CLASS}__item`;
+  item.disabled = true;
+  if (isDefault) item.dataset.default = "true";
+
+  const label = document.createElement("span");
+  label.className = `${POPOVER_CLASS}__item-label`;
+  label.textContent = destination.label;
+  item.append(createChannelAvatar(destination), label);
+
+  if (isLastUsed) {
+    // Announced as the button's description, so the name stays the channel's label.
+    const badge = document.createElement("span");
+    badge.className = `${POPOVER_CLASS}__badge`;
+    badge.id = `${POPOVER_CLASS}-last-used`;
+    badge.setAttribute("aria-hidden", "true");
+    badge.textContent = "Last used";
+    item.setAttribute("aria-describedby", badge.id);
+    item.append(badge);
+  }
+  return item;
 }
 
 function openDestinationMenu(anchor, article, destinations, options = {}) {
   const { showQuoteOption = false, preferences = DEFAULT_PREFERENCES } = options;
-  closeDestinationMenu();
-
-  const last = localStorage.getItem(DESTINATION_KEY);
-  const menu = document.createElement("div");
-  menu.className = `${POPOVER_CLASS} ${POPOVER_CLASS}--with-preview`;
-  applyXThemeVars(menu);
-  menu.setAttribute("role", "menu");
-  menu.setAttribute("aria-label", "Share to Discord");
-
-  const titleEl = document.createElement("div");
-  titleEl.className = `${POPOVER_CLASS}__title`;
-  titleEl.textContent = "Share to Discord";
-  menu.append(titleEl);
-
-  const destinationsHost = document.createElement("div");
-
-  const previewWrap = document.createElement("div");
-  previewWrap.className = `${POPOVER_CLASS}__preview-wrap`;
-  const previewLabel = document.createElement("p");
-  previewLabel.className = `${POPOVER_CLASS}__preview-label`;
-  previewLabel.textContent = "Preview";
-  const previewBody = document.createElement("div");
-  const previewStatus = document.createElement("p");
-  previewStatus.className = `${POPOVER_CLASS}__preview-status`;
-  previewStatus.textContent = "Loading preview…";
-  previewBody.append(previewStatus);
-  previewWrap.append(previewLabel, previewBody);
+  const lastUsedId = localStorage.getItem(DESTINATION_KEY);
+  const defaultId = destinations.some((destination) => destination.id === lastUsedId) ? lastUsedId : destinations[0].id;
+  // Non-modal on purpose. Tab may leave it, and Escape or a click outside closes it.
+  const panel = document.createElement("div");
+  panel.className = POPOVER_CLASS;
+  applyXThemeVars(panel);
+  panel.setAttribute("role", "dialog");
+  panel.tabIndex = -1;
 
   let includeQuote = true;
   let preparedTweet = null;
-  let loadGeneration = 0;
-  const destinationItems = [];
 
   function shareOptions() {
     return {
@@ -2072,147 +2148,350 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     };
   }
 
-  function previewOptions() {
-    const options = shareOptions();
-    const attachmentUrls = collectMediaAttachmentUrls(preparedTweet, options);
-    return {
-      ...options,
-      attachMedia: attachmentUrls.length > 0,
-      attachmentUrls,
-      fallbackVideoUrls: []
-    };
+  const findAnchor = trackShareButton(article, anchor);
+  const returnFocus = () => returnFocusToPost(findAnchor);
+
+  function closeAndReturnFocus() {
+    closeDestinationMenu();
+    returnFocus();
   }
 
-  function refreshPreview() {
-    if (!preparedTweet) return;
-    const attachmentUrls = collectMediaAttachmentUrls(preparedTweet, shareOptions());
-    previewBody.replaceChildren(renderDiscordPreview(
-      buildDiscordPayloads(preparedTweet, previewOptions()),
-      { hasMediaCandidates: attachmentUrls.length > 0 }
-    ));
-    positionPopover(menu, anchor);
-  }
+  const header = document.createElement("div");
+  header.className = `${POPOVER_CLASS}__header`;
+  const titleEl = document.createElement("h2");
+  titleEl.className = `${POPOVER_CLASS}__title`;
+  titleEl.id = `${POPOVER_CLASS}-title`;
+  titleEl.textContent = "Share to Discord";
+  panel.setAttribute("aria-labelledby", titleEl.id);
+  const settingsBtn = createGearButton();
+  settingsBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openSettingsModal(returnFocus);
+  });
+  header.append(titleEl, settingsBtn);
 
-  async function loadPreview() {
-    const generation = ++loadGeneration;
-    setDestinationItemsDisabled(destinationItems, true);
-    previewBody.replaceChildren();
-    previewStatus.textContent = "Loading preview…";
-    previewBody.append(previewStatus);
-
-    try {
-      preparedTweet = await prepareShareTweet(article);
-      if (generation !== loadGeneration) return;
-      const attachmentUrls = collectMediaAttachmentUrls(preparedTweet, shareOptions());
-      previewBody.replaceChildren(renderDiscordPreview(
-        buildDiscordPayloads(preparedTweet, previewOptions()),
-        { hasMediaCandidates: attachmentUrls.length > 0 }
-      ));
-      setDestinationItemsDisabled(destinationItems, false);
-      positionPopover(menu, anchor);
-    } catch (error) {
-      if (generation !== loadGeneration) return;
-      console.error(error);
-      previewStatus.textContent = error.message || "Could not build a preview for this post.";
-      previewBody.replaceChildren(previewStatus);
-      setDestinationItemsDisabled(destinationItems, true);
-    }
-  }
+  const summary = document.createElement("p");
+  summary.className = `${POPOVER_CLASS}__summary`;
+  summary.setAttribute("aria-live", "polite");
+  summary.textContent = "Preparing post…";
+  panel.append(header, summary);
 
   if (showQuoteOption) {
     const quoteOption = document.createElement("label");
     quoteOption.className = `${POPOVER_CLASS}__quote-option`;
-
     const quoteCheckbox = document.createElement("input");
     quoteCheckbox.type = "checkbox";
     quoteCheckbox.checked = true;
     quoteCheckbox.addEventListener("change", () => {
       includeQuote = quoteCheckbox.checked;
-      refreshPreview();
+      if (preparedTweet) renderPrepared();
     });
-
     const quoteLabel = document.createElement("span");
-    quoteLabel.textContent = "Include quoted tweet";
-
+    quoteLabel.textContent = "Include quoted post";
     quoteOption.append(quoteCheckbox, quoteLabel);
-    menu.append(quoteOption);
+    panel.append(quoteOption);
   }
 
-  menu.append(previewWrap, destinationsHost);
-
-  destinations.forEach((destination) => {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = `${POPOVER_CLASS}__item`;
-    item.setAttribute("role", "menuitem");
-    item.textContent = destination.label;
-    item.disabled = true;
-    item.setAttribute("aria-disabled", "true");
-    item.style.opacity = "0.55";
-    item.style.pointerEvents = "none";
-    if (destination.id === last) {
-      item.dataset.last = "true";
-    }
+  const sendLabel = document.createElement("p");
+  sendLabel.className = `${POPOVER_CLASS}__section-label`;
+  sendLabel.id = `${POPOVER_CLASS}-send-label`;
+  sendLabel.textContent = "Send to";
+  const destinationsHost = document.createElement("div");
+  destinationsHost.className = `${POPOVER_CLASS}__destinations`;
+  destinationsHost.setAttribute("role", "group");
+  destinationsHost.setAttribute("aria-labelledby", sendLabel.id);
+  const destinationItems = destinations.map((destination) => {
+    const item = createDestinationItem(destination, {
+      isDefault: destination.id === defaultId,
+      isLastUsed: destination.id === lastUsedId
+    });
     item.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
       if (!preparedTweet) return;
-      closeDestinationMenu();
+      closeAndReturnFocus();
       localStorage.setItem(DESTINATION_KEY, destination.id);
       runShare(article, destination.id, shareOptions(), preparedTweet);
     });
-    destinationsHost.append(item);
-    destinationItems.push(item);
+    return item;
   });
-
-  const footer = document.createElement("div");
-  footer.className = `${POPOVER_CLASS}__footer`;
-  const manageBtn = document.createElement("button");
-  manageBtn.type = "button";
-  manageBtn.className = `${POPOVER_CLASS}__manage`;
-  manageBtn.textContent = "Settings…";
-  manageBtn.addEventListener("click", (event) => {
+  destinationsHost.append(...destinationItems);
+  destinationsHost.addEventListener("keydown", (event) => {
+    const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
+    const index = destinationItems.indexOf(event.target);
+    if (!step || index === -1) return;
     event.preventDefault();
-    event.stopPropagation();
-    closeDestinationMenu();
-    openSettingsModal();
+    destinationItems[(index + step + destinationItems.length) % destinationItems.length].focus();
   });
-  footer.append(manageBtn);
-  menu.append(footer);
+  panel.append(sendLabel, destinationsHost);
 
-  positionPopover(menu, anchor);
-  activePopover = menu;
+  const previewToggle = document.createElement("button");
+  previewToggle.type = "button";
+  previewToggle.className = `${POPOVER_CLASS}__disclosure`;
+  previewToggle.textContent = "Preview message";
+  const previewWrap = document.createElement("div");
+  previewWrap.className = `${POPOVER_CLASS}__preview-wrap`;
+  previewWrap.id = `${POPOVER_CLASS}-preview`;
+  previewWrap.tabIndex = 0;
+  previewWrap.setAttribute("role", "region");
+  previewWrap.setAttribute("aria-label", "Message preview");
+  previewToggle.setAttribute("aria-controls", previewWrap.id);
+  const previewStatus = document.createElement("p");
+  previewStatus.className = `${POPOVER_CLASS}__preview-status`;
+  previewStatus.textContent = "Loading preview…";
+  previewWrap.append(previewStatus);
+
+  function setPreviewExpanded(expanded) {
+    previewToggle.setAttribute("aria-expanded", String(expanded));
+    previewWrap.hidden = !expanded;
+  }
+  setPreviewExpanded(preferences.alwaysShowPreview);
+  previewToggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setPreviewExpanded(previewWrap.hidden);
+    lifecycle.place();
+  });
+  panel.append(previewToggle, previewWrap);
+
+  function renderPrepared() {
+    const options = shareOptions();
+    const attachmentUrls = collectMediaAttachmentUrls(preparedTweet, options);
+    const payloads = buildDiscordPayloads(preparedTweet, {
+      ...options,
+      attachMedia: attachmentUrls.length > 0,
+      attachmentUrls,
+      fallbackVideoUrls: []
+    });
+    previewWrap.replaceChildren(renderDiscordPreview(payloads, { attachmentUrls }));
+    summary.textContent = describeShare(preparedTweet, options, payloads.length);
+    lifecycle.place();
+  }
+
+  async function loadPreview() {
+    try {
+      preparedTweet = await prepareShareTweet(article);
+      if (!panel.isConnected) return;
+      renderPrepared();
+      for (const item of destinationItems) item.disabled = false;
+      if (document.activeElement === panel) {
+        destinationItems.find((item) => item.dataset.default === "true").focus();
+      }
+    } catch (error) {
+      if (!panel.isConnected) return;
+      console.error(error);
+      const message = error.message || "Could not build a preview for this post.";
+      summary.textContent = message;
+      previewStatus.textContent = message;
+    }
+  }
+
+  const lifecycle = showPanel(panel, { findAnchor, returnFocus });
   loadPreview();
+}
 
-  const onKeyDown = (event) => {
-    if (event.key === "Escape") {
-      closeDestinationMenu();
+function popoverStylesCss() {
+  return `
+    .${POPOVER_CLASS} {
+      border-radius: 16px;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      font-size: 15px;
+      overflow-y: auto;
+      position: fixed;
+      width: min(360px, calc(100vw - ${PANEL_MARGIN * 2}px));
+      z-index: 10000;
     }
-  };
-
-  const onPointerDown = (event) => {
-    if (!menu.contains(event.target) && event.target !== anchor && !anchor.contains?.(event.target)) {
-      closeDestinationMenu();
+    .${POPOVER_CLASS}--sheet {
+      border-bottom-width: 0;
+      border-radius: 16px 16px 0 0;
+      transform: translateY(-100%);
     }
-  };
-
-  window.setTimeout(() => {
-    document.addEventListener("keydown", onKeyDown);
-    document.addEventListener("pointerdown", onPointerDown, true);
-  }, 0);
-
-  activePopoverCleanup = () => {
-    loadGeneration += 1;
-    document.removeEventListener("keydown", onKeyDown);
-    document.removeEventListener("pointerdown", onPointerDown, true);
-  };
+    .${POPOVER_CLASS}:focus {
+      outline: none;
+    }
+    .${POPOVER_CLASS} > :not(.${POPOVER_CLASS}__preview-wrap) {
+      flex-shrink: 0;
+    }
+    .${POPOVER_CLASS} [hidden] {
+      display: none;
+    }
+    .${POPOVER_CLASS}__header {
+      align-items: center;
+      display: flex;
+      gap: 8px;
+      padding-block: 10px 0;
+      padding-inline: 16px 8px;
+    }
+    .${POPOVER_CLASS}__title {
+      flex: 1;
+      font-size: 17px;
+      font-weight: 800;
+      margin: 0;
+    }
+    .${POPOVER_CLASS}__icon-btn {
+      align-items: center;
+      background: transparent;
+      border: 0;
+      border-radius: 999px;
+      color: rgb(var(--tds-subtle));
+      cursor: pointer;
+      display: inline-flex;
+      height: 34px;
+      justify-content: center;
+      padding: 0;
+      width: 34px;
+    }
+    .${POPOVER_CLASS}__icon-btn svg {
+      fill: currentColor;
+      height: 18px;
+      width: 18px;
+    }
+    .${POPOVER_CLASS}__summary {
+      color: rgb(var(--tds-subtle));
+      font-size: 13px;
+      line-height: 1.4;
+      margin: 0;
+      overflow: hidden;
+      padding: 0 16px 8px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .${POPOVER_CLASS}__quote-option {
+      align-items: center;
+      border-radius: 12px;
+      cursor: pointer;
+      display: flex;
+      font-size: 14px;
+      gap: 10px;
+      margin: 0 8px 4px;
+      padding: 8px;
+      user-select: none;
+    }
+    .${POPOVER_CLASS}__quote-option input {
+      accent-color: rgb(var(--tds-blue));
+      cursor: pointer;
+      flex-shrink: 0;
+      height: 18px;
+      margin: 0;
+      width: 18px;
+    }
+    .${POPOVER_CLASS}__section-label {
+      color: rgb(var(--tds-subtle));
+      font-size: 13px;
+      font-weight: 700;
+      margin: 0;
+      padding: 6px 16px;
+    }
+    .${POPOVER_CLASS}__destinations {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 0 12px 12px;
+    }
+    .${POPOVER_CLASS}__item {
+      align-items: center;
+      background: transparent;
+      border: 1px solid rgb(var(--tds-border));
+      border-radius: 12px;
+      box-sizing: border-box;
+      color: inherit;
+      cursor: pointer;
+      display: flex;
+      font: inherit;
+      font-weight: 700;
+      gap: 12px;
+      min-height: 52px;
+      padding: 8px 12px;
+      text-align: start;
+      transition: background 0.12s ease, border-color 0.12s ease;
+      width: 100%;
+    }
+    .${POPOVER_CLASS}__item-label {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .${POPOVER_CLASS}__item:hover:not(:disabled) {
+      background: rgb(var(--tds-blue) / 0.1);
+      border-color: rgb(var(--tds-blue));
+    }
+    .${POPOVER_CLASS}__item[data-default="true"] {
+      background: rgb(var(--tds-accent));
+      border-color: rgb(var(--tds-accent));
+      color: #fff;
+    }
+    .${POPOVER_CLASS}__item[data-default="true"]:hover:not(:disabled) {
+      background: linear-gradient(rgb(0 0 0 / 0.1), rgb(0 0 0 / 0.1)) rgb(var(--tds-accent));
+      border-color: rgb(var(--tds-accent));
+    }
+    .${POPOVER_CLASS}__item:disabled {
+      cursor: progress;
+      opacity: 0.5;
+    }
+    /* The last-used channel is always the default, so the badge only ever sits on the accent fill. */
+    .${POPOVER_CLASS}__badge {
+      background: rgb(0 0 0 / 0.2);
+      border-radius: 999px;
+      color: #fff;
+      flex-shrink: 0;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 3px 8px;
+    }
+    .${POPOVER_CLASS}__item:focus-visible,
+    .${POPOVER_CLASS}__icon-btn:focus-visible,
+    .${POPOVER_CLASS}__disclosure:focus-visible,
+    .${POPOVER_CLASS}__quote-option:focus-within {
+      outline: 2px solid rgb(var(--tds-blue));
+      outline-offset: 2px;
+    }
+    .${POPOVER_CLASS}__icon-btn:hover,
+    .${POPOVER_CLASS}__quote-option:hover,
+    .${POPOVER_CLASS}__disclosure:hover {
+      background: rgb(var(--tds-text) / 0.07);
+    }
+    .${POPOVER_CLASS}__disclosure {
+      align-items: center;
+      background: transparent;
+      border: 0;
+      border-top: 1px solid rgb(var(--tds-border));
+      color: rgb(var(--tds-subtle));
+      cursor: pointer;
+      display: flex;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      gap: 10px;
+      padding: 10px 16px;
+      text-align: start;
+      width: 100%;
+    }
+    .${POPOVER_CLASS}__disclosure::before {
+      border-block: 4px solid transparent;
+      border-inline-start: 5px solid currentColor;
+      content: "";
+      transition: transform 0.12s ease;
+    }
+    .${POPOVER_CLASS}__disclosure[aria-expanded="true"]::before {
+      transform: rotate(90deg);
+    }
+    .${POPOVER_CLASS}__disclosure[aria-expanded="true"]:dir(rtl)::before {
+      transform: rotate(-90deg);
+    }
+  `;
 }
 
   // --- 09-ui.js ---
-// Simple person outline (head + shoulders), readable at menu size.
-const PERSON_ICON_PATHS = [
-  "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2",
-  "M12 11a4 4 0 0 1 0-8 4 4 0 0 1 0 8z",
+// A filled "#" channel glyph, drawn like X's own filled menu icons.
+const CHANNEL_ICON_PATHS = [
+  "M9.1 3.5h2l-2.2 17h-2z",
+  "M15.1 3.5h2l-2.2 17h-2z",
+  "M3.5 8h17v2h-17z",
+  "M3.5 14h17v2h-17z"
 ];
 
 let pendingShareArticle = null;
@@ -2253,8 +2532,9 @@ async function runShare(article, destinationId, options = {}, preparedTweet = nu
 async function startDiscordShare(article, anchor) {
   const [destinations, preferences] = await Promise.all([getDestinations(), loadPreferences()]);
   if (destinations.length === 0) {
+    const findPostShareButton = trackShareButton(article, anchor);
     closeXOverlay();
-    openSettingsModal();
+    openSettingsModal(() => returnFocusToPost(findPostShareButton));
     return;
   }
 
@@ -2278,6 +2558,76 @@ async function startDiscordShare(article, anchor) {
 function findShareButton(root) {
   return root.querySelector('[data-testid="share"]')
     || [...root.querySelectorAll("button")].find((button) => /share/i.test(button.getAttribute("aria-label") || ""));
+}
+
+// X can re-render a post while the panel or settings are open, which replaces its Share button.
+// The finder remembers where on the page the button last was, to tell copies of the post apart.
+function trackShareButton(article, anchor) {
+  const postUrl = tweetUrlFromArticle(article);
+  let lastRect = toPageRect(anchor.getBoundingClientRect());
+  return () => {
+    const button = anchor.isConnected ? anchor
+      : article.isConnected ? findShareButton(article)
+        : nearestShareButtonCopy(postUrl, lastRect);
+    if (button) lastRect = toPageRect(button.getBoundingClientRect());
+    return button;
+  };
+}
+
+// Scrolling the page moves a rect in the viewport, so another copy of the post can scroll into where Share was.
+function toPageRect({ x, y, width, height }) {
+  return new DOMRect(x + window.scrollX, y + window.scrollY, width, height);
+}
+
+// The same post can be on the page twice, as in a repost. Only a copy where the Share button last was,
+// or one in view, can stand in for it, so focusing it never jumps the page.
+function nearestShareButtonCopy(postUrl, lastRect) {
+  const viewport = toPageRect(visibleViewport());
+  const distance = ({ rect }) => Math.hypot(rect.x - lastRect.x, rect.y - lastRect.y);
+  return [...document.querySelectorAll("article")]
+    .filter((candidate) => !candidate.closest(`.${POPOVER_CLASS}`) && tweetUrlFromArticle(candidate) === postUrl)
+    .map(findShareButton)
+    .filter(Boolean)
+    .map((button) => ({ button, rect: toPageRect(button.getBoundingClientRect()) }))
+    .filter(({ rect }) => rectsOverlap(rect, lastRect) || rectsOverlap(rect, viewport))
+    .sort((a, b) => distance(a) - distance(b))[0]?.button ?? null;
+}
+
+const FOCUSABLE_SELECTOR = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+// The browser refuses focus to hidden, inert, and disabled controls, so a target counts once focus actually lands.
+function focusIfAble(target) {
+  if (!target || target.closest('[aria-hidden="true"]')) return false;
+  target.focus({ preventScroll: true });
+  return document.activeElement === target;
+}
+
+// The browser still focuses a control with no size or no opacity, its own or an ancestor's.
+function isVisible(control) {
+  const { width, height } = control.getBoundingClientRect();
+  if (!width || !height) return false;
+  for (let node = control; node; node = node.parentElement) {
+    if (Number(getComputedStyle(node).opacity) === 0) return false;
+  }
+  return true;
+}
+
+// With the post gone, focus goes to a visible control in view, X's main column first, and as a last resort to main itself.
+function focusFallbackControl() {
+  const main = document.querySelector("main");
+  const controls = [...new Set([...(main?.querySelectorAll(FOCUSABLE_SELECTOR) ?? []), ...document.querySelectorAll(FOCUSABLE_SELECTOR)])];
+  const viewport = visibleViewport();
+  const inView = controls.filter((control) => rectsOverlap(control.getBoundingClientRect(), viewport));
+  if ([...inView, ...controls].some((control) => isVisible(control) && focusIfAble(control)) || !main) return;
+  if (!main.hasAttribute("tabindex")) {
+    main.tabIndex = -1;
+    main.addEventListener("blur", () => main.removeAttribute("tabindex"), { once: true });
+  }
+  main.focus({ preventScroll: true });
+}
+
+function returnFocusToPost(findPostShareButton) {
+  if (!focusIfAble(findPostShareButton())) focusFallbackControl();
 }
 
 function captureShareArticle(event) {
@@ -2324,44 +2674,18 @@ function findMenuItemLabelElement(item, referenceItem) {
   return itemSpans.find((node) => node.children.length === 0) || itemSpans[0] || null;
 }
 
-function applyPersonIconToSvg(svg, referenceSvg) {
-  const refPath = referenceSvg?.querySelector("path");
-  if (!svg) return false;
+function replaceMenuItemIcon(item) {
+  const svg = item.querySelector("svg");
+  if (!svg) return;
 
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("aria-hidden", "true");
-  svg.replaceChildren();
-
-  for (const d of PERSON_ICON_PATHS) {
+  svg.replaceChildren(...CHANNEL_ICON_PATHS.map((d) => {
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", d);
-    if (refPath) {
-      for (const attr of ["fill", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin"]) {
-        const val = refPath.getAttribute(attr);
-        if (val != null) path.setAttribute(attr, val);
-      }
-    } else {
-      path.setAttribute("fill", "none");
-      path.setAttribute("stroke", "currentColor");
-      path.setAttribute("stroke-width", "2");
-      path.setAttribute("stroke-linecap", "round");
-      path.setAttribute("stroke-linejoin", "round");
-    }
-    svg.append(path);
-  }
-
-  if (referenceSvg) {
-    for (const attr of ["fill", "stroke", "stroke-width"]) {
-      const val = referenceSvg.getAttribute(attr);
-      if (val != null) svg.setAttribute(attr, val);
-    }
-  }
-
-  return true;
-}
-
-function replaceMenuItemIcon(item, referenceItem) {
-  return applyPersonIconToSvg(item.querySelector("svg"), referenceItem?.querySelector("svg"));
+    path.setAttribute("fill", "currentColor");
+    return path;
+  }));
 }
 
 function replaceMenuItemText(item, text, referenceItem) {
@@ -2403,7 +2727,8 @@ function wireDiscordMenuItem(item) {
       showToast("Could not find the post. Try opening Share again.", "error");
       return;
     }
-    startDiscordShare(article, item);
+    // X removes its menu, and this item with it, so the panel anchors to the post's Share button.
+    startDiscordShare(article, findShareButton(article) || item);
   });
 
   item.addEventListener("keydown", (event) => {
@@ -2421,7 +2746,7 @@ function createDiscordMenuItem(template) {
   item.classList.add(SHARE_MENU_ITEM_CLASS);
 
   replaceMenuItemText(item, "Share to Discord", template);
-  replaceMenuItemIcon(item, template);
+  replaceMenuItemIcon(item);
 
   wireDiscordMenuItem(item);
   return item;
@@ -2643,11 +2968,8 @@ async function savePreferences(preferences) {
   return sanitized;
 }
 
-  // --- 11-settings-surface.js ---
-// Settings modal surface helpers: styles and small DOM builders.
-let settingsModalCleanup = null;
-let settingsFieldCount = 0;
-
+  // --- 11-settings-styles.js ---
+// Settings modal styles, injected once per page.
 function injectSettingsStyles() {
   if (document.getElementById("tds-settings-style")) return;
 
@@ -2657,37 +2979,43 @@ function injectSettingsStyles() {
     ${tdsSharedSurfaceCss()}
 
     .${SETTINGS_CLASS}__backdrop {
-      position: fixed;
-      inset: 0;
-      z-index: 10002;
-      display: flex;
       align-items: center;
+      /* Do not use X gray-* tokens for overlay — e.g. --color-gray-1100 is pink on X */
+      background-color: rgb(91 112 131 / 0.4);
+      display: flex;
+      inset: 0;
       justify-content: center;
       padding: 16px;
-      /* Do not use X gray-* tokens for overlay — e.g. --color-gray-1100 is pink on X */
-      background-color: rgba(0, 0, 0, 0.65);
+      position: fixed;
+      z-index: 10002;
     }
     .${SETTINGS_CLASS}__dialog {
-      border-radius: var(--border-radius-x-large, 20px);
+      border-radius: 16px;
+      display: flex;
+      flex-direction: column;
       max-height: min(90vh, 720px);
       max-width: 520px;
       overflow: hidden;
       width: 100%;
-      display: flex;
-      flex-direction: column;
+    }
+    .${SETTINGS_CLASS}__dialog:focus {
+      outline: none;
+    }
+    .${SETTINGS_CLASS}__dialog [hidden] {
+      display: none;
     }
     .${SETTINGS_CLASS}__header {
       align-items: center;
-      border-bottom-width: 1px;
-      border-bottom-style: solid;
+      border-bottom: 1px solid rgb(var(--tds-border));
       display: flex;
       gap: 12px;
-      justify-content: space-between;
-      padding: 16px 18px;
+      padding-block: 12px;
+      padding-inline: 20px 12px;
     }
     .${SETTINGS_CLASS}__header h2 {
+      flex: 1;
       font-size: 20px;
-      font-weight: 700;
+      font-weight: 800;
       margin: 0;
     }
     .${SETTINGS_CLASS}__close {
@@ -2701,55 +3029,126 @@ function injectSettingsStyles() {
       line-height: 1;
       width: 36px;
     }
+    .${SETTINGS_CLASS}__close:hover {
+      background: rgb(var(--tds-text) / 0.1);
+    }
     .${SETTINGS_CLASS}__body {
-      overflow: auto;
-      padding: 16px 18px;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 20px;
+      overflow: auto;
+      overscroll-behavior: contain;
+      padding: 16px 20px 20px;
     }
-    .${SETTINGS_CLASS}__hint {
-      font-size: 15px;
-      line-height: 1.45;
-      margin: 0;
-    }
-    .${SETTINGS_CLASS}__list {
+    .${SETTINGS_CLASS}__section {
       display: flex;
       flex-direction: column;
       gap: 10px;
     }
-    .${SETTINGS_CLASS}__card {
-      border-width: 1px;
-      border-style: solid;
-      border-radius: var(--border-radius-large, 16px);
-      padding: 12px;
+    .${SETTINGS_CLASS}__section-title {
+      align-items: baseline;
+      display: flex;
+      font-size: 17px;
+      font-weight: 800;
+      gap: 8px;
+      margin: 0;
+    }
+    .${SETTINGS_CLASS}__count {
+      color: rgb(var(--tds-subtle));
+      font-size: 15px;
+      font-weight: 400;
+    }
+    .${SETTINGS_CLASS}__list {
+      border: 1px solid rgb(var(--tds-border));
+      border-radius: 12px;
+      list-style: none;
+      margin: 0;
+      overflow: hidden;
+      padding: 0;
+    }
+    .${SETTINGS_CLASS}__row + .${SETTINGS_CLASS}__row {
+      border-top: 1px solid rgb(var(--tds-border));
+    }
+    .${SETTINGS_CLASS}__row-main {
+      align-items: center;
+      display: flex;
+      gap: 12px;
+      padding: 10px 12px;
+    }
+    .${SETTINGS_CLASS}__row-text {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+    .${SETTINGS_CLASS}__row-title,
+    .${SETTINGS_CLASS}__row-status {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .${SETTINGS_CLASS}__row-title {
+      font-size: 15px;
+      font-weight: 700;
+    }
+    .${SETTINGS_CLASS}__row-status {
+      color: rgb(var(--tds-subtle));
+      font-size: 13px;
+    }
+    .${SETTINGS_CLASS}__row-status[data-invalid="true"] {
+      color: rgb(var(--tds-danger));
+    }
+    .${SETTINGS_CLASS}__row-edit {
+      background: rgb(var(--tds-raised));
+      border-top: 1px solid rgb(var(--tds-border));
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 12px;
+      padding: 12px;
     }
-    .${SETTINGS_CLASS}__card-head {
-      align-items: flex-start;
+    .${SETTINGS_CLASS}__card {
+      border: 1px solid rgb(var(--tds-border));
+      border-radius: 12px;
       display: flex;
-      gap: 8px;
-      justify-content: space-between;
+      flex-direction: column;
+      gap: 12px;
+      padding: 14px;
     }
     .${SETTINGS_CLASS}__card-title {
       font-size: 15px;
       font-weight: 700;
     }
-    .${SETTINGS_CLASS}__card-id {
+    .${SETTINGS_CLASS}__field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .${SETTINGS_CLASS}__field label {
+      color: rgb(var(--tds-subtle));
       font-size: 13px;
+      font-weight: 700;
     }
     .${SETTINGS_CLASS}__field input {
-      border-radius: var(--border-radius-medium, 8px);
+      background: rgb(var(--tds-surface));
+      border: 1px solid rgb(var(--tds-border));
+      border-radius: 8px;
       box-sizing: border-box;
+      color: rgb(var(--tds-text));
       font: inherit;
       font-size: 15px;
-      padding: 12px;
+      padding: 10px 12px;
       width: 100%;
     }
+    .${SETTINGS_CLASS}__field input::placeholder {
+      color: rgb(var(--tds-subtle));
+    }
+    .${SETTINGS_CLASS}__field input:focus {
+      border-color: rgb(var(--tds-blue));
+      box-shadow: 0 0 0 1px rgb(var(--tds-blue));
+      outline: none;
+    }
     .${SETTINGS_CLASS}__secret {
-      align-items: stretch;
       display: flex;
       gap: 8px;
     }
@@ -2757,120 +3156,164 @@ function injectSettingsStyles() {
       flex: 1;
       min-width: 0;
     }
-    .${SETTINGS_CLASS}__reveal {
-      background: transparent;
-      border: 1px solid rgb(var(--tds-border, 47 51 54));
-      border-radius: var(--border-radius-medium, 8px);
-      color: inherit;
-      cursor: pointer;
-      flex-shrink: 0;
-      font: inherit;
-      font-size: 14px;
-      font-weight: 700;
-      min-height: 44px;
-      padding: 0 12px;
-    }
-    .${SETTINGS_CLASS}__reveal:hover {
-      background: rgb(var(--tds-blue, 29 155 240) / 0.1);
-      border-color: rgb(var(--tds-blue, 29 155 240));
-    }
-    .${SETTINGS_CLASS}__remove {
-      background: transparent;
-      border: 0;
-      border-radius: 999px;
-      cursor: pointer;
-      flex-shrink: 0;
-      font: inherit;
-      font-size: 15px;
-      padding: 8px 12px;
-    }
-    .${SETTINGS_CLASS}__footer {
-      border-top-width: 1px;
-      border-top-style: solid;
-      display: flex;
-      gap: 8px;
-      justify-content: flex-end;
-      padding: 14px 18px;
-    }
-    .${SETTINGS_CLASS}__btn {
-      border: 0;
-      border-radius: 999px;
-      cursor: pointer;
-      font: inherit;
-      font-size: 15px;
-      font-weight: 700;
-      min-height: 36px;
-      padding: 0 16px;
-    }
-    .${SETTINGS_CLASS}__btn--ghost {
-      background: transparent;
-      color: inherit;
-    }
-    .${SETTINGS_CLASS}__empty {
-      font-size: 15px;
-      line-height: 1.45;
-      padding: 4px 0 0;
-    }
-    .${SETTINGS_CLASS}__empty-title {
-      color: rgb(var(--tds-text, 231 233 234));
-      font-weight: 700;
-      margin: 0 0 8px;
-    }
-    .${SETTINGS_CLASS}__empty-steps {
-      margin: 0;
-      padding-left: 1.25em;
-    }
-    .${SETTINGS_CLASS}__empty-steps li {
-      margin: 0 0 6px;
-    }
-    .${SETTINGS_CLASS}__empty-steps li:last-child {
-      margin-bottom: 0;
-    }
-    .${SETTINGS_CLASS}__card-actions {
+    .${SETTINGS_CLASS}__actions {
+      align-items: center;
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
-      justify-content: flex-start;
-      margin-top: 4px;
+    }
+    .${SETTINGS_CLASS}__btn {
+      align-items: center;
+      background: transparent;
+      border: 1px solid rgb(var(--tds-border));
+      border-radius: 999px;
+      color: inherit;
+      cursor: pointer;
+      display: inline-flex;
+      font: inherit;
+      font-size: 15px;
+      font-weight: 700;
+      justify-content: center;
+      min-height: 34px;
+      padding: 0 14px;
+      white-space: nowrap;
+    }
+    .${SETTINGS_CLASS}__btn:hover {
+      background: rgb(var(--tds-text) / 0.08);
+    }
+    .${SETTINGS_CLASS}__btn--primary {
+      background: rgb(var(--tds-text));
+      border-color: transparent;
+      color: rgb(var(--tds-surface));
+      min-height: 36px;
+      padding: 0 18px;
+    }
+    .${SETTINGS_CLASS}__btn--primary:hover {
+      background: rgb(var(--tds-text) / 0.85);
+    }
+    .${SETTINGS_CLASS}__btn--ghost {
+      border-color: transparent;
+    }
+    .${SETTINGS_CLASS}__btn--danger {
+      color: rgb(var(--tds-danger));
+    }
+    .${SETTINGS_CLASS}__btn--danger:hover {
+      background: rgb(var(--tds-danger) / 0.1);
+      border-color: rgb(var(--tds-danger) / 0.5);
     }
     .${SETTINGS_CLASS}__btn:disabled {
       cursor: wait;
       opacity: 0.55;
     }
-    .${SETTINGS_CLASS}__section-title {
-      font-size: 17px;
+    .${SETTINGS_CLASS}__btn:focus-visible,
+    .${SETTINGS_CLASS}__close:focus-visible,
+    .${SETTINGS_CLASS}__add-toggle:focus-visible,
+    .${SETTINGS_CLASS}__option:focus-within {
+      outline: 2px solid rgb(var(--tds-blue));
+      outline-offset: 2px;
+    }
+    .${SETTINGS_CLASS}__add-toggle {
+      background: transparent;
+      border: 1px dashed rgb(var(--tds-border));
+      border-radius: 12px;
+      color: rgb(var(--tds-link));
+      cursor: pointer;
+      font: inherit;
+      font-size: 15px;
       font-weight: 700;
+      padding: 12px;
+      text-align: start;
+    }
+    .${SETTINGS_CLASS}__add-toggle:hover {
+      background: rgb(var(--tds-link) / 0.08);
+      border-color: rgb(var(--tds-link));
+    }
+    .${SETTINGS_CLASS}__empty {
+      background: rgb(var(--tds-raised));
+      border-radius: 12px;
+      color: rgb(var(--tds-subtle));
+      font-size: 14px;
+      line-height: 1.45;
+      padding: 14px 16px;
+    }
+    .${SETTINGS_CLASS}__empty-title {
+      color: rgb(var(--tds-text));
+      font-size: 15px;
+      font-weight: 700;
+      margin: 0 0 8px;
+    }
+    .${SETTINGS_CLASS}__empty-steps {
       margin: 0;
+      padding-inline-start: 1.25em;
+    }
+    .${SETTINGS_CLASS}__empty-steps li {
+      margin: 0 0 4px;
     }
     .${SETTINGS_CLASS}__option {
       align-items: flex-start;
+      border: 1px solid rgb(var(--tds-border));
+      border-radius: 12px;
       cursor: pointer;
       display: flex;
       font-size: 15px;
-      gap: 10px;
-      line-height: 1.45;
+      gap: 12px;
+      line-height: 1.4;
+      padding: 12px 14px;
       user-select: none;
     }
     .${SETTINGS_CLASS}__option input {
-      accent-color: rgb(var(--tds-blue, 29 155 240));
+      accent-color: rgb(var(--tds-blue));
       cursor: pointer;
       flex-shrink: 0;
-      height: 16px;
-      margin-top: 3px;
-      width: 16px;
+      height: 18px;
+      margin: 1px 0 0;
+      width: 18px;
     }
     .${SETTINGS_CLASS}__option-text {
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 2px;
     }
     .${SETTINGS_CLASS}__option-detail {
-      color: rgb(var(--tds-subtle, 113 118 123));
-      font-size: 14px;
+      color: rgb(var(--tds-subtle));
+      font-size: 13px;
+    }
+    .${SETTINGS_CLASS}__hint {
+      color: rgb(var(--tds-subtle));
+      font-size: 13px;
+      line-height: 1.45;
+      margin: 0;
+    }
+    .${SETTINGS_CLASS}__footer {
+      border-top: 1px solid rgb(var(--tds-border));
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      padding: 12px 16px;
+    }
+    @media ${NARROW_VIEWPORT_MEDIA} {
+      .${SETTINGS_CLASS}__backdrop {
+        padding: 8px;
+      }
+      .${SETTINGS_CLASS}__body {
+        padding: 16px;
+      }
+      .${SETTINGS_CLASS}__row-main {
+        gap: 10px;
+        padding: 10px;
+      }
+      .${SETTINGS_CLASS}__row-main .${SETTINGS_CLASS}__btn {
+        padding: 0 10px;
+      }
     }
   `;
   appendWhenReady(style);
 }
+
+  // --- 11-settings-surface.js ---
+// Small DOM builders for the settings modal, including the channel row.
+let settingsModalCleanup = null;
+let settingsIdCount = 0;
 
 function createSettingsOption(labelText, detailText, checked) {
   const option = document.createElement("label");
@@ -2896,19 +3339,32 @@ function createSettingsOption(labelText, detailText, checked) {
   return { option, input };
 }
 
+// The dialog goes first, so returning focus never picks one of its own controls.
 function closeSettingsModal() {
+  document.querySelector(`.${SETTINGS_CLASS}__backdrop`)?.remove();
   if (settingsModalCleanup) {
     settingsModalCleanup();
     settingsModalCleanup = null;
   }
-  document.querySelector(`.${SETTINGS_CLASS}__backdrop`)?.remove();
+}
+
+function nextSettingsId() {
+  return `${SETTINGS_CLASS}-${++settingsIdCount}`;
+}
+
+function createSettingsButton(text, variant = "") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `${SETTINGS_CLASS}__btn${variant ? ` ${SETTINGS_CLASS}__btn--${variant}` : ""}`;
+  button.textContent = text;
+  return button;
 }
 
 function createSettingsField(labelText, control) {
   const fieldEl = document.createElement("div");
   fieldEl.className = `${SETTINGS_CLASS}__field`;
   const input = control.matches("input") ? control : control.querySelector("input");
-  input.id ||= `${SETTINGS_CLASS}-field-${++settingsFieldCount}`;
+  input.id ||= nextSettingsId();
   const label = document.createElement("label");
   label.textContent = labelText;
   label.htmlFor = input.id;
@@ -2925,25 +3381,15 @@ function createWebhookUrlField(input) {
   const row = document.createElement("div");
   row.className = `${SETTINGS_CLASS}__secret`;
 
-  const revealBtn = document.createElement("button");
-  revealBtn.type = "button";
-  revealBtn.className = `${SETTINGS_CLASS}__reveal`;
-  revealBtn.textContent = "Show";
+  const revealBtn = createSettingsButton("Show");
   revealBtn.setAttribute("aria-label", "Show webhook URL");
   revealBtn.setAttribute("aria-pressed", "false");
   revealBtn.addEventListener("click", () => {
     const showing = input.type !== "password";
-    if (showing) {
-      input.type = "password";
-      revealBtn.textContent = "Show";
-      revealBtn.setAttribute("aria-label", "Show webhook URL");
-      revealBtn.setAttribute("aria-pressed", "false");
-    } else {
-      input.type = "text";
-      revealBtn.textContent = "Hide";
-      revealBtn.setAttribute("aria-label", "Hide webhook URL");
-      revealBtn.setAttribute("aria-pressed", "true");
-    }
+    input.type = showing ? "password" : "text";
+    revealBtn.textContent = showing ? "Show" : "Hide";
+    revealBtn.setAttribute("aria-label", showing ? "Show webhook URL" : "Hide webhook URL");
+    revealBtn.setAttribute("aria-pressed", String(!showing));
   });
 
   row.append(input, revealBtn);
@@ -2962,9 +3408,8 @@ function createSettingsEmptyState() {
   steps.className = `${SETTINGS_CLASS}__empty-steps`;
   for (const text of [
     "In Discord: Edit Channel → Integrations → Webhooks → New Webhook.",
-    "Copy the webhook URL.",
-    "Add a display name and paste the URL below, then Test webhook.",
-    "Save — then use Share → Share to Discord on X."
+    "Copy the webhook URL and paste it below with a name you'll recognize.",
+    "Test webhook, then Save. Share → Share to Discord on any post."
   ]) {
     const item = document.createElement("li");
     item.textContent = text;
@@ -2976,10 +3421,7 @@ function createSettingsEmptyState() {
 }
 
 function createTestWebhookButton(getWebhookUrl) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = `${SETTINGS_CLASS}__btn ${SETTINGS_CLASS}__btn--ghost`;
-  button.textContent = "Test webhook";
+  const button = createSettingsButton("Test webhook");
   button.addEventListener("click", async () => {
     if (button.disabled) return;
     button.disabled = true;
@@ -2998,14 +3440,122 @@ function createTestWebhookButton(getWebhookUrl) {
   return button;
 }
 
+function trapFocus(dialog, event) {
+  const focusable = [...dialog.querySelectorAll("button, input, a[href]")].filter((node) => {
+    return !node.disabled && !node.closest("[hidden]");
+  });
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const outside = !focusable.includes(document.activeElement);
+  if (event.shiftKey && (outside || document.activeElement === first)) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (outside || document.activeElement === last)) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+// A channel's summary row and its inline edit form. Edits write straight to `destination`.
+function createChannelRow(destination, { savedWebhookUrl, onToggleEdit, onRemove }) {
+  const element = document.createElement("li");
+  element.className = `${SETTINGS_CLASS}__row`;
+
+  const main = document.createElement("div");
+  main.className = `${SETTINGS_CLASS}__row-main`;
+  let avatar = createChannelAvatar(destination);
+  const text = document.createElement("div");
+  text.className = `${SETTINGS_CLASS}__row-text`;
+  const title = document.createElement("div");
+  title.className = `${SETTINGS_CLASS}__row-title`;
+  title.id = nextSettingsId();
+  const status = document.createElement("div");
+  status.className = `${SETTINGS_CLASS}__row-status`;
+  text.append(title, status);
+
+  function refresh() {
+    const label = destination.label.trim();
+    const valid = Boolean(sanitizeDestination(destination));
+    title.textContent = label || "Untitled channel";
+    if (valid) status.textContent = destination.webhookUrl === savedWebhookUrl ? "Webhook saved" : "Not saved yet";
+    else status.textContent = label ? "Needs a valid webhook URL" : "Needs a display name";
+    status.dataset.invalid = String(!valid);
+    const freshAvatar = createChannelAvatar(destination);
+    avatar.replaceWith(freshAvatar);
+    avatar = freshAvatar;
+  }
+
+  const editRegion = document.createElement("div");
+  editRegion.className = `${SETTINGS_CLASS}__row-edit`;
+  editRegion.id = nextSettingsId();
+
+  const editBtn = createSettingsButton("Edit");
+  editBtn.setAttribute("aria-controls", editRegion.id);
+  editBtn.setAttribute("aria-describedby", title.id);
+  editBtn.addEventListener("click", () => {
+    onToggleEdit();
+    (editRegion.hidden ? editBtn : labelInput).focus();
+  });
+
+  function setEditing(open) {
+    editRegion.hidden = !open;
+    editBtn.textContent = open ? "Done" : "Edit";
+    editBtn.setAttribute("aria-expanded", String(open));
+  }
+
+  const removeBtn = createSettingsButton("Remove", "danger");
+  removeBtn.setAttribute("aria-describedby", title.id);
+  removeBtn.addEventListener("click", onRemove);
+
+  const actions = document.createElement("div");
+  actions.className = `${SETTINGS_CLASS}__actions`;
+  actions.append(editBtn, removeBtn);
+  main.append(avatar, text, actions);
+
+  const labelInput = document.createElement("input");
+  labelInput.type = "text";
+  labelInput.value = destination.label;
+  labelInput.addEventListener("input", () => {
+    destination.label = labelInput.value;
+    refresh();
+  });
+
+  const urlInput = document.createElement("input");
+  urlInput.placeholder = "https://discord.com/api/webhooks/...";
+  urlInput.value = destination.webhookUrl;
+  urlInput.addEventListener("input", () => {
+    destination.webhookUrl = urlInput.value.trim();
+    refresh();
+  });
+
+  const editActions = document.createElement("div");
+  editActions.className = `${SETTINGS_CLASS}__actions`;
+  editActions.append(createTestWebhookButton(() => destination.webhookUrl));
+  editRegion.append(
+    createSettingsField("Display name", labelInput),
+    createWebhookUrlField(urlInput),
+    editActions
+  );
+
+  refresh();
+  element.append(main, editRegion);
+  return { element, editBtn, labelInput, urlInput, setEditing };
+}
+
   // --- 11-settings.js ---
-async function openSettingsModal() {
+async function openSettingsModal(returnFocus) {
   closeDestinationMenu();
   if (document.querySelector(`.${SETTINGS_CLASS}__backdrop`)) return;
   injectSettingsStyles();
 
   let destinations = [...(await loadAllDestinations())];
-  let preferences = await loadPreferences();
+  const savedWebhookUrls = new Map(destinations.map(({ id, webhookUrl }) => [id, webhookUrl]));
+  const preferences = await loadPreferences();
+  // One channel form is open at a time; the Add form is forced open while there are no channels.
+  let editingId = null;
+  let addFormOpen = false;
+  let rows = new Map();
+
   const backdrop = document.createElement("div");
   backdrop.className = `${SETTINGS_CLASS}__backdrop`;
 
@@ -3015,6 +3565,7 @@ async function openSettingsModal() {
   dialog.setAttribute("role", "dialog");
   dialog.setAttribute("aria-modal", "true");
   dialog.setAttribute("aria-label", "Tweet Discord Share settings");
+  dialog.tabIndex = -1;
 
   const header = document.createElement("div");
   header.className = `${SETTINGS_CLASS}__header`;
@@ -3031,103 +3582,42 @@ async function openSettingsModal() {
   const body = document.createElement("div");
   body.className = `${SETTINGS_CLASS}__body`;
 
-  const sharingTitle = document.createElement("h3");
-  sharingTitle.className = `${SETTINGS_CLASS}__section-title`;
-  sharingTitle.textContent = "Sharing";
-
-  const previewOption = createSettingsOption(
-    "Always show preview before sending",
-    "Turn off to send instantly when you have one channel and the post has no quote.",
-    preferences.alwaysShowPreview
-  );
-  previewOption.input.addEventListener("change", () => {
-    preferences.alwaysShowPreview = previewOption.input.checked;
-  });
-
-  const sharingCard = document.createElement("div");
-  sharingCard.className = `${SETTINGS_CLASS}__card`;
-  sharingCard.append(sharingTitle, previewOption.option);
-  body.append(sharingCard);
-
+  const channelsSection = document.createElement("section");
+  channelsSection.className = `${SETTINGS_CLASS}__section`;
   const channelsTitle = document.createElement("h3");
   channelsTitle.className = `${SETTINGS_CLASS}__section-title`;
+  channelsTitle.id = nextSettingsId();
   channelsTitle.textContent = "Discord channels";
+  const channelCount = document.createElement("span");
+  channelCount.className = `${SETTINGS_CLASS}__count`;
+  channelCount.setAttribute("aria-hidden", "true");
+  channelsTitle.append(channelCount);
 
-  const hint = document.createElement("p");
-  hint.className = `${SETTINGS_CLASS}__hint`;
-  hint.textContent = "Channels and preferences are saved in Violentmonkey (or Tampermonkey) and persist across script updates — do not put webhook URLs in the script source. Treat webhook URLs like passwords.";
-  body.append(channelsTitle, hint);
-
-  const listEl = document.createElement("div");
+  const emptyState = createSettingsEmptyState();
+  const listEl = document.createElement("ul");
   listEl.className = `${SETTINGS_CLASS}__list`;
-  body.append(listEl);
+  listEl.setAttribute("aria-labelledby", channelsTitle.id);
 
-  function renderList() {
-    listEl.replaceChildren();
-    if (destinations.length === 0) {
-      listEl.append(createSettingsEmptyState());
-      return;
-    }
-
-    destinations.forEach((destination, index) => {
-      const card = document.createElement("div");
-      card.className = `${SETTINGS_CLASS}__card`;
-
-      const head = document.createElement("div");
-      head.className = `${SETTINGS_CLASS}__card-head`;
-
-      const meta = document.createElement("div");
-      const titleEl = document.createElement("div");
-      titleEl.className = `${SETTINGS_CLASS}__card-title`;
-      titleEl.textContent = destination.label;
-      const idEl = document.createElement("div");
-      idEl.className = `${SETTINGS_CLASS}__card-id`;
-      idEl.textContent = destination.id;
-      meta.append(titleEl, idEl);
-
-      const removeBtn = document.createElement("button");
-      removeBtn.type = "button";
-      removeBtn.className = `${SETTINGS_CLASS}__remove`;
-      removeBtn.textContent = "Remove";
-      removeBtn.addEventListener("click", () => {
-        destinations = destinations.filter((_, itemIndex) => itemIndex !== index);
-        renderList();
-      });
-      head.append(meta, removeBtn);
-
-      const labelInput = document.createElement("input");
-      labelInput.type = "text";
-      labelInput.value = destination.label;
-      labelInput.addEventListener("input", () => {
-        destinations[index].label = labelInput.value;
-      });
-
-      const urlInput = document.createElement("input");
-      urlInput.placeholder = "https://discord.com/api/webhooks/...";
-      urlInput.value = destination.webhookUrl;
-      urlInput.addEventListener("input", () => {
-        destinations[index].webhookUrl = urlInput.value.trim();
-      });
-
-      const actions = document.createElement("div");
-      actions.className = `${SETTINGS_CLASS}__card-actions`;
-      actions.append(createTestWebhookButton(() => destinations[index]?.webhookUrl || urlInput.value));
-
-      card.append(
-        head,
-        createSettingsField("Display name", labelInput),
-        createWebhookUrlField(urlInput),
-        actions
-      );
-      listEl.append(card);
-    });
-  }
-
-  const addSection = document.createElement("div");
-  addSection.className = `${SETTINGS_CLASS}__card`;
+  const addCard = document.createElement("div");
+  addCard.className = `${SETTINGS_CLASS}__card`;
+  addCard.id = nextSettingsId();
+  addCard.setAttribute("role", "group");
   const addTitleEl = document.createElement("div");
   addTitleEl.className = `${SETTINGS_CLASS}__card-title`;
+  addTitleEl.id = nextSettingsId();
   addTitleEl.textContent = "Add channel";
+  addCard.setAttribute("aria-labelledby", addTitleEl.id);
+
+  const addToggle = document.createElement("button");
+  addToggle.type = "button";
+  addToggle.className = `${SETTINGS_CLASS}__add-toggle`;
+  addToggle.textContent = "+ Add channel";
+  addToggle.setAttribute("aria-controls", addCard.id);
+  addToggle.addEventListener("click", () => {
+    addFormOpen = true;
+    render();
+    newLabelInput.focus();
+  });
 
   const newLabelInput = document.createElement("input");
   newLabelInput.type = "text";
@@ -3136,10 +3626,6 @@ async function openSettingsModal() {
   const newUrlInput = document.createElement("input");
   newUrlInput.placeholder = "https://discord.com/api/webhooks/...";
 
-  const addBtn = document.createElement("button");
-  addBtn.type = "button";
-  addBtn.className = `${SETTINGS_CLASS}__btn ${SETTINGS_CLASS}__btn--ghost`;
-  addBtn.textContent = "Add to list";
   function readPendingChannel() {
     const label = newLabelInput.value.trim();
     const webhookUrl = newUrlInput.value.trim();
@@ -3147,62 +3633,123 @@ async function openSettingsModal() {
     if (!isValidWebhookUrl(webhookUrl)) return { error: "Enter a valid Discord webhook URL.", input: newUrlInput };
     return { channel: { id: createDestinationId(label, new Set(destinations.map((item) => item.id))), label, webhookUrl } };
   }
+
+  function collapseAddForm() {
+    newLabelInput.value = "";
+    newUrlInput.value = "";
+    addFormOpen = false;
+    render();
+    addToggle.focus();
+  }
+
+  const addBtn = createSettingsButton("Add to list");
   addBtn.addEventListener("click", () => {
-    const { error, channel } = readPendingChannel();
+    const { error, channel, input } = readPendingChannel();
     if (error) {
       showToast(error, "error");
+      input.focus();
       return;
     }
     destinations.push(channel);
-    newLabelInput.value = "";
-    newUrlInput.value = "";
-    renderList();
+    collapseAddForm();
   });
+  const discardBtn = createSettingsButton("Discard", "ghost");
+  discardBtn.addEventListener("click", collapseAddForm);
 
   const addActions = document.createElement("div");
-  addActions.className = `${SETTINGS_CLASS}__card-actions`;
-  addActions.append(addBtn, createTestWebhookButton(() => newUrlInput.value));
-
-  addSection.append(
+  addActions.className = `${SETTINGS_CLASS}__actions`;
+  addActions.append(addBtn, createTestWebhookButton(() => newUrlInput.value), discardBtn);
+  addCard.append(
     addTitleEl,
     createSettingsField("Display name", newLabelInput),
     createWebhookUrlField(newUrlInput),
     addActions
   );
-  body.append(addSection);
+  channelsSection.append(channelsTitle, emptyState, listEl, addToggle, addCard);
+
+  const sharingSection = document.createElement("section");
+  sharingSection.className = `${SETTINGS_CLASS}__section`;
+  const sharingTitle = document.createElement("h3");
+  sharingTitle.className = `${SETTINGS_CLASS}__section-title`;
+  sharingTitle.textContent = "Sharing";
+  const previewOption = createSettingsOption(
+    "Always show preview before sending",
+    "Off: one channel and no quoted post sends right away. The share panel opens with the preview collapsed.",
+    preferences.alwaysShowPreview
+  );
+  previewOption.input.addEventListener("change", () => {
+    preferences.alwaysShowPreview = previewOption.input.checked;
+  });
+  sharingSection.append(sharingTitle, previewOption.option);
+
+  const hint = document.createElement("p");
+  hint.className = `${SETTINGS_CLASS}__hint`;
+  hint.textContent = "Channels are stored only in Violentmonkey or Tampermonkey and survive script updates. Treat webhook URLs like passwords: anyone with one can post to that channel.";
+  body.append(channelsSection, sharingSection, hint);
+
+  function toggleEdit(destination) {
+    editingId = editingId === destination.id ? null : destination.id;
+    render();
+  }
+
+  // With no rows left the Add form is forced open, so its name field takes focus.
+  function removeChannel(destination) {
+    const index = destinations.indexOf(destination);
+    destinations = destinations.filter((item) => item !== destination);
+    if (editingId === destination.id) editingId = null;
+    render();
+    const neighbour = destinations[index] ?? destinations[index - 1];
+    (neighbour ? rows.get(neighbour).editBtn : newLabelInput).focus();
+  }
+
+  function render() {
+    rows = new Map(destinations.map((destination) => [destination, rows.get(destination) ?? createChannelRow(destination, {
+      savedWebhookUrl: savedWebhookUrls.get(destination.id),
+      onToggleEdit: () => toggleEdit(destination),
+      onRemove: () => removeChannel(destination)
+    })]));
+    listEl.replaceChildren(...[...rows.values()].map((row) => row.element));
+    for (const [destination, row] of rows) row.setEditing(destination.id === editingId);
+    listEl.hidden = destinations.length === 0;
+    emptyState.hidden = destinations.length > 0;
+    channelCount.textContent = destinations.length ? String(destinations.length) : "";
+
+    const addOpen = addFormOpen || destinations.length === 0;
+    addCard.hidden = !addOpen;
+    addToggle.hidden = addOpen;
+    addToggle.setAttribute("aria-expanded", String(addOpen));
+    discardBtn.hidden = destinations.length === 0;
+  }
 
   const footer = document.createElement("div");
   footer.className = `${SETTINGS_CLASS}__footer`;
 
-  const cancelBtn = document.createElement("button");
-  cancelBtn.type = "button";
-  cancelBtn.className = `${SETTINGS_CLASS}__btn ${SETTINGS_CLASS}__btn--ghost`;
-  cancelBtn.textContent = "Cancel";
+  const cancelBtn = createSettingsButton("Cancel", "ghost");
   cancelBtn.addEventListener("click", closeSettingsModal);
 
-  const saveBtn = document.createElement("button");
-  saveBtn.type = "button";
-  saveBtn.className = `${SETTINGS_CLASS}__btn ${SETTINGS_CLASS}__btn--primary`;
-  saveBtn.textContent = "Save";
+  const saveBtn = createSettingsButton("Save", "primary");
   saveBtn.addEventListener("click", async () => {
+    // The Add form only collapses once cleared, so a pending channel is always visible here.
     const pending = newLabelInput.value.trim() || newUrlInput.value.trim() ? readPendingChannel() : {};
     if (pending.error) {
       showToast(`${pending.error} Finish or clear the Add channel form before saving.`, "error");
       pending.input.focus();
       return;
     }
-    const candidates = pending.channel ? [...destinations, pending.channel] : destinations;
-    const sanitized = sanitizeDestinations(candidates);
-    if (sanitized.length === 0 && candidates.length > 0) {
-      showToast("Fix invalid names or webhook URLs before saving.", "error");
-      return;
-    }
-    if (sanitized.length !== candidates.length) {
+    const invalid = destinations.find((destination) => !sanitizeDestination(destination));
+    if (invalid) {
       showToast("Fix invalid channel names or webhook URLs before saving.", "error");
+      editingId = invalid.id;
+      render();
+      const row = rows.get(invalid);
+      (invalid.label.trim() ? row.urlInput : row.labelInput).focus();
       return;
     }
     try {
-      await Promise.all([saveAllDestinations(sanitized), savePreferences(preferences)]);
+      await Promise.all([
+        saveAllDestinations(pending.channel ? [...destinations, pending.channel] : destinations),
+        savePreferences(preferences)
+      ]);
       showToast("Settings saved.", "success");
       closeSettingsModal();
       refreshShareButtons();
@@ -3218,19 +3765,22 @@ async function openSettingsModal() {
     if (event.target === backdrop) closeSettingsModal();
   });
 
-  const onEscape = (event) => {
+  const onKeyDown = (event) => {
     if (event.key === "Escape") {
       closeSettingsModal();
+    } else if (event.key === "Tab") {
+      trapFocus(dialog, event);
     }
   };
   settingsModalCleanup = () => {
-    document.removeEventListener("keydown", onEscape);
+    document.removeEventListener("keydown", onKeyDown);
+    returnFocus();
   };
-  document.addEventListener("keydown", onEscape);
+  document.addEventListener("keydown", onKeyDown);
 
   document.body.append(backdrop);
-  renderList();
-  newLabelInput.focus();
+  render();
+  (destinations.length ? dialog : newLabelInput).focus({ preventScroll: true });
 }
 
 function refreshShareButtons() {
@@ -3245,7 +3795,14 @@ function registerSettingsMenuCommand() {
       : null;
 
   if (!register) return;
-  register("Tweet Discord Share settings…", () => openSettingsModal());
+  register("Tweet Discord Share settings…", () => {
+    const previousFocus = document.activeElement;
+    // Settings closes the share panel, so focus the panel owned goes back to the post instead.
+    const returnFocus = activePanel?.ownsFocus(previousFocus)
+      ? activePanel.returnFocus
+      : () => previousFocus?.focus({ preventScroll: true });
+    openSettingsModal(returnFocus);
+  });
 }
 
 registerSettingsMenuCommand();
@@ -3256,34 +3813,68 @@ function embedColorCss(color) {
   return `#${(color >>> 0).toString(16).padStart(6, "0").slice(-6)}`;
 }
 
-function appendLinkText(container, value) {
-  const text = String(value || "").trim();
-  if (!text) return;
+function createPreviewLink(href, text) {
+  const link = document.createElement("a");
+  link.className = `${PREVIEW_CLASS}__link`;
+  link.href = href;
+  link.title = href;
+  link.textContent = text;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  return link;
+}
 
-  const masked = /^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/i.exec(text);
-  if (masked) {
-    const link = document.createElement("a");
-    link.className = `${PREVIEW_CLASS}__link`;
-    link.href = masked[2];
-    link.textContent = masked[1];
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    container.append(link);
-    return;
+// A masked link's label can name any site, so the preview also shows the host it really opens.
+function createMaskedPreviewLink(href, label) {
+  const link = createPreviewLink(href, label);
+  if (label !== href) {
+    const host = document.createElement("span");
+    host.className = `${PREVIEW_CLASS}__link-host`;
+    host.textContent = ` (${link.host})`;
+    link.append(host);
   }
+  return link;
+}
 
-  if (/^https?:\/\//i.test(text)) {
-    const link = document.createElement("a");
-    link.className = `${PREVIEW_CLASS}__link`;
-    link.href = text;
-    link.textContent = text;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    container.append(link);
-    return;
+// The inline markdown the formatter emits and post text can carry: masked links, bare URLs, and _italics_.
+const PREVIEW_INLINE_PATTERN = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>]+)|\b_([^_\n]+)_\b/g;
+
+function appendPreviewInline(container, text) {
+  let index = 0;
+  for (const match of text.matchAll(PREVIEW_INLINE_PATTERN)) {
+    const [whole, maskedLabel, maskedUrl, url, italic] = match;
+    container.append(text.slice(index, match.index));
+    if (italic) {
+      const emphasis = document.createElement("em");
+      emphasis.textContent = italic;
+      container.append(emphasis);
+    } else {
+      container.append(maskedUrl ? createMaskedPreviewLink(maskedUrl, maskedLabel) : createPreviewLink(url, url));
+    }
+    index = match.index + whole.length;
   }
+  container.append(text.slice(index));
+}
 
-  container.textContent = text;
+// Discord draws a run of "> " lines as one quote with a bar beside it.
+function appendPreviewMarkdown(container, value) {
+  const runs = [];
+  for (const line of String(value || "").split("\n")) {
+    const quoted = line.startsWith("> ");
+    const text = quoted ? line.slice(2) : line;
+    if (runs.at(-1)?.quoted === quoted) runs.at(-1).lines.push(text);
+    else runs.push({ quoted, lines: [text] });
+  }
+  for (const { quoted, lines } of runs) {
+    if (!quoted) {
+      appendPreviewInline(container, lines.join("\n"));
+      continue;
+    }
+    const quote = document.createElement("blockquote");
+    quote.className = `${PREVIEW_CLASS}__quote`;
+    appendPreviewInline(quote, lines.join("\n"));
+    container.append(quote);
+  }
 }
 
 function createPreviewEmbed(embed) {
@@ -3308,13 +3899,7 @@ function createPreviewEmbed(embed) {
     const name = document.createElement("span");
     name.className = `${PREVIEW_CLASS}__author-name`;
     if (embed.author.url) {
-      const link = document.createElement("a");
-      link.className = `${PREVIEW_CLASS}__link`;
-      link.href = embed.author.url;
-      link.textContent = embed.author.name;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      name.append(link);
+      name.append(createPreviewLink(embed.author.url, embed.author.name));
     } else {
       name.textContent = embed.author.name;
     }
@@ -3333,7 +3918,7 @@ function createPreviewEmbed(embed) {
   if (embed.description) {
     const description = document.createElement("div");
     description.className = `${PREVIEW_CLASS}__description`;
-    description.textContent = embed.description;
+    appendPreviewMarkdown(description, embed.description);
     card.append(description);
   }
 
@@ -3360,7 +3945,7 @@ function createPreviewEmbed(embed) {
 
     const value = document.createElement("div");
     value.className = `${PREVIEW_CLASS}__field-value`;
-    appendLinkText(value, field.value);
+    appendPreviewMarkdown(value, field.value);
 
     fieldEl.append(name, value);
     card.append(fieldEl);
@@ -3383,35 +3968,6 @@ function previewMessageLabel(payload, index, total) {
   return `Message ${index + 1} of ${total} · Tweet`;
 }
 
-function appendPreviewContent(message, content) {
-  const blocks = String(content || "").split("\n\n").filter(Boolean);
-  for (const block of blocks) {
-    const blockEl = document.createElement("div");
-    blockEl.className = `${PREVIEW_CLASS}__content-block`;
-
-    const lines = block.split("\n");
-    const titleMatch = /^\*\*(.+)\*\*$/.exec(lines[0] || "");
-    if (titleMatch && lines[1] && /^https?:\/\//i.test(lines[1].trim())) {
-      const title = document.createElement("div");
-      title.className = `${PREVIEW_CLASS}__content-title`;
-      title.textContent = titleMatch[1];
-      blockEl.append(title);
-
-      const link = document.createElement("a");
-      link.className = `${PREVIEW_CLASS}__link`;
-      link.href = lines[1].trim();
-      link.textContent = lines[1].trim();
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      blockEl.append(link);
-    } else {
-      blockEl.textContent = block;
-    }
-
-    message.append(blockEl);
-  }
-}
-
 function createPreviewMessage(payload, index, total) {
   const message = document.createElement("div");
   message.className = `${PREVIEW_CLASS}__message`;
@@ -3424,36 +3980,43 @@ function createPreviewMessage(payload, index, total) {
     message.append(label);
   }
 
-  if (payload.username || payload.avatar_url) {
-    const header = document.createElement("div");
-    header.className = `${PREVIEW_CLASS}__webhook`;
+  const avatar = document.createElement("img");
+  avatar.className = `${PREVIEW_CLASS}__webhook-avatar`;
+  avatar.alt = "";
+  avatar.loading = "lazy";
+  avatar.referrerPolicy = "no-referrer";
+  if (payload.avatar_url) avatar.src = payload.avatar_url;
 
-    if (payload.avatar_url) {
-      const avatar = document.createElement("img");
-      avatar.className = `${PREVIEW_CLASS}__webhook-avatar`;
-      avatar.src = payload.avatar_url;
-      avatar.alt = "";
-      avatar.loading = "lazy";
-      avatar.referrerPolicy = "no-referrer";
-      header.append(avatar);
-    }
-
-    const name = document.createElement("span");
-    name.className = `${PREVIEW_CLASS}__webhook-name`;
-    name.textContent = payload.username || WEBHOOK_SENDER_NAME;
-    header.append(name);
-    message.append(header);
-  }
+  const body = document.createElement("div");
+  body.className = `${PREVIEW_CLASS}__message-body`;
+  const header = document.createElement("div");
+  header.className = `${PREVIEW_CLASS}__webhook`;
+  const name = document.createElement("span");
+  name.className = `${PREVIEW_CLASS}__webhook-name`;
+  name.textContent = payload.username || WEBHOOK_SENDER_NAME;
+  const badge = document.createElement("span");
+  badge.className = `${PREVIEW_CLASS}__app-badge`;
+  badge.textContent = "APP";
+  header.append(name, badge);
+  body.append(header);
 
   if (payload.content) {
-    appendPreviewContent(message, payload.content);
+    const content = document.createElement("div");
+    content.className = `${PREVIEW_CLASS}__content`;
+    appendPreviewMarkdown(content, payload.content);
+    body.append(content);
   }
 
   for (const embed of payload.embeds || []) {
-    message.append(createPreviewEmbed(embed));
+    body.append(createPreviewEmbed(embed));
   }
 
+  message.append(avatar, body);
   return message;
+}
+
+function mediaFileCount(count) {
+  return count === 1 ? "1 media file" : `${count} media files`;
 }
 
 function renderDiscordPreview(payloads, options = {}) {
@@ -3473,10 +4036,12 @@ function renderDiscordPreview(payloads, options = {}) {
     host.append(createPreviewMessage(payload, index, list.length));
   });
 
-  if (options.hasMediaCandidates) {
+  const attachmentUrls = options.attachmentUrls || [];
+  if (attachmentUrls.length) {
     const hint = document.createElement("div");
     hint.className = `${PREVIEW_CLASS}__attachment-hint`;
-    hint.textContent = "Media uploads when eligible; unavailable or oversized video is sent as a playable link.";
+    const videoNote = attachmentUrls.some(isPlayableTweetVideoUrl) ? " Video too large for Discord goes as a link." : "";
+    hint.textContent = `${mediaFileCount(attachmentUrls.length)} attached on send.${videoNote}`;
     host.append(hint);
   }
 
@@ -3485,91 +4050,106 @@ function renderDiscordPreview(payloads, options = {}) {
 
 function previewStylesCss() {
   return `
-    .${POPOVER_CLASS}--with-preview {
-      min-width: min(320px, calc(100vw - 16px));
-      max-width: min(400px, calc(100vw - 16px));
-    }
     .${POPOVER_CLASS}__preview-wrap {
-      border-top-width: 1px;
-      border-top-style: solid;
-      border-color: rgb(var(--tds-border, 47 51 54));
-      margin: 4px 4px 8px;
-      max-height: min(42vh, 360px);
+      flex: 1 1 auto;
+      min-height: 72px;
       overflow: auto;
-      padding: 8px 8px 4px;
+      overscroll-behavior: contain;
+      padding: 4px 12px 12px;
     }
-    .${POPOVER_CLASS}__preview-label {
-      color: rgb(var(--tds-subtle, 113 118 123));
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.02em;
-      margin: 0 0 8px;
-      text-transform: uppercase;
+    .${POPOVER_CLASS}__preview-wrap:focus-visible {
+      outline: 2px solid rgb(var(--tds-blue));
+      outline-offset: -2px;
     }
     .${POPOVER_CLASS}__preview-status {
-      color: rgb(var(--tds-subtle, 113 118 123));
+      color: rgb(var(--tds-subtle));
       font-size: 14px;
       line-height: 1.4;
       margin: 0;
-      padding: 8px 4px 12px;
+      padding: 8px 4px;
     }
     .${PREVIEW_CLASS} {
+      background: rgb(var(--tds-raised));
+      border-radius: 12px;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 12px;
+      padding-block: 12px;
+      padding-inline: 8px 12px;
     }
     .${PREVIEW_CLASS}__empty {
-      color: rgb(var(--tds-subtle, 113 118 123));
+      color: rgb(var(--tds-subtle));
       font-size: 14px;
       line-height: 1.4;
       margin: 0;
     }
     .${PREVIEW_CLASS}__message {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
+      column-gap: 10px;
+      display: grid;
+      grid-template-columns: 32px minmax(0, 1fr);
     }
     .${PREVIEW_CLASS}__message-label {
-      color: rgb(var(--tds-subtle, 113 118 123));
-      font-size: 12px;
-      font-weight: 600;
+      color: rgb(var(--tds-subtle));
+      font-size: 11px;
+      font-weight: 700;
+      grid-column: 1 / -1;
+      letter-spacing: 0.02em;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+    }
+    .${PREVIEW_CLASS}__webhook-avatar {
+      background: #5865f2;
+      border-radius: 50%;
+      height: 32px;
+      object-fit: cover;
+      width: 32px;
+    }
+    .${PREVIEW_CLASS}__message-body {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
     }
     .${PREVIEW_CLASS}__webhook {
       align-items: center;
       display: flex;
-      gap: 8px;
-    }
-    .${PREVIEW_CLASS}__webhook-avatar {
-      border-radius: 50%;
-      height: 20px;
-      object-fit: cover;
-      width: 20px;
+      gap: 6px;
+      line-height: 1.2;
     }
     .${PREVIEW_CLASS}__webhook-name {
-      color: rgb(var(--tds-text, 231 233 234));
-      font-size: 13px;
-      font-weight: 600;
-    }
-    .${PREVIEW_CLASS}__content-block {
-      color: rgb(var(--tds-text, 231 233 234));
-      display: flex;
-      flex-direction: column;
       font-size: 14px;
-      gap: 4px;
-      line-height: 1.45;
-      word-break: break-word;
-    }
-    .${PREVIEW_CLASS}__content-title {
       font-weight: 700;
     }
+    .${PREVIEW_CLASS}__app-badge {
+      background: #5865f2;
+      border-radius: 3px;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 4px;
+    }
+    .${PREVIEW_CLASS}__content,
+    .${PREVIEW_CLASS}__description,
+    .${PREVIEW_CLASS}__field-value {
+      line-height: 1.4;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .${PREVIEW_CLASS}__content,
+    .${PREVIEW_CLASS}__description,
+    .${PREVIEW_CLASS}__title {
+      font-size: 14px;
+    }
     .${PREVIEW_CLASS}__embed {
-      background: rgb(var(--tds-text, 231 233 234) / 0.06);
-      border-left: 4px solid var(--tds-preview-accent, #5865f2);
+      background: rgb(var(--tds-surface));
+      border: 1px solid rgb(var(--tds-border));
+      border-inline-start: 4px solid var(--tds-preview-accent, #5865f2);
       border-radius: 4px;
       display: flex;
       flex-direction: column;
       gap: 6px;
-      padding: 8px 10px 10px 8px;
+      margin-top: 4px;
+      padding: 8px 10px 10px;
     }
     .${PREVIEW_CLASS}__author {
       align-items: center;
@@ -3582,22 +4162,16 @@ function previewStylesCss() {
       object-fit: cover;
       width: 20px;
     }
-    .${PREVIEW_CLASS}__author-name {
-      color: rgb(var(--tds-text, 231 233 234));
+    .${PREVIEW_CLASS}__author-name,
+    .${PREVIEW_CLASS}__field-name {
       font-size: 13px;
-      font-weight: 600;
-    }
-    .${PREVIEW_CLASS}__title {
-      color: rgb(var(--tds-text, 231 233 234));
-      font-size: 14px;
       font-weight: 700;
     }
-    .${PREVIEW_CLASS}__description {
-      color: rgb(var(--tds-text, 231 233 234));
-      font-size: 14px;
-      line-height: 1.45;
-      white-space: pre-wrap;
-      word-break: break-word;
+    .${PREVIEW_CLASS}__author-name .${PREVIEW_CLASS}__link {
+      color: inherit;
+    }
+    .${PREVIEW_CLASS}__title {
+      font-weight: 700;
     }
     .${PREVIEW_CLASS}__image-wrap {
       margin-top: 2px;
@@ -3615,33 +4189,38 @@ function previewStylesCss() {
       flex-direction: column;
       gap: 2px;
     }
-    .${PREVIEW_CLASS}__field-name {
-      color: rgb(var(--tds-text, 231 233 234));
-      font-size: 13px;
-      font-weight: 700;
-    }
     .${PREVIEW_CLASS}__field-value {
-      color: rgb(var(--tds-subtle, 113 118 123));
+      color: rgb(var(--tds-subtle));
       font-size: 13px;
-      line-height: 1.4;
-      word-break: break-word;
     }
     .${PREVIEW_CLASS}__footer {
-      color: rgb(var(--tds-subtle, 113 118 123));
+      color: rgb(var(--tds-subtle));
       font-size: 12px;
     }
     .${PREVIEW_CLASS}__attachment-hint {
-      color: rgb(var(--tds-subtle, 113 118 123));
+      border-top: 1px solid rgb(var(--tds-border));
+      color: rgb(var(--tds-subtle));
       font-size: 12px;
       line-height: 1.35;
+      padding-block: 8px 0;
+      padding-inline: 4px 0;
     }
     .${PREVIEW_CLASS}__link {
-      color: rgb(var(--tds-blue, 29 155 240));
+      color: rgb(var(--tds-link));
       text-decoration: none;
       word-break: break-all;
     }
     .${PREVIEW_CLASS}__link:hover {
       text-decoration: underline;
+    }
+    .${PREVIEW_CLASS}__link-host {
+      color: rgb(var(--tds-subtle));
+    }
+    .${PREVIEW_CLASS}__quote {
+      border-inline-start: 4px solid rgb(var(--tds-subtle) / 0.5);
+      border-radius: 4px;
+      margin: 0;
+      padding-inline-start: 10px;
     }
   `;
 }

@@ -1,6 +1,5 @@
 // Shared UI surface helpers: styles, toasts, and popover positioning.
-let activePopover = null;
-let activePopoverCleanup = null;
+let activePanel = null;
 
 function appendWhenReady(node) {
   if (document.documentElement) {
@@ -15,89 +14,29 @@ function injectStyles() {
   const style = document.createElement("style");
   style.textContent = `
     ${tdsSharedSurfaceCss()}
+    ${popoverStylesCss()}
     ${previewStylesCss()}
 
     .${SHARE_MENU_ITEM_CLASS} {
       cursor: pointer;
     }
 
-    .${POPOVER_CLASS} {
-      position: fixed;
-      z-index: 10000;
-      min-width: 220px;
-      max-width: min(320px, calc(100vw - 16px));
-      padding: 4px;
-      font-size: 15px;
-    }
-    .${POPOVER_CLASS}__title {
-      font-size: 13px;
-      font-weight: 700;
-      padding: 8px 12px 4px;
-    }
-    .${POPOVER_CLASS}__item {
+    .${AVATAR_CLASS} {
       align-items: center;
-      background: transparent;
-      border: 0;
-      border-radius: 8px;
-      color: inherit;
-      cursor: pointer;
-      display: flex;
-      font: inherit;
-      gap: 8px;
-      padding: 10px 12px;
-      text-align: left;
-      width: 100%;
-    }
-    .${POPOVER_CLASS}__item:hover,
-    .${POPOVER_CLASS}__item:focus-visible,
-    .${POPOVER_CLASS}__manage:hover,
-    .${POPOVER_CLASS}__manage:focus-visible {
-      outline: none;
-    }
-    .${POPOVER_CLASS}__item[data-last="true"]::after {
-      content: "Last used";
-      font-size: 11px;
-      margin-left: auto;
-    }
-    .${POPOVER_CLASS}__quote-option {
-      align-items: center;
-      cursor: pointer;
-      display: flex;
-      font-size: 14px;
-      gap: 8px;
-      margin: 2px 4px 6px;
-      padding: 8px 12px;
-      user-select: none;
-    }
-    .${POPOVER_CLASS}__quote-option input {
-      accent-color: var(--color-primary, #1d9bf0);
-      cursor: pointer;
+      border-radius: 10px;
+      color: #fff;
+      display: inline-flex;
       flex-shrink: 0;
-      height: 16px;
-      width: 16px;
-    }
-    .${POPOVER_CLASS}__footer {
-      border-top-width: 1px;
-      border-top-style: solid;
-      margin-top: 4px;
-      padding-top: 4px;
-    }
-    .${POPOVER_CLASS}__manage {
-      background: transparent;
-      border: 0;
-      border-radius: 999px;
-      cursor: pointer;
-      font: inherit;
       font-size: 15px;
-      font-weight: 400;
-      padding: 12px;
-      text-align: left;
-      width: 100%;
+      font-weight: 800;
+      height: 34px;
+      justify-content: center;
+      width: 34px;
     }
 
     .${TOAST_HOST_CLASS} {
       position: fixed;
-      right: 16px;
+      inset-inline-end: 16px;
       bottom: 16px;
       z-index: 10001;
       display: flex;
@@ -107,14 +46,45 @@ function injectStyles() {
       max-width: min(360px, calc(100vw - 32px));
     }
     .${TOAST_CLASS} {
-      border-radius: var(--border-radius-large, 16px);
-      border-left-width: 3px;
-      border-left-style: solid;
-      font-size: 15px;
-      line-height: 1.35;
-      padding: 12px 14px;
-      pointer-events: auto;
       animation: tds-toast-in 0.2s ease;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      line-height: 1.35;
+      padding-block: 12px;
+      padding-inline: 40px 14px;
+      pointer-events: auto;
+      position: relative;
+    }
+    .${TOAST_CLASS}::before {
+      border-radius: 999px;
+      color: rgb(var(--tds-surface));
+      font-size: 12px;
+      font-weight: 800;
+      height: 18px;
+      inset-inline-start: 12px;
+      line-height: 18px;
+      position: absolute;
+      text-align: center;
+      top: 13px;
+      width: 18px;
+    }
+    /* The "/ ''" alt text keeps the icon glyph out of what screen readers announce. */
+    .${TOAST_CLASS}[data-state="success"]::before {
+      background: rgb(var(--tds-success));
+      content: "✓";
+      content: "✓" / "";
+    }
+    .${TOAST_CLASS}[data-state="error"]::before {
+      background: rgb(var(--tds-danger));
+      content: "!";
+      content: "!" / "";
+    }
+    .${TOAST_CLASS}[data-state="info"]::before {
+      background: rgb(var(--tds-link));
+      content: "…";
+      content: "…" / "";
+      line-height: 14px;
     }
     @keyframes tds-toast-in {
       from { opacity: 0; transform: translateY(8px); }
@@ -157,36 +127,131 @@ function closeXOverlay() {
 }
 
 function closeDestinationMenu() {
-  if (activePopoverCleanup) {
-    activePopoverCleanup();
-    activePopoverCleanup = null;
-  }
-  if (activePopover) {
-    activePopover.remove();
-    activePopover = null;
-  }
+  activePanel?.close();
 }
 
-function positionPopover(menu, anchor) {
-  const rect = anchor.getBoundingClientRect();
-  const margin = 8;
-  menu.style.visibility = "hidden";
-  menu.style.left = "0";
-  menu.style.top = "0";
-  if (!menu.isConnected) {
-    document.body.append(menu);
+const PANEL_MARGIN = 8;
+const NARROW_VIEWPORT_WIDTH = 500;
+const NARROW_VIEWPORT_MEDIA = `(max-width: ${NARROW_VIEWPORT_WIDTH - 0.02}px)`;
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(value, max));
+}
+
+// What the user sees, in the coordinates of getBoundingClientRect and fixed positioning. Pinch zoom shrinks and moves it.
+function visibleViewport() {
+  const visual = window.visualViewport;
+  return visual
+    ? new DOMRect(visual.offsetLeft, visual.offsetTop, visual.width, visual.height)
+    : new DOMRect(0, 0, window.innerWidth, window.innerHeight);
+}
+
+function rectsOverlap(a, b) {
+  return a.left <= b.right && b.left <= a.right && a.top <= b.bottom && b.top <= a.bottom;
+}
+
+// Rects and sizes are in viewport pixels, and `viewport` is the part of the page the user sees.
+// maxHeight caps the panel so only its preview scrolls.
+// A sheet spans that width, and its top is that bottom edge. Its CSS lifts it by its own height, so placing it needs no measuring.
+function placePanel({ anchorRect, panelSize, viewport }) {
+  if (viewport.width < NARROW_VIEWPORT_WIDTH) {
+    return { mode: "sheet", top: viewport.bottom, left: viewport.left, width: viewport.width, maxHeight: Math.round(viewport.height * 0.85) };
   }
 
-  const menuRect = menu.getBoundingClientRect();
-  let top = rect.top - menuRect.height - margin;
-  if (top < margin) {
-    top = rect.bottom + margin;
+  const maxHeight = viewport.height - PANEL_MARGIN * 2;
+  const height = Math.min(panelSize.height, maxHeight);
+  const left = clamp(
+    anchorRect.left + anchorRect.width / 2 - panelSize.width / 2,
+    viewport.left + PANEL_MARGIN,
+    viewport.right - panelSize.width - PANEL_MARGIN
+  );
+  let mode = "clamped";
+  let top = anchorRect.top + anchorRect.height / 2 - height / 2;
+  if (panelSize.height <= anchorRect.top - viewport.top - PANEL_MARGIN * 2) {
+    mode = "above";
+    top = anchorRect.top - PANEL_MARGIN - panelSize.height;
+  } else if (panelSize.height <= viewport.bottom - anchorRect.bottom - PANEL_MARGIN * 2) {
+    mode = "below";
+    top = anchorRect.bottom + PANEL_MARGIN;
+  }
+  top = clamp(top, viewport.top + PANEL_MARGIN, viewport.bottom - height - PANEL_MARGIN);
+  return { mode, top: Math.round(top), left: Math.round(left), maxHeight };
+}
+
+// The panel is measured with none of a sheet's styles, which change its width and border.
+// Measured at full height, the panel and its preview lose where they were scrolled to, so that is put back.
+function positionPopover(panel, anchorRect) {
+  const scrolled = [panel, ...panel.children].map((node) => [node, node.scrollTop]);
+  panel.style.maxHeight = "";
+  panel.style.width = "";
+  panel.classList.remove(`${POPOVER_CLASS}--sheet`);
+  if (!panel.isConnected) {
+    document.body.append(panel);
   }
 
-  let left = rect.left + rect.width / 2 - menuRect.width / 2;
-  left = Math.max(margin, Math.min(left, window.innerWidth - menuRect.width - margin));
+  const { width, height } = panel.getBoundingClientRect();
+  const placement = placePanel({ anchorRect, panelSize: { width, height }, viewport: visibleViewport() });
+  panel.classList.toggle(`${POPOVER_CLASS}--sheet`, placement.mode === "sheet");
+  panel.style.top = `${placement.top}px`;
+  panel.style.left = `${placement.left}px`;
+  panel.style.width = placement.width === undefined ? "" : `${placement.width}px`;
+  panel.style.maxHeight = `${placement.maxHeight}px`;
+  for (const [node, scrollTop] of scrolled) node.scrollTop = scrollTop;
+}
 
-  menu.style.top = `${Math.round(top)}px`;
-  menu.style.left = `${Math.round(left)}px`;
-  menu.style.visibility = "visible";
+// Escape is the panel's only while focus is in it, on its Share button, or nowhere, so Escape elsewhere on X is left alone.
+// When X re-renders the post away, the panel keeps the place its Share button last had.
+function showPanel(panel, { findAnchor, returnFocus }) {
+  closeDestinationMenu();
+  let anchorRect = new DOMRect();
+  const place = () => {
+    anchorRect = findAnchor()?.getBoundingClientRect() ?? anchorRect;
+    positionPopover(panel, anchorRect);
+  };
+  const ownsFocus = (node) => node === document.body || panel.contains(node) || node === findAnchor();
+  const onKeyDown = (event) => {
+    if (event.key !== "Escape" || event.defaultPrevented || !ownsFocus(document.activeElement)) return;
+    close();
+    returnFocus();
+  };
+  const onPointerDown = (event) => {
+    if (!panel.contains(event.target) && !findAnchor()?.contains(event.target)) close();
+  };
+  const listeners = [
+    [document, "keydown", onKeyDown, false],
+    [document, "pointerdown", onPointerDown, true],
+    [window, "resize", place, false],
+    [window, "orientationchange", place, false],
+    [window.visualViewport, "resize", place, false],
+    [window.visualViewport, "scroll", place, false]
+  ].filter(([target]) => target);
+
+  function close() {
+    for (const [target, type, listener, capture] of listeners) target.removeEventListener(type, listener, capture);
+    panel.remove();
+    activePanel = null;
+  }
+
+  for (const [target, type, listener, capture] of listeners) target.addEventListener(type, listener, capture);
+  place();
+  panel.focus({ preventScroll: true });
+  activePanel = { place, close, ownsFocus, returnFocus };
+  return activePanel;
+}
+
+// The first character a reader sees, so a flag or a family emoji stays whole.
+function firstGrapheme(text) {
+  if (!Intl.Segmenter) return [...text][0];
+  return new Intl.Segmenter().segment(text)[Symbol.iterator]().next().value?.segment;
+}
+
+function createChannelAvatar(destination) {
+  const avatar = document.createElement("span");
+  avatar.className = AVATAR_CLASS;
+  avatar.setAttribute("aria-hidden", "true");
+  avatar.textContent = firstGrapheme(destination.label.trim())?.toUpperCase() || "#";
+  let hash = 0;
+  for (const char of destination.id) hash = (hash * 31 + char.codePointAt(0)) >>> 0;
+  avatar.style.background = avatarColor(hash % 360);
+  return avatar;
 }

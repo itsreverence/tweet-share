@@ -1,230 +1,6 @@
-// Settings modal surface helpers: styles and small DOM builders.
+// Small DOM builders for the settings modal, including the channel row.
 let settingsModalCleanup = null;
-let settingsFieldCount = 0;
-
-function injectSettingsStyles() {
-  if (document.getElementById("tds-settings-style")) return;
-
-  const style = document.createElement("style");
-  style.id = "tds-settings-style";
-  style.textContent = `
-    ${tdsSharedSurfaceCss()}
-
-    .${SETTINGS_CLASS}__backdrop {
-      position: fixed;
-      inset: 0;
-      z-index: 10002;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 16px;
-      /* Do not use X gray-* tokens for overlay — e.g. --color-gray-1100 is pink on X */
-      background-color: rgba(0, 0, 0, 0.65);
-    }
-    .${SETTINGS_CLASS}__dialog {
-      border-radius: var(--border-radius-x-large, 20px);
-      max-height: min(90vh, 720px);
-      max-width: 520px;
-      overflow: hidden;
-      width: 100%;
-      display: flex;
-      flex-direction: column;
-    }
-    .${SETTINGS_CLASS}__header {
-      align-items: center;
-      border-bottom-width: 1px;
-      border-bottom-style: solid;
-      display: flex;
-      gap: 12px;
-      justify-content: space-between;
-      padding: 16px 18px;
-    }
-    .${SETTINGS_CLASS}__header h2 {
-      font-size: 20px;
-      font-weight: 700;
-      margin: 0;
-    }
-    .${SETTINGS_CLASS}__close {
-      background: transparent;
-      border: 0;
-      border-radius: 999px;
-      color: inherit;
-      cursor: pointer;
-      font-size: 22px;
-      height: 36px;
-      line-height: 1;
-      width: 36px;
-    }
-    .${SETTINGS_CLASS}__body {
-      overflow: auto;
-      padding: 16px 18px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-    .${SETTINGS_CLASS}__hint {
-      font-size: 15px;
-      line-height: 1.45;
-      margin: 0;
-    }
-    .${SETTINGS_CLASS}__list {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-    .${SETTINGS_CLASS}__card {
-      border-width: 1px;
-      border-style: solid;
-      border-radius: var(--border-radius-large, 16px);
-      padding: 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .${SETTINGS_CLASS}__card-head {
-      align-items: flex-start;
-      display: flex;
-      gap: 8px;
-      justify-content: space-between;
-    }
-    .${SETTINGS_CLASS}__card-title {
-      font-size: 15px;
-      font-weight: 700;
-    }
-    .${SETTINGS_CLASS}__card-id {
-      font-size: 13px;
-    }
-    .${SETTINGS_CLASS}__field input {
-      border-radius: var(--border-radius-medium, 8px);
-      box-sizing: border-box;
-      font: inherit;
-      font-size: 15px;
-      padding: 12px;
-      width: 100%;
-    }
-    .${SETTINGS_CLASS}__secret {
-      align-items: stretch;
-      display: flex;
-      gap: 8px;
-    }
-    .${SETTINGS_CLASS}__secret input {
-      flex: 1;
-      min-width: 0;
-    }
-    .${SETTINGS_CLASS}__reveal {
-      background: transparent;
-      border: 1px solid rgb(var(--tds-border, 47 51 54));
-      border-radius: var(--border-radius-medium, 8px);
-      color: inherit;
-      cursor: pointer;
-      flex-shrink: 0;
-      font: inherit;
-      font-size: 14px;
-      font-weight: 700;
-      min-height: 44px;
-      padding: 0 12px;
-    }
-    .${SETTINGS_CLASS}__reveal:hover {
-      background: rgb(var(--tds-blue, 29 155 240) / 0.1);
-      border-color: rgb(var(--tds-blue, 29 155 240));
-    }
-    .${SETTINGS_CLASS}__remove {
-      background: transparent;
-      border: 0;
-      border-radius: 999px;
-      cursor: pointer;
-      flex-shrink: 0;
-      font: inherit;
-      font-size: 15px;
-      padding: 8px 12px;
-    }
-    .${SETTINGS_CLASS}__footer {
-      border-top-width: 1px;
-      border-top-style: solid;
-      display: flex;
-      gap: 8px;
-      justify-content: flex-end;
-      padding: 14px 18px;
-    }
-    .${SETTINGS_CLASS}__btn {
-      border: 0;
-      border-radius: 999px;
-      cursor: pointer;
-      font: inherit;
-      font-size: 15px;
-      font-weight: 700;
-      min-height: 36px;
-      padding: 0 16px;
-    }
-    .${SETTINGS_CLASS}__btn--ghost {
-      background: transparent;
-      color: inherit;
-    }
-    .${SETTINGS_CLASS}__empty {
-      font-size: 15px;
-      line-height: 1.45;
-      padding: 4px 0 0;
-    }
-    .${SETTINGS_CLASS}__empty-title {
-      color: rgb(var(--tds-text, 231 233 234));
-      font-weight: 700;
-      margin: 0 0 8px;
-    }
-    .${SETTINGS_CLASS}__empty-steps {
-      margin: 0;
-      padding-left: 1.25em;
-    }
-    .${SETTINGS_CLASS}__empty-steps li {
-      margin: 0 0 6px;
-    }
-    .${SETTINGS_CLASS}__empty-steps li:last-child {
-      margin-bottom: 0;
-    }
-    .${SETTINGS_CLASS}__card-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      justify-content: flex-start;
-      margin-top: 4px;
-    }
-    .${SETTINGS_CLASS}__btn:disabled {
-      cursor: wait;
-      opacity: 0.55;
-    }
-    .${SETTINGS_CLASS}__section-title {
-      font-size: 17px;
-      font-weight: 700;
-      margin: 0;
-    }
-    .${SETTINGS_CLASS}__option {
-      align-items: flex-start;
-      cursor: pointer;
-      display: flex;
-      font-size: 15px;
-      gap: 10px;
-      line-height: 1.45;
-      user-select: none;
-    }
-    .${SETTINGS_CLASS}__option input {
-      accent-color: rgb(var(--tds-blue, 29 155 240));
-      cursor: pointer;
-      flex-shrink: 0;
-      height: 16px;
-      margin-top: 3px;
-      width: 16px;
-    }
-    .${SETTINGS_CLASS}__option-text {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-    .${SETTINGS_CLASS}__option-detail {
-      color: rgb(var(--tds-subtle, 113 118 123));
-      font-size: 14px;
-    }
-  `;
-  appendWhenReady(style);
-}
+let settingsIdCount = 0;
 
 function createSettingsOption(labelText, detailText, checked) {
   const option = document.createElement("label");
@@ -250,19 +26,32 @@ function createSettingsOption(labelText, detailText, checked) {
   return { option, input };
 }
 
+// The dialog goes first, so returning focus never picks one of its own controls.
 function closeSettingsModal() {
+  document.querySelector(`.${SETTINGS_CLASS}__backdrop`)?.remove();
   if (settingsModalCleanup) {
     settingsModalCleanup();
     settingsModalCleanup = null;
   }
-  document.querySelector(`.${SETTINGS_CLASS}__backdrop`)?.remove();
+}
+
+function nextSettingsId() {
+  return `${SETTINGS_CLASS}-${++settingsIdCount}`;
+}
+
+function createSettingsButton(text, variant = "") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `${SETTINGS_CLASS}__btn${variant ? ` ${SETTINGS_CLASS}__btn--${variant}` : ""}`;
+  button.textContent = text;
+  return button;
 }
 
 function createSettingsField(labelText, control) {
   const fieldEl = document.createElement("div");
   fieldEl.className = `${SETTINGS_CLASS}__field`;
   const input = control.matches("input") ? control : control.querySelector("input");
-  input.id ||= `${SETTINGS_CLASS}-field-${++settingsFieldCount}`;
+  input.id ||= nextSettingsId();
   const label = document.createElement("label");
   label.textContent = labelText;
   label.htmlFor = input.id;
@@ -279,25 +68,15 @@ function createWebhookUrlField(input) {
   const row = document.createElement("div");
   row.className = `${SETTINGS_CLASS}__secret`;
 
-  const revealBtn = document.createElement("button");
-  revealBtn.type = "button";
-  revealBtn.className = `${SETTINGS_CLASS}__reveal`;
-  revealBtn.textContent = "Show";
+  const revealBtn = createSettingsButton("Show");
   revealBtn.setAttribute("aria-label", "Show webhook URL");
   revealBtn.setAttribute("aria-pressed", "false");
   revealBtn.addEventListener("click", () => {
     const showing = input.type !== "password";
-    if (showing) {
-      input.type = "password";
-      revealBtn.textContent = "Show";
-      revealBtn.setAttribute("aria-label", "Show webhook URL");
-      revealBtn.setAttribute("aria-pressed", "false");
-    } else {
-      input.type = "text";
-      revealBtn.textContent = "Hide";
-      revealBtn.setAttribute("aria-label", "Hide webhook URL");
-      revealBtn.setAttribute("aria-pressed", "true");
-    }
+    input.type = showing ? "password" : "text";
+    revealBtn.textContent = showing ? "Show" : "Hide";
+    revealBtn.setAttribute("aria-label", showing ? "Show webhook URL" : "Hide webhook URL");
+    revealBtn.setAttribute("aria-pressed", String(!showing));
   });
 
   row.append(input, revealBtn);
@@ -316,9 +95,8 @@ function createSettingsEmptyState() {
   steps.className = `${SETTINGS_CLASS}__empty-steps`;
   for (const text of [
     "In Discord: Edit Channel → Integrations → Webhooks → New Webhook.",
-    "Copy the webhook URL.",
-    "Add a display name and paste the URL below, then Test webhook.",
-    "Save — then use Share → Share to Discord on X."
+    "Copy the webhook URL and paste it below with a name you'll recognize.",
+    "Test webhook, then Save. Share → Share to Discord on any post."
   ]) {
     const item = document.createElement("li");
     item.textContent = text;
@@ -330,10 +108,7 @@ function createSettingsEmptyState() {
 }
 
 function createTestWebhookButton(getWebhookUrl) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = `${SETTINGS_CLASS}__btn ${SETTINGS_CLASS}__btn--ghost`;
-  button.textContent = "Test webhook";
+  const button = createSettingsButton("Test webhook");
   button.addEventListener("click", async () => {
     if (button.disabled) return;
     button.disabled = true;
@@ -350,4 +125,106 @@ function createTestWebhookButton(getWebhookUrl) {
     }
   });
   return button;
+}
+
+function trapFocus(dialog, event) {
+  const focusable = [...dialog.querySelectorAll("button, input, a[href]")].filter((node) => {
+    return !node.disabled && !node.closest("[hidden]");
+  });
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const outside = !focusable.includes(document.activeElement);
+  if (event.shiftKey && (outside || document.activeElement === first)) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (outside || document.activeElement === last)) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+// A channel's summary row and its inline edit form. Edits write straight to `destination`.
+function createChannelRow(destination, { savedWebhookUrl, onToggleEdit, onRemove }) {
+  const element = document.createElement("li");
+  element.className = `${SETTINGS_CLASS}__row`;
+
+  const main = document.createElement("div");
+  main.className = `${SETTINGS_CLASS}__row-main`;
+  let avatar = createChannelAvatar(destination);
+  const text = document.createElement("div");
+  text.className = `${SETTINGS_CLASS}__row-text`;
+  const title = document.createElement("div");
+  title.className = `${SETTINGS_CLASS}__row-title`;
+  title.id = nextSettingsId();
+  const status = document.createElement("div");
+  status.className = `${SETTINGS_CLASS}__row-status`;
+  text.append(title, status);
+
+  function refresh() {
+    const label = destination.label.trim();
+    const valid = Boolean(sanitizeDestination(destination));
+    title.textContent = label || "Untitled channel";
+    if (valid) status.textContent = destination.webhookUrl === savedWebhookUrl ? "Webhook saved" : "Not saved yet";
+    else status.textContent = label ? "Needs a valid webhook URL" : "Needs a display name";
+    status.dataset.invalid = String(!valid);
+    const freshAvatar = createChannelAvatar(destination);
+    avatar.replaceWith(freshAvatar);
+    avatar = freshAvatar;
+  }
+
+  const editRegion = document.createElement("div");
+  editRegion.className = `${SETTINGS_CLASS}__row-edit`;
+  editRegion.id = nextSettingsId();
+
+  const editBtn = createSettingsButton("Edit");
+  editBtn.setAttribute("aria-controls", editRegion.id);
+  editBtn.setAttribute("aria-describedby", title.id);
+  editBtn.addEventListener("click", () => {
+    onToggleEdit();
+    (editRegion.hidden ? editBtn : labelInput).focus();
+  });
+
+  function setEditing(open) {
+    editRegion.hidden = !open;
+    editBtn.textContent = open ? "Done" : "Edit";
+    editBtn.setAttribute("aria-expanded", String(open));
+  }
+
+  const removeBtn = createSettingsButton("Remove", "danger");
+  removeBtn.setAttribute("aria-describedby", title.id);
+  removeBtn.addEventListener("click", onRemove);
+
+  const actions = document.createElement("div");
+  actions.className = `${SETTINGS_CLASS}__actions`;
+  actions.append(editBtn, removeBtn);
+  main.append(avatar, text, actions);
+
+  const labelInput = document.createElement("input");
+  labelInput.type = "text";
+  labelInput.value = destination.label;
+  labelInput.addEventListener("input", () => {
+    destination.label = labelInput.value;
+    refresh();
+  });
+
+  const urlInput = document.createElement("input");
+  urlInput.placeholder = "https://discord.com/api/webhooks/...";
+  urlInput.value = destination.webhookUrl;
+  urlInput.addEventListener("input", () => {
+    destination.webhookUrl = urlInput.value.trim();
+    refresh();
+  });
+
+  const editActions = document.createElement("div");
+  editActions.className = `${SETTINGS_CLASS}__actions`;
+  editActions.append(createTestWebhookButton(() => destination.webhookUrl));
+  editRegion.append(
+    createSettingsField("Display name", labelInput),
+    createWebhookUrlField(urlInput),
+    editActions
+  );
+
+  refresh();
+  element.append(main, editRegion);
+  return { element, editBtn, labelInput, urlInput, setEditing };
 }
