@@ -180,7 +180,7 @@ test("auto quote layout inlines text-only main with quoted video", () => {
   assert.match(payloads[0].content, /↳ 📑 Quoted post: https:\/\/x\.com\/atrupar\/status\/2064811778433818859/);
   assert.ok(quoteField);
   assert.match(quoteField.value, /^> Hegseth:/);
-  assert.ok(firstEmbed.fields.some((field) => field.name === "Original post" && field.value === jamieQuoteTweet.url));
+  assert.equal(firstEmbed.fields.some((field) => field.name === "Original post"), false);
   assert.match(payloads[1].content, /q\.mp4/);
 });
 
