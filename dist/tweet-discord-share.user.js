@@ -3752,28 +3752,61 @@ function appendPreviewInline(container, text) {
   container.append(text.slice(index));
 }
 
-// Discord draws a run of "> " lines as one quote with a bar beside it.
+// Discord draws a run of "> " lines as one quote with a bar beside it, and "-# " lines as small subtext.
+const PREVIEW_LINE_BLOCKS = [
+  { prefix: "> ", tag: "blockquote", className: `${PREVIEW_CLASS}__quote` },
+  { prefix: "-# ", tag: "div", className: `${PREVIEW_CLASS}__subtext` }
+];
+
 function appendPreviewMarkdown(container, value) {
   const runs = [];
   for (const line of String(value || "").split("\n")) {
-    const quoted = line.startsWith("> ");
-    const text = quoted ? line.slice(2) : line;
-    if (runs.at(-1)?.quoted === quoted) runs.at(-1).lines.push(text);
-    else runs.push({ quoted, lines: [text] });
+    const block = PREVIEW_LINE_BLOCKS.find((candidate) => line.startsWith(candidate.prefix));
+    const text = block ? line.slice(block.prefix.length) : line;
+    if (runs.length && runs.at(-1).block === block) runs.at(-1).lines.push(text);
+    else runs.push({ block, lines: [text] });
   }
-  for (const { quoted, lines } of runs) {
-    if (!quoted) {
+  for (const { block, lines } of runs) {
+    if (!block) {
       appendPreviewInline(container, lines.join("\n"));
       continue;
     }
-    const quote = document.createElement("blockquote");
-    quote.className = `${PREVIEW_CLASS}__quote`;
-    appendPreviewInline(quote, lines.join("\n"));
-    container.append(quote);
+    const element = document.createElement(block.tag);
+    element.className = block.className;
+    appendPreviewInline(element, lines.join("\n"));
+    container.append(element);
   }
 }
 
-function createPreviewEmbed(embed) {
+// Discord folds an embed into an earlier one with the same url, adding its image to that embed's grid of up to four.
+function mergeImageGrids(embeds) {
+  const cards = [];
+  for (const embed of embeds) {
+    const host = embed.url && embed.image?.url
+      ? cards.find((card) => card.embed.url === embed.url && card.images.length < 4)
+      : null;
+    if (host) host.images.push(embed.image.url);
+    else cards.push({ embed, images: embed.image?.url ? [embed.image.url] : [] });
+  }
+  return cards;
+}
+
+function createPreviewImage(url) {
+  const image = document.createElement("img");
+  image.className = `${PREVIEW_CLASS}__image`;
+  image.src = url;
+  image.alt = "";
+  image.loading = "lazy";
+  image.referrerPolicy = "no-referrer";
+  return image;
+}
+
+function previewTimestamp(value) {
+  const date = new Date(value || "");
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+function createPreviewEmbed(embed, images) {
   const card = document.createElement("article");
   card.className = `${PREVIEW_CLASS}__embed`;
   card.style.setProperty("--tds-preview-accent", embedColorCss(embed.color));
@@ -3818,19 +3851,6 @@ function createPreviewEmbed(embed) {
     card.append(description);
   }
 
-  if (embed.image?.url) {
-    const imageWrap = document.createElement("div");
-    imageWrap.className = `${PREVIEW_CLASS}__image-wrap`;
-    const image = document.createElement("img");
-    image.className = `${PREVIEW_CLASS}__image`;
-    image.src = embed.image.url;
-    image.alt = "";
-    image.loading = "lazy";
-    image.referrerPolicy = "no-referrer";
-    imageWrap.append(image);
-    card.append(imageWrap);
-  }
-
   for (const field of embed.fields || []) {
     const fieldEl = document.createElement("div");
     fieldEl.className = `${PREVIEW_CLASS}__field`;
@@ -3847,10 +3867,20 @@ function createPreviewEmbed(embed) {
     card.append(fieldEl);
   }
 
-  if (embed.footer?.text) {
+  if (images.length) {
+    const imageWrap = document.createElement("div");
+    imageWrap.className = images.length > 1
+      ? `${PREVIEW_CLASS}__image-grid ${PREVIEW_CLASS}__image-grid--${images.length}`
+      : `${PREVIEW_CLASS}__image-wrap`;
+    imageWrap.append(...images.map(createPreviewImage));
+    card.append(imageWrap);
+  }
+
+  const footerText = [embed.footer?.text, previewTimestamp(embed.timestamp)].filter(Boolean).join(" • ");
+  if (footerText) {
     const footer = document.createElement("div");
     footer.className = `${PREVIEW_CLASS}__footer`;
-    footer.textContent = embed.footer.text;
+    footer.textContent = footerText;
     card.append(footer);
   }
 
@@ -3903,8 +3933,8 @@ function createPreviewMessage(payload, index, total) {
     body.append(content);
   }
 
-  for (const embed of payload.embeds || []) {
-    body.append(createPreviewEmbed(embed));
+  for (const { embed, images } of mergeImageGrids(payload.embeds || [])) {
+    body.append(createPreviewEmbed(embed, images));
   }
 
   message.append(avatar, body);
@@ -4080,6 +4110,25 @@ function previewStylesCss() {
       max-width: 100%;
       object-fit: contain;
     }
+    .${PREVIEW_CLASS}__image-grid {
+      display: grid;
+      gap: 4px;
+      grid-auto-rows: 112px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      margin-top: 2px;
+    }
+    .${PREVIEW_CLASS}__image-grid--2 {
+      grid-auto-rows: 168px;
+    }
+    .${PREVIEW_CLASS}__image-grid--3 > :first-child {
+      grid-row: span 2;
+    }
+    .${PREVIEW_CLASS}__image-grid .${PREVIEW_CLASS}__image {
+      height: 100%;
+      max-height: none;
+      object-fit: cover;
+      width: 100%;
+    }
     .${PREVIEW_CLASS}__field {
       display: flex;
       flex-direction: column;
@@ -4111,6 +4160,11 @@ function previewStylesCss() {
     }
     .${PREVIEW_CLASS}__link-host {
       color: rgb(var(--tds-subtle));
+    }
+    .${PREVIEW_CLASS}__subtext {
+      color: rgb(var(--tds-subtle));
+      font-size: 12px;
+      line-height: 1.35;
     }
     .${PREVIEW_CLASS}__quote {
       border-inline-start: 4px solid rgb(var(--tds-subtle) / 0.5);

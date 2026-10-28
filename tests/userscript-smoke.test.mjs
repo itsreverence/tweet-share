@@ -375,6 +375,58 @@ test("the preview links the post and the quoted post", async (t) => {
   );
 });
 
+test("the preview draws the content as one small Open on X line, with no literal -#", async (t) => {
+  const view = openPage(t, { destinations: [general, friends] });
+
+  const preview = expandPreview(view, await openPreview(view));
+  const lines = renderedLines(view, preview);
+  assert.ok(lines.includes("Open on X (x.com)"), `the content line is shown in ${JSON.stringify(lines)}`);
+  assert.ok(!lines.some((line) => line.startsWith("-#")), `no literal "-#" is shown in ${JSON.stringify(lines)}`);
+  const fontSize = (node) => {
+    for (let element = node; element; element = element.parentElement) {
+      const size = parseFloat(view.window.getComputedStyle(element).fontSize);
+      if (size) return size;
+    }
+    return 0;
+  };
+  const link = preview.querySelector(`a[href="${postUrl}"]`);
+  const description = leafWithText(preview, postText);
+  assert.ok(fontSize(link) < fontSize(description), "the content line is smaller than the post text");
+});
+
+const photoMarkup = (id) => `<div data-testid="tweetPhoto"><img alt="Image" src="https://pbs.twimg.com/media/${id}?format=jpg&name=small"></div>`;
+const previewCards = (preview) => [...preview.querySelectorAll("article")];
+const photoIds = (card) => [...card.querySelectorAll('img[src*="pbs.twimg.com/media/"]')].map((img) => /\/media\/([^?]+)/.exec(img.src)[1]);
+
+test("the preview shows a post's photos inside its card, four as one grid", async (t) => {
+  const view = openPage(t, { destinations: [general, friends] });
+  view.document.querySelector('[data-testid="tweetPhoto"]').insertAdjacentHTML("afterend", ["Two", "Three", "Four"].map(photoMarkup).join(""));
+
+  const preview = expandPreview(view, await openPreview(view));
+  const cards = previewCards(preview);
+  assert.equal(cards.length, 1, "the four photos merge into the post's card");
+  assert.deepEqual(photoIds(cards[0]), ["SmokePhoto", "Two", "Three", "Four"]);
+  assert.ok(cards[0].textContent.includes(postText), "the photos share the card with the post text");
+});
+
+test("the preview shows a quoted post with a photo as its own card, with its photo and date", async (t) => {
+  const view = openPage(t, { destinations: [general, friends], quote: true });
+  view.document.querySelector('[role="link"] [data-testid="tweetText"]').insertAdjacentHTML(
+    "afterend",
+    `${photoMarkup("QuotePhoto")}<time datetime="2025-03-04T05:06:00.000Z">Mar 4</time>`
+  );
+
+  const preview = expandPreview(view, await openPreview(view));
+  const cards = previewCards(preview);
+  assert.equal(cards.length, 2);
+  assert.deepEqual(photoIds(cards[0]), ["SmokePhoto"], "the main card shows only the main post's photo");
+  assert.ok(cards[1].textContent.includes("Quoting Bob (@bob)"));
+  assert.ok(cards[1].textContent.includes(quoteText));
+  assert.deepEqual(photoIds(cards[1]), ["QuotePhoto"], "the quote card shows the quote's photo");
+  assert.ok(cards[1].textContent.includes("2025"), "the quote card shows the quote's own date");
+  assert.ok(!cards[0].textContent.includes("2025"));
+});
+
 test("the preview shows where masked links in the post and the quote really go, and draws quote lines as a quote", async (t) => {
   const phish = "https://evil.example/phish";
   const lure = "https://lure.example/win";
