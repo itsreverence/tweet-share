@@ -169,7 +169,6 @@ async function resolveMediaAttachment(media, remainingBytes, options = {}) {
 async function resolveAttachmentsForTweet(tweet, shareOptions = {}) {
   const attachments = [];
   const skipped = [];
-  const resolvedUrls = [];
   let totalBytes = 0;
   const candidates = collectMediaAttachmentItems(tweet, shareOptions);
 
@@ -192,8 +191,6 @@ async function resolveAttachmentsForTweet(tweet, shareOptions = {}) {
         sourceUrl: resolved.url
       });
       totalBytes += resolved.size;
-      const primaryUrl = media.type === "video" ? normalizeTweetVideoUrl(media.url) : media.url;
-      resolvedUrls.push(primaryUrl, resolved.url);
       continue;
     }
 
@@ -204,5 +201,5 @@ async function resolveAttachmentsForTweet(tweet, shareOptions = {}) {
     });
   }
 
-  return { attachments, skipped, urls: unique(resolvedUrls.filter(Boolean)) };
+  return { attachments, skipped };
 }

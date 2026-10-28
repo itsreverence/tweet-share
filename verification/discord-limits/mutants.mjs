@@ -28,8 +28,8 @@ const mutants = [
   {
     name: "description chunks larger than Discord allows",
     file: "05-format-discord.js",
-    find: "splitText(text, DISCORD_EMBED_LIMITS.description)",
-    replace: "splitText(text, 4200)",
+    find: "splitText(card.text, DISCORD_EMBED_LIMITS.description)",
+    replace: "splitText(card.text, 4200)",
     expect: PER_EMBED
   },
   {
@@ -113,22 +113,22 @@ const mutants = [
   {
     name: "share content omits the main permalink",
     file: "05-format-discord.js",
-    find: "const lines = [];\n  if (tweet.url) lines.push(tweet.url);\n  if (resolveQuoteLayout",
-    replace: "const lines = [];\n  if (resolveQuoteLayout",
+    find: "`-# [Open on X](${tweet.url})`",
+    replace: "`-# Open on X`",
     expect: PRESERVES
   },
   {
-    name: "drop supplemental image embeds",
+    name: "drop a card's photos after its first",
     file: "05-format-discord.js",
-    find: "return [...withHints, ...supplements];",
-    replace: "return withHints;",
+    find: "return [first, ...photos, ...rest];",
+    replace: "return [first, ...rest];",
     expect: PRESERVES
   },
   {
     name: "embed descriptions strip spaces from the main text",
     file: "05-format-discord.js",
-    find: "description: chunk,",
-    replace: "description: chunk.replace(/ /g, \"\"),",
+    find: "      description,\n      url: index === 0 ? card.url : undefined,",
+    replace: "      description: description?.replace(/ /g, \"\"),\n      url: index === 0 ? card.url : undefined,",
     expect: PRESERVES
   },
   {
@@ -190,17 +190,17 @@ const mutants = [
   {
     name: "embed shares leak part of an excluded quote's text past its opening",
     file: "05-format-discord.js",
-    find: "  if (tweet.url) lines.push(tweet.url);\n  if (resolveQuoteLayout(tweet, shareOptions) !== \"none\" && tweet.quote?.url) {",
+    find: "      content: index === 0 ? shareContentLine(tweet) : undefined,",
     replace:
-      "  if (tweet.url) lines.push(tweet.url);\n  if (shareOptions.includeQuote === false && tweet.quote?.text?.length > 100) lines.push(tweet.quote.text.slice(100, 200));\n  if (resolveQuoteLayout(tweet, shareOptions) !== \"none\" && tweet.quote?.url) {",
+      "      content: index === 0 ? [shareContentLine(tweet), options.includeQuote === false && tweet.quote?.text?.length > 100 ? tweet.quote.text.slice(100, 200) : \"\"].filter(Boolean).join(\"\\n\") : undefined,",
     expect: QUOTE_ONLY_WHEN_INCLUDED
   },
   {
     name: "embed shares leak an excluded quote's media that has no twimg media ID",
     file: "05-format-discord.js",
-    find: "  const embeds = [...buildTweetEmbedGroup(tweet, \"main\", shareOptions)];",
+    find: "packEmbedsIntoMessages(shareCards(tweet, options).flatMap(cardEmbeds))",
     replace:
-      "  const embeds = [...buildTweetEmbedGroup(tweet, \"main\", shareOptions)];\n  if (!includeQuote) for (const item of tweet.quote?.media || []) if (item.posterUrl || (item.type === \"image\" && !isTweetImageMediaUrl(item.url))) embeds.push({ image: { url: item.posterUrl || item.url } });",
+      "packEmbedsIntoMessages([...shareCards(tweet, options).flatMap(cardEmbeds), ...(options.includeQuote === false ? (tweet.quote?.media || []).filter((item) => item.posterUrl || (item.type === \"image\" && !isTweetImageMediaUrl(item.url))).map((item) => ({ image: { url: item.posterUrl || item.url } })) : [])])",
     expect: QUOTE_ONLY_WHEN_INCLUDED
   },
   {

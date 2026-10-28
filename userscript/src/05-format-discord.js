@@ -21,6 +21,14 @@ function embedAuthorDisplayName(tweet) {
   return "Unknown author";
 }
 
+function authorLabel(tweet) {
+  const displayName = String(tweet.author?.displayName || "").trim();
+  const username = String(tweet.author?.username || "").trim();
+  const handle = username ? `@${username}` : "";
+  if (displayName && handle) return `${displayName} (${handle})`;
+  return displayName || handle || "Unknown author";
+}
+
 function webhookSenderAvatarUrl() {
   return WEBHOOK_SENDER_AVATAR_URL;
 }
@@ -40,11 +48,6 @@ function mediaUrlIdentity(url) {
   return isTweetImageMediaUrl(url) ? (tweetImageMediaKey(url) || url) : url;
 }
 
-function attachmentIncludesMediaUrl(attachmentUrls, url) {
-  const identity = mediaUrlIdentity(url);
-  return attachmentUrls.some((candidate) => mediaUrlIdentity(candidate) === identity);
-}
-
 function tweetHasEmbedImageMedia(tweet) {
   return imageMedia(tweet).length > 0;
 }
@@ -56,11 +59,8 @@ function needsMediaPostPrefix(rootTweet, shareOptions = {}) {
 }
 
 function resolveQuoteLayout(tweet, shareOptions = {}) {
-  const mode = shareOptions.quoteLayout || "auto";
   if (shareOptions.includeQuote === false || !hasQuoteTweet(tweet)) return "none";
-  if (mode === "card") return "card";
-  if (mode === "inline") return "inline";
-  return "inline";
+  return shareOptions.quoteLayout === "card" ? "card" : "inline";
 }
 
 function mediaCaption(kind, postTweet, index, shareOptions = {}, rootTweet = postTweet) {
@@ -132,11 +132,11 @@ function isValidEmbedImageUrl(url) {
   }
 }
 
-function embedAuthorBlock(tweet) {
-  const block = { name: embedAuthorDisplayName(tweet) };
+function embedAuthorBlock(tweet, name, url) {
+  const block = { name: truncate(name, DISCORD_EMBED_LIMITS.authorName) };
   const iconUrl = tweetAuthorAvatarUrl(tweet);
-  if (isHttpsUrl(iconUrl)) block.icon_url = iconUrl;
-  if (tweet.author?.username) block.url = `https://x.com/${tweet.author.username}`;
+  if (iconUrl) block.icon_url = iconUrl;
+  if (url) block.url = url;
   return block;
 }
 
@@ -226,177 +226,110 @@ function pruneEmbed(embed) {
   return next;
 }
 
-function formatQuoteFieldValue(text) {
+function formatQuoteFieldValue(text, limit) {
   const trimmed = String(text || "").trim();
   if (!trimmed) return "";
-  return truncate(trimmed.split("\n").map((line) => `> ${line}`).join("\n"), DISCORD_EMBED_LIMITS.fieldValue);
+  return truncate(trimmed.split("\n").map((line) => `> ${line}`).join("\n"), limit);
 }
 
-function permalinkField(name, url) {
-  if (!url) return null;
-  return {
-    name: truncate(name, DISCORD_EMBED_LIMITS.fieldName),
-    value: truncate(url, DISCORD_EMBED_LIMITS.fieldValue),
-    inline: false
-  };
-}
-
-function buildInlineQuoteFields(tweet) {
-  const quote = tweet.quote;
-  if (!quote) return [];
-
-  const username = quote.author?.username ? `@${quote.author.username}` : "unknown";
-  const quoteBody = formatQuoteFieldValue(quote.text);
-  if (!quoteBody) return [];
+function buildInlineQuoteFields(quote) {
+  const link = quote.url ? `[View quoted post](${quote.url})` : "";
+  const room = DISCORD_EMBED_LIMITS.fieldValue - (link ? link.length + 1 : 0);
+  const value = [formatQuoteFieldValue(quote.text, room), link].filter(Boolean).join("\n");
+  if (!value) return [];
 
   return [{
-    name: truncate(`Quoted post from ${username}`, DISCORD_EMBED_LIMITS.fieldName),
-    value: quoteBody,
+    name: truncate(`Quoting ${authorLabel(quote)}`, DISCORD_EMBED_LIMITS.fieldName),
+    value,
     inline: false
   }];
 }
 
-function buildShareContentLines(tweet, shareOptions = {}) {
-  const lines = [];
-  if (tweet.url) lines.push(tweet.url);
-  if (resolveQuoteLayout(tweet, shareOptions) !== "none" && tweet.quote?.url) {
-    lines.push(`↳ 📑 Quoted post: ${tweet.quote.url}`);
+function shareContentLine(tweet) {
+  return tweet.url ? truncate(`-# [Open on X](${tweet.url})`, DISCORD_LIMITS.content) : undefined;
+}
+
+function cardPhotoUrls(post, alreadyShown = []) {
+  const seen = new Set(alreadyShown.map(mediaUrlIdentity));
+  const urls = [];
+  for (const { url } of imageMedia(post)) {
+    const identity = mediaUrlIdentity(url);
+    if (!isValidEmbedImageUrl(url) || seen.has(identity)) continue;
+    seen.add(identity);
+    urls.push(url);
   }
-  return lines.length ? truncate(lines.join("\n"), DISCORD_LIMITS.content) : undefined;
+  return urls;
 }
 
-function pickEmbedImageUrl(mediaItems) {
-  const image = mediaItems.find((item) => isValidEmbedImageUrl(item.url));
-  return image?.url || "";
-}
-
-function pickEmbedHeroUrl(mediaItems) {
-  return pickEmbedImageUrl(mediaItems);
-}
-
-function buildMediaHintField(imageSupplementCount) {
-  if (imageSupplementCount <= 0) return null;
-
-  const text = imageSupplementCount === 1 ? "1 more image below" : `${imageSupplementCount} more images below`;
-
+function postCard(post, kind, { images, fields = [] }) {
+  const isQuote = kind === "quote";
+  const label = authorLabel(post);
+  const profileUrl = post.author?.username ? `https://x.com/${post.author.username}` : undefined;
+  const text = String(post.text || "").trim();
   return {
-    name: "More images",
-    value: truncate(`${text} ↓`, DISCORD_EMBED_LIMITS.fieldValue),
-    inline: false
+    color: isQuote ? EMBED_COLOR_QUOTE : EMBED_COLOR_MAIN,
+    // A quote card has no other visible link to the quoted post, so its author name opens it.
+    author: isQuote ? embedAuthorBlock(post, `Quoting ${label}`, post.url) : embedAuthorBlock(post, label, profileUrl),
+    text: text || (images.length || mediaLinks(post).length ? "" : "(No text found)"),
+    fields,
+    images,
+    date: isQuote ? undefined : discordEmbedTimestamp(post.createdAt),
+    footer: embedFooterForTweet(post, kind),
+    url: post.url || ""
   };
 }
 
-function appendMediaHintToLastContentEmbed(embeds, imageSupplementCount) {
-  const hintField = buildMediaHintField(imageSupplementCount);
-  if (!hintField || !embeds.length) return embeds;
+function shareCards(tweet, shareOptions = {}) {
+  const layout = resolveQuoteLayout(tweet, shareOptions);
+  const mainImages = cardPhotoUrls(tweet);
+  if (layout === "none") return [postCard(tweet, "main", { images: mainImages })];
 
-  const lastContentEmbed = [...embeds].reverse().find((embed) => embed.author || embed.description);
-  if (!lastContentEmbed) return embeds;
-
-  lastContentEmbed.fields = [...(lastContentEmbed.fields || []), hintField];
-  return embeds;
-}
-
-function buildImageSupplementEmbeds(tweet, mediaItems, heroUrl, kind, shareOptions = {}) {
-  const color = kind === "quote" ? EMBED_COLOR_QUOTE : EMBED_COLOR_MAIN;
-  const permalink = tweet.url || "";
-  const attachmentUrls = shareOptions.attachmentUrls || [];
-
-  return mediaItems
-    .filter((item) =>
-      item.kind === "image"
-      && item.url
-      && item.url !== heroUrl
-      && !attachmentIncludesMediaUrl(attachmentUrls, item.url)
-      && isValidEmbedImageUrl(item.url)
-    )
-    .map((item) =>
-      pruneEmbed({
-        color,
-        title: truncate(item.label, DISCORD_EMBED_LIMITS.title),
-        url: permalink || undefined,
-        image: { url: item.url }
-      })
-    );
-}
-
-function assembleTweetEmbedGroup(tweet, kind, shareOptions, contentEmbeds, media, heroImageUrl) {
-  const supplements = buildImageSupplementEmbeds(tweet, media, heroImageUrl, kind, shareOptions);
-  const withHints = appendMediaHintToLastContentEmbed(contentEmbeds, supplements.length);
-  return [...withHints, ...supplements];
-}
-
-function buildTweetEmbedGroup(tweet, kind, shareOptions = {}) {
-  const color = kind === "quote" ? EMBED_COLOR_QUOTE : EMBED_COLOR_MAIN;
-  const permalink = tweet.url || "";
-  const text = String(tweet.text || "").trim();
-  const inlineQuote = kind === "main" && shareOptions.quoteLayout === "inline" ? shareOptions.rootTweet?.quote : null;
-  const inlineQuoteMedia = inlineQuote ? mediaLinks(inlineQuote, shareOptions).filter((item) => item.kind === "image") : [];
-  const media = uniqueMediaLinks([...mediaLinks(tweet, shareOptions), ...inlineQuoteMedia]);
-  const attachmentUrls = shareOptions.attachmentUrls || [];
-  const visibleMedia = media.filter((item) => !attachmentIncludesMediaUrl(attachmentUrls, item.url));
-  const visibleInlineQuoteMedia = inlineQuoteMedia.filter((item) => !attachmentIncludesMediaUrl(attachmentUrls, item.url));
-  const heroImageUrl = pickEmbedHeroUrl(visibleMedia)
-    || (inlineQuote ? pickEmbedHeroUrl(visibleInlineQuoteMedia) : "");
-  const mediaFields = [];
-  const inlineQuoteFields = kind === "main" ? (shareOptions.inlineQuoteFields || []) : [];
-  const permalinkFields = kind === "quote" ? [permalinkField("Quoted post", permalink)].filter(Boolean) : [];
-  const footer = embedFooterForTweet(tweet, kind);
-  const descriptionChunks = splitText(text, DISCORD_EMBED_LIMITS.description);
-  const contentEmbeds = [];
-
-  if (descriptionChunks.length === 0) {
-    contentEmbeds.push(
-      pruneEmbed({
-        color,
-        author: embedAuthorBlock(tweet),
-        description: media.length ? undefined : "(No text found)",
-        url: permalink || undefined,
-        image: heroImageUrl ? { url: heroImageUrl } : undefined,
-        fields: [...mediaFields, ...inlineQuoteFields, ...permalinkFields].length ? [...mediaFields, ...inlineQuoteFields, ...permalinkFields] : undefined,
-        timestamp: kind === "main" ? discordEmbedTimestamp(tweet.createdAt) : undefined,
-        footer
-      })
-    );
-    return assembleTweetEmbedGroup(
-      tweet,
-      kind,
-      shareOptions,
-      rebalanceEmbedsForCharBudget(contentEmbeds),
-      media,
-      heroImageUrl
-    );
+  const quoteImages = cardPhotoUrls(tweet.quote, mainImages);
+  if (layout === "card") {
+    return [postCard(tweet, "main", { images: mainImages }), postCard(tweet.quote, "quote", { images: quoteImages })];
   }
+  return [postCard(tweet, "main", { images: [...mainImages, ...quoteImages], fields: buildInlineQuoteFields(tweet.quote) })];
+}
 
-  descriptionChunks.forEach((chunk, index) => {
-    const isFirst = index === 0;
-    const isLast = index === descriptionChunks.length - 1;
-    contentEmbeds.push(
-      pruneEmbed({
-        color,
-        author: isFirst ? embedAuthorBlock(tweet) : undefined,
-        title:
-          descriptionChunks.length > 1 && !isFirst
-            ? truncate(`Continued (${index + 1}/${descriptionChunks.length})`, DISCORD_EMBED_LIMITS.title)
-            : undefined,
-        description: chunk,
-        url: isFirst && permalink ? permalink : undefined,
-        image: isFirst && heroImageUrl ? { url: heroImageUrl } : undefined,
-        fields: isLast && [...mediaFields, ...inlineQuoteFields, ...permalinkFields].length ? [...mediaFields, ...inlineQuoteFields, ...permalinkFields] : undefined,
-        timestamp: kind === "main" && isFirst ? discordEmbedTimestamp(tweet.createdAt) : undefined,
-        footer: isLast ? footer : undefined
-      })
-    );
-  });
-
-  return assembleTweetEmbedGroup(
-    tweet,
-    kind,
-    shareOptions,
-    rebalanceEmbedsForCharBudget(contentEmbeds),
-    media,
-    heroImageUrl
+function cardEmbeds(card) {
+  const chunks = splitText(card.text, DISCORD_EMBED_LIMITS.description);
+  const descriptions = chunks.length ? chunks : [undefined];
+  const last = descriptions.length - 1;
+  const [hero, ...gallery] = card.images;
+  const textEmbeds = descriptions.map((description, index) =>
+    pruneEmbed({
+      color: card.color,
+      author: index === 0 ? card.author : undefined,
+      title: index === 0 ? undefined : truncate(`Continued (${index + 1}/${descriptions.length})`, DISCORD_EMBED_LIMITS.title),
+      description,
+      url: index === 0 ? card.url : undefined,
+      image: index === 0 && hero ? { url: hero } : undefined,
+      fields: index === last && card.fields.length ? card.fields : undefined,
+      timestamp: index === last ? card.date : undefined,
+      footer: index === last ? card.footer : undefined
+    })
   );
+  const [first, ...rest] = rebalanceEmbedsForCharBudget(textEmbeds);
+  // Discord merges embeds that share the first one's url into a grid of up to four images inside it.
+  const photos = gallery.map((url) => pruneEmbed({ color: card.color, url: card.url, image: { url } }));
+  return [first, ...photos, ...rest];
+}
+
+// Files upload with the first message, so only its embeds can show them. A photo packed into a
+// later message links its source instead, and its file stays off the first message so Discord
+// does not show it there as well.
+function assignUploads(messages, attachments) {
+  const fileFor = (url) => url && attachments.find((file) => mediaUrlIdentity(file.sourceUrl) === mediaUrlIdentity(url));
+  const [first, ...later] = messages;
+  const linkedLater = new Set(later.flat().map((embed) => fileFor(embed.image?.url)).filter(Boolean));
+  const firstWithUploads = first.map((embed) => {
+    const file = fileFor(embed.image?.url);
+    return file ? { ...embed, image: { url: `attachment://${file.filename}` } } : embed;
+  });
+  return {
+    messages: [firstWithUploads, ...later],
+    files: attachments.filter((file) => !linkedLater.has(file)).map((file) => file.filename)
+  };
 }
 
 function packEmbedsIntoMessages(embeds) {
@@ -459,10 +392,6 @@ function buildWebhookPayload(embeds, tweet, options = {}) {
   return payload;
 }
 
-function attachmentFilenames(options = {}) {
-  return (options.attachments || []).map((file) => file.filename);
-}
-
 function buildVideoFollowUpContent(entries) {
   if (!entries.length) return undefined;
   if (entries.length === 1) return truncate(`_Video:_\n${entries[0].url}`, DISCORD_LIMITS.content);
@@ -472,38 +401,17 @@ function buildVideoFollowUpContent(entries) {
 }
 
 function buildEmbedDiscordPayloads(tweet, options = {}) {
-  const { includeQuote = true } = options;
   const allVideoEntries = collectShareVideoEntries(tweet, options);
-  const attachmentUrls = options.attachmentUrls || [];
-  const fallbackVideoUrls = Array.isArray(options.fallbackVideoUrls)
-    ? options.fallbackVideoUrls
-    : (options.attachMedia === true
-      ? allVideoEntries.filter((entry) => !attachmentUrls.includes(entry.url)).map((entry) => entry.url)
-      : allVideoEntries.map((entry) => entry.url));
-  const fallbackVideoUrlSet = new Set(fallbackVideoUrls);
+  const fallbackVideoUrlSet = new Set(options.fallbackVideoUrls ?? allVideoEntries.map((entry) => entry.url));
   const videoEntries = allVideoEntries.filter((entry) => fallbackVideoUrlSet.has(entry.url));
-  const quoteLayout = resolveQuoteLayout(tweet, options);
-  const shareOptions = {
-    ...options,
-    attachmentUrls,
-    quoteLayout,
-    inlineQuoteFields: quoteLayout === "inline" ? buildInlineQuoteFields(tweet) : [],
-    rootTweet: tweet
-  };
-  const embeds = [...buildTweetEmbedGroup(tweet, "main", shareOptions)];
+  const packed = packEmbedsIntoMessages(shareCards(tweet, options).flatMap(cardEmbeds));
+  const { messages: groups, files } = assignUploads(packed, options.attachments || []);
 
-  if (includeQuote && hasQuoteTweet(tweet) && quoteLayout === "card") {
-    embeds.push(...buildTweetEmbedGroup(tweet.quote, "quote", shareOptions));
-  }
-
-  const packed = packEmbedsIntoMessages(embeds);
-  if (!packed.length) return [];
-
-  const messages = packed.map((group, index) =>
+  const messages = groups.map((group, index) =>
     buildWebhookPayload(group, tweet, {
-      content: index === 0 ? buildShareContentLines(tweet, shareOptions) : undefined,
-      messageLabel: packed.length > 1 ? `Tweet embeds ${index + 1}/${packed.length}` : undefined,
-      files: index === 0 ? attachmentFilenames(options) : undefined
+      content: index === 0 ? shareContentLine(tweet) : undefined,
+      messageLabel: groups.length > 1 ? `Tweet embeds ${index + 1}/${groups.length}` : undefined,
+      files: index === 0 ? files : undefined
     })
   );
 
@@ -551,7 +459,7 @@ function buildPlainFallbackPayloads(tweet, options = {}) {
   const body = buildCompactPlainBody(tweet, options);
   const chunks = splitText(body, MESSAGE_CHUNK_LIMIT);
   const parts = chunks.length ? chunks : [body || formatAuthor(tweet)];
-  const files = attachmentFilenames(options);
+  const files = (options.attachments || []).map((file) => file.filename);
 
   return parts.map((content, index) => ({
     username: webhookSenderName(),

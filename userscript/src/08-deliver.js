@@ -32,8 +32,6 @@ async function shareToDestination(destinationId, tweet, options = {}) {
     .filter((url) => isPlayableTweetVideoUrl(url));
   const payloads = buildDiscordPayloads(tweet, {
     ...options,
-    attachMedia: attachments.length > 0,
-    attachmentUrls: resolved.urls,
     attachments: attachments.map(({ filename, sourceUrl }) => ({ filename, sourceUrl })),
     fallbackVideoUrls
   });

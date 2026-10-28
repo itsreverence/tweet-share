@@ -96,7 +96,6 @@ test("successful video fetch creates one MP4 attachment", async () => {
   assert.equal(resolved.attachments[0].filename, "media_0.mp4");
   assert.equal(resolved.attachments[0].contentType, "video/mp4");
   assert.equal(resolved.attachments[0].sourceUrl, videoUrl);
-  assert.deepEqual(Array.from(resolved.urls), [videoUrl]);
   assert.equal(resolved.skipped.length, 0);
 });
 
@@ -165,7 +164,6 @@ test("oversized highest-quality video falls back to the best fitting variant", a
 
   assert.deepEqual(fetched, [mediumUrl]);
   assert.equal(resolved.attachments[0].sourceUrl, mediumUrl);
-  assert.deepEqual(Array.from(resolved.urls), [highUrl, mediumUrl]);
   assert.equal(resolved.skipped.length, 0);
 });
 
@@ -249,8 +247,7 @@ test("partial success returns attachments and skipped source details", async () 
     }
   });
 
-  assert.deepEqual(Array.from(resolved.urls), [videoUrl]);
-  assert.equal(resolved.attachments.length, 1);
+  assert.deepEqual(Array.from(resolved.attachments, (attachment) => attachment.sourceUrl), [videoUrl]);
   assert.equal(resolved.skipped.length, 1);
   assert.equal(resolved.skipped[0].sourceUrl, imageUrl);
   assert.equal(resolved.skipped[0].reason, "fetch");

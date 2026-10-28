@@ -279,12 +279,15 @@ test("sharing to the only destination posts the post to its webhook", async (t) 
   const messages = view.webhookPosts().map(postedMessage);
   assert.ok(messages.length >= 1, "the share POSTs to the webhook");
   const payloads = messages.map((message) => message.payload);
-  assert.ok(payloads.some((payload) => payload.content?.split("\n").some((line) => line === postUrl)), "a message carries the post URL");
+  assert.ok(payloads.some((payload) => payload.content?.includes(`](${postUrl})`)), "a message's content links the post URL");
   assert.ok(
     payloads.some((payload) => payload.embeds?.some((embed) => embed.description?.includes(postText))),
     "an embed description carries the post text"
   );
-  assert.equal(messages.flatMap((message) => message.files).length, 1, "the photo is uploaded as one file");
+  const files = messages.flatMap((message) => message.files);
+  assert.equal(files.length, 1, "the photo is uploaded as one file");
+  assert.equal(messages[0].files.length, 1, "the photo uploads with the message that shows it");
+  assert.equal(payloads[0].embeds[0].image?.url, `attachment://${files[0].name}`, "the card shows the uploaded photo");
   for (const [index, payload] of payloads.entries()) {
     assert.deepEqual(payload.allowed_mentions?.parse, [], `message ${index + 1} disables mentions`);
   }
@@ -360,17 +363,16 @@ test("the summary line names the post, its media, and the quote, and follows the
   assert.equal(summary.textContent, "Post by @alice · 1 media file", "unchecking the quote drops it from the summary");
 });
 
-test("the preview shows the post link and the quoted-post line on separate lines", async (t) => {
+test("the preview links the post and the quoted post", async (t) => {
   const view = openPage(t, { destinations: [general, friends], quote: true });
 
   const preview = expandPreview(view, await openPreview(view));
-  const lines = renderedLines(view, preview);
-  assert.ok(lines.some((line) => line === postUrl), `the post URL is a line of its own in ${JSON.stringify(lines)}`);
-  assert.ok(
-    lines.some((line) => line === "↳ 📑 Quoted post: https://x.com/bob/status/999"),
-    `the quoted-post line is a line of its own in ${JSON.stringify(lines)}`
+  assert.match(preview.querySelector(`a[href="${postUrl}"]`)?.textContent ?? "", /^Open on X/, "the content links the post");
+  assert.match(
+    preview.querySelector('a[href="https://x.com/bob/status/999"]')?.textContent ?? "",
+    /^View quoted post/,
+    "the quote field links the quoted post"
   );
-  assert.ok(preview.querySelector(`a[href="${postUrl}"]`), "the post URL is a link");
 });
 
 test("the preview shows where masked links in the post and the quote really go, and draws quote lines as a quote", async (t) => {
@@ -378,7 +380,7 @@ test("the preview shows where masked links in the post and the quote really go, 
   const lure = "https://lure.example/win";
   const view = openPage(t, {
     destinations: [general, friends],
-    text: `Security notice [x.com/settings/security](${phish}) and _new_`,
+    text: `Security notice [x.com/settings/security](${phish}) and _new_ at https://example.com/notes`,
     quote: `Claim it [x.com/rewards](${lure}) today\nSecond line`
   });
 
@@ -389,7 +391,8 @@ test("the preview shows where masked links in the post and the quote really go, 
     assert.equal(link.title, href, "hovering shows the full destination");
     assert.match(accessibleName(link), new RegExp(`\\(${new URL(href).host.replace(".", "\\.")}\\)$`), "the link names the host it opens");
   }
-  assert.equal(preview.querySelector('a[href="https://x.com/alice/status/1234567890"]').textContent, postUrl, "a bare URL is shown as itself, with no host suffix");
+  assert.equal(preview.querySelector('a[href="https://example.com/notes"]')?.textContent, "https://example.com/notes", "a bare URL is shown as itself, with no host suffix");
+  assert.match(accessibleName(preview.querySelector(`a[href="${postUrl}"]`)), /\(x\.com\)$/, "the Open on X link names the host it opens");
   assert.equal(leafWithText(preview, "new")?.tagName, "EM", "italics in the post text render as italics");
 
   const lines = renderedLines(view, preview);
