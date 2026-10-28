@@ -71,6 +71,7 @@ function createUiHarness({ destinations = [], alwaysShowPreview = true } = {}) {
   runInNewContext(`${uiSource}
 injectDiscordShareMenuItem = (menu) => __calls.injected.push(menu);
 runShare = async (...args) => __calls.runShares.push(args);
+trackShareButton = () => () => null;
 this.exports = {
   installShareMenuIntegration,
   scanShareMenus,

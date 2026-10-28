@@ -75,7 +75,8 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     };
   }
 
-  const returnFocus = () => returnFocusToPost(article, anchor);
+  const findAnchor = trackShareButton(article, anchor);
+  const returnFocus = () => returnFocusToPost(findAnchor);
 
   function closeAndReturnFocus() {
     closeDestinationMenu();
@@ -212,7 +213,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
     }
   }
 
-  const lifecycle = showPanel(panel, { findAnchor: () => currentShareButton(article, anchor), returnFocus });
+  const lifecycle = showPanel(panel, { findAnchor, returnFocus });
   loadPreview();
 }
 

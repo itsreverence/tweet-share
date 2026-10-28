@@ -145,8 +145,8 @@ const shareItems = ({ document }) =>
 const toast = ({ document }, state) => document.querySelector(`.tds-toast[data-state="${state}"]`);
 const toasts = ({ document }, state) => [...document.querySelectorAll(`.tds-toast[data-state="${state}"]`)];
 
-async function openShareMenu(view) {
-  click(view, view.document.querySelector('[data-testid="share"]'));
+async function openShareMenu(view, share = view.document.querySelector('[data-testid="share"]')) {
+  click(view, share);
   const layer = view.document.createElement("div");
   layer.innerHTML = '<div role="menu"><div role="menuitem"><svg><path d="M1"/></svg><span>Copy link</span></div></div>';
   view.document.body.append(layer);
@@ -175,8 +175,8 @@ const sentStatusIds = (requests) =>
       .flatMap((url) => /\/status\/(\d+)/.exec(url)?.[1] ?? [])
   );
 
-async function openPreview(view) {
-  const [item] = await openShareMenu(view);
+async function openPreview(view, share) {
+  const [item] = await openShareMenu(view, share);
   click(view, item);
   const menu = await waitFor(() => sharePanel(view), "the Share to Discord preview");
   await waitFor(() => {
@@ -514,6 +514,11 @@ test("Escape closes the panel and returns focus to the post's Share button", asy
   assert.equal(view.document.activeElement, view.document.querySelector('[data-testid="share"]'), "focus is back on Share");
 });
 
+// jsdom has no layout, so a test that cares where a control is gives it a box, as the browser would.
+const placeAt = (node, top, left = 0, size = 34) => {
+  node.getBoundingClientRect = () => new node.ownerDocument.defaultView.DOMRect(left, top, size, size);
+};
+
 const rerenders = [
   ["X re-renders the post", ({ document }) => {
     const article = document.querySelector("article");
@@ -550,10 +555,54 @@ for (const [what, rerender] of rerenders) {
   });
 }
 
-// jsdom has no layout, so a test that cares where a control is gives it a box, as the browser would.
-const placeAt = (node, top, left = 0, size = 34) => {
-  node.getBoundingClientRect = () => new node.ownerDocument.defaultView.DOMRect(left, top, size, size);
-};
+// The shared copy sits in view; the same post appears again far up the timeline, first in the page.
+function pageWithTwoCopies({ document }) {
+  const shared = document.querySelector("article");
+  const other = shared.cloneNode(true);
+  shared.before(other);
+  const shareOf = (article) => article.querySelector('[data-testid="share"]');
+  placeAt(shareOf(shared), 300, 800);
+  for (const control of other.querySelectorAll("a, button")) placeAt(control, -2000, 800);
+  return { shared, other, shareOf };
+}
+
+for (const [where, otherTop] of [["far out of view", -2000], ["also in view", 500]]) {
+  test(`when X re-renders the shared copy of a post whose other copy is ${where}, the panel and focus stay with the shared copy`, async (t) => {
+    const view = openPage(t, { destinations: [general, friends] });
+    const { shared, other, shareOf } = pageWithTwoCopies(view);
+    for (const control of other.querySelectorAll("a, button")) placeAt(control, otherTop, 800);
+    const panel = await openPreview(view, shareOf(shared));
+
+    const rerendered = shared.cloneNode(true);
+    shared.replaceWith(rerendered);
+    placeAt(shareOf(rerendered), 300, 800);
+    view.window.dispatchEvent(new view.window.Event("resize"));
+    const top = parseFloat(panel.style.top);
+    assert.ok(Math.abs(top - 300) < Math.abs(top - otherTop), `the panel stays by the shared copy (top ${top})`);
+
+    press(view, "Escape");
+    assert.equal(view.document.activeElement, shareOf(rerendered), "focus is on the shared copy's new Share button");
+  });
+}
+
+for (const [where, top, expected] of [
+  ["far out of view", -2000, "a control in view"],
+  ["in view", 500, "the other copy's Share button"]
+]) {
+  test(`when the shared copy is gone and the post's other copy is ${where}, Escape focuses ${expected}`, async (t) => {
+    const view = openPage(t, { destinations: [general, friends] });
+    const { shared, other, shareOf } = pageWithTwoCopies(view);
+    const inView = view.document.createElement("a");
+    inView.href = "/home";
+    view.document.querySelector("main").prepend(inView);
+    for (const control of other.querySelectorAll("a, button")) placeAt(control, top, 800);
+    await openPreview(view, shareOf(shared));
+
+    shared.remove();
+    press(view, "Escape");
+    assert.equal(view.document.activeElement, top < 0 ? inView : shareOf(other), expected);
+  });
+}
 
 // X has closed its share menu by now, as it does on the Escape the userscript sends when it takes over.
 function removePost({ document }) {

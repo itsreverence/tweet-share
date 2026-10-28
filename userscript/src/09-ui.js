@@ -44,8 +44,9 @@ async function runShare(article, destinationId, options = {}, preparedTweet = nu
 async function startDiscordShare(article, anchor) {
   const [destinations, preferences] = await Promise.all([getDestinations(), loadPreferences()]);
   if (destinations.length === 0) {
+    const findPostShareButton = trackShareButton(article, anchor);
     closeXOverlay();
-    openSettingsModal(() => returnFocusToPost(article, anchor));
+    openSettingsModal(() => returnFocusToPost(findPostShareButton));
     return;
   }
 
@@ -72,13 +73,31 @@ function findShareButton(root) {
 }
 
 // X can re-render a post while the panel or settings are open, which replaces its Share button.
-function currentShareButton(article, anchor) {
-  if (anchor.isConnected) return anchor;
+// Returns a finder for the post's current Share button, which remembers where the button last was.
+function trackShareButton(article, anchor) {
   const postUrl = tweetUrlFromArticle(article);
-  const post = article.isConnected
-    ? article
-    : [...document.querySelectorAll("article")].find((candidate) => tweetUrlFromArticle(candidate) === postUrl);
-  return post ? findShareButton(post) : null;
+  let lastRect = anchor.getBoundingClientRect();
+  return () => {
+    const button = anchor.isConnected ? anchor
+      : article.isConnected ? findShareButton(article)
+        : nearestShareButtonCopy(postUrl, lastRect);
+    if (button) lastRect = button.getBoundingClientRect();
+    return button;
+  };
+}
+
+// The same post can be on the page twice, as in a repost far down the timeline. Only a copy where the
+// Share button last was, or one in view, can stand in for it, so focusing it never jumps the page.
+function nearestShareButtonCopy(postUrl, lastRect) {
+  const viewport = visibleViewport();
+  const distance = ({ rect }) => Math.hypot(rect.x - lastRect.x, rect.y - lastRect.y);
+  return [...document.querySelectorAll("article")]
+    .filter((candidate) => !candidate.closest(`.${POPOVER_CLASS}`) && tweetUrlFromArticle(candidate) === postUrl)
+    .map(findShareButton)
+    .filter(Boolean)
+    .map((button) => ({ button, rect: button.getBoundingClientRect() }))
+    .filter(({ rect }) => rectsOverlap(rect, lastRect) || rectsOverlap(rect, viewport))
+    .sort((a, b) => distance(a) - distance(b))[0]?.button ?? null;
 }
 
 const FOCUSABLE_SELECTOR = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
@@ -104,8 +123,8 @@ function focusFallbackControl() {
   main.focus({ preventScroll: true });
 }
 
-function returnFocusToPost(article, anchor) {
-  if (!focusIfAble(currentShareButton(article, anchor))) focusFallbackControl();
+function returnFocusToPost(findPostShareButton) {
+  if (!focusIfAble(findPostShareButton())) focusFallbackControl();
 }
 
 function captureShareArticle(event) {
