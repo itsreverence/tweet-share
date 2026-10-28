@@ -2561,29 +2561,34 @@ function findShareButton(root) {
 }
 
 // X can re-render a post while the panel or settings are open, which replaces its Share button.
-// The finder remembers where the button last was, to tell copies of the post apart.
+// The finder remembers where on the page the button last was, to tell copies of the post apart.
 function trackShareButton(article, anchor) {
   const postUrl = tweetUrlFromArticle(article);
-  let lastRect = anchor.getBoundingClientRect();
+  let lastRect = toPageRect(anchor.getBoundingClientRect());
   return () => {
     const button = anchor.isConnected ? anchor
       : article.isConnected ? findShareButton(article)
         : nearestShareButtonCopy(postUrl, lastRect);
-    if (button) lastRect = button.getBoundingClientRect();
+    if (button) lastRect = toPageRect(button.getBoundingClientRect());
     return button;
   };
+}
+
+// Scrolling the page moves a rect in the viewport, so another copy of the post can scroll into where Share was.
+function toPageRect({ x, y, width, height }) {
+  return new DOMRect(x + window.scrollX, y + window.scrollY, width, height);
 }
 
 // The same post can be on the page twice, as in a repost. Only a copy where the Share button last was,
 // or one in view, can stand in for it, so focusing it never jumps the page.
 function nearestShareButtonCopy(postUrl, lastRect) {
-  const viewport = visibleViewport();
+  const viewport = toPageRect(visibleViewport());
   const distance = ({ rect }) => Math.hypot(rect.x - lastRect.x, rect.y - lastRect.y);
   return [...document.querySelectorAll("article")]
     .filter((candidate) => !candidate.closest(`.${POPOVER_CLASS}`) && tweetUrlFromArticle(candidate) === postUrl)
     .map(findShareButton)
     .filter(Boolean)
-    .map((button) => ({ button, rect: button.getBoundingClientRect() }))
+    .map((button) => ({ button, rect: toPageRect(button.getBoundingClientRect()) }))
     .filter(({ rect }) => rectsOverlap(rect, lastRect) || rectsOverlap(rect, viewport))
     .sort((a, b) => distance(a) - distance(b))[0]?.button ?? null;
 }

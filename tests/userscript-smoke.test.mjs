@@ -630,6 +630,25 @@ test("when X re-renders the shared copy after the page scrolled it out of view, 
   assert.equal(view.document.activeElement, shareOf(rerendered), "the copy where Share last was stands in for it, in view or not");
 });
 
+test("when the page scrolls the post's other copy to where Share was and X then re-renders the shared copy, Escape focuses the shared copy's new Share button", async (t) => {
+  const view = openPage(t, { destinations: [general, friends] });
+  const shared = view.document.querySelector("article");
+  const other = shared.cloneNode(true);
+  shared.after(other);
+  const shareOf = (article) => article.querySelector('[data-testid="share"]');
+  placeAt(shareOf(shared), 300, 800);
+  placeAt(shareOf(other), 1200, 1000);
+  await openPreview(view, shareOf(shared));
+
+  Object.assign(view.window, { scrollX: 200, scrollY: 900 });
+  placeAt(shareOf(other), 300, 800);
+  const rerendered = shared.cloneNode(true);
+  shared.replaceWith(rerendered);
+  placeAt(shareOf(rerendered), -600, 600);
+  press(view, "Escape");
+  assert.equal(view.document.activeElement, shareOf(rerendered), "focus is on the shared copy, not the copy the page scrolled into its old place");
+});
+
 for (const [where, top, expected] of [
   ["far out of view", -2000, "a control in view"],
   ["in view", 500, "the other copy's Share button"]
