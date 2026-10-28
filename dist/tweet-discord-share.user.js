@@ -1993,7 +1993,9 @@ function placePanel({ anchorRect, panelSize, viewport }) {
 }
 
 // The panel is measured with none of a sheet's styles, which change its width and border.
+// Measured at full height, the panel and its preview lose where they were scrolled to, so that is put back.
 function positionPopover(panel, anchorRect) {
+  const scrolled = [panel, ...panel.children].map((node) => [node, node.scrollTop]);
   panel.style.maxHeight = "";
   panel.style.width = "";
   panel.classList.remove(`${POPOVER_CLASS}--sheet`);
@@ -2008,6 +2010,7 @@ function positionPopover(panel, anchorRect) {
   panel.style.left = `${placement.left}px`;
   panel.style.width = placement.width === undefined ? "" : `${placement.width}px`;
   panel.style.maxHeight = `${placement.maxHeight}px`;
+  for (const [node, scrollTop] of scrolled) node.scrollTop = scrollTop;
 }
 
 // Escape is the panel's only while focus is in it, on its Share button, or nowhere, so Escape elsewhere on X is left alone.
