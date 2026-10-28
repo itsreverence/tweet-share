@@ -18,19 +18,11 @@ function loadFormatContext() {
     performance: { getEntriesByType: () => [] },
     document: { querySelectorAll: () => [] }
   };
-  runInNewContext(`${code}\nthis.exports = {\n  buildDiscordPayloads,\n  countEmbedChars,\n  discordEmbedTimestamp,\n  packEmbedsIntoMessages,\n  hasQuoteTweet,\n  rebalanceEmbedsForCharBudget,\n  truncate\n};`, context);
+  runInNewContext(`${code}\nthis.exports = { buildDiscordPayloads, discordEmbedTimestamp, packEmbedsIntoMessages, hasQuoteTweet, truncate };`, context);
   return context.exports;
 }
 
-const {
-  buildDiscordPayloads,
-  countEmbedChars,
-  discordEmbedTimestamp,
-  packEmbedsIntoMessages,
-  hasQuoteTweet,
-  rebalanceEmbedsForCharBudget,
-  truncate
-} = loadFormatContext();
+const { buildDiscordPayloads, discordEmbedTimestamp, packEmbedsIntoMessages, hasQuoteTweet, truncate } = loadFormatContext();
 
 const sampleTweet = {
   url: "https://x.com/alice/status/1",
@@ -352,55 +344,6 @@ test("packEmbedsIntoMessages respects the 6000 character budget", () => {
     assert.ok(total <= 6000, `message has ${total} embed chars, Discord allows 6000`);
     assert.ok(group.length <= 10, `message has ${group.length} embeds, Discord allows 10`);
   }
-});
-
-test("rebalanceEmbedsForCharBudget splits fields when one embed exceeds 6000 chars", () => {
-  const embed = {
-    color: 1942002,
-    author: { name: "Alice" },
-    description: "Main tweet with a quoted post attached inline.",
-    fields: Array.from({ length: 8 }, (_, index) => ({
-      name: `Field ${index + 1}`,
-      value: "x".repeat(900),
-      inline: false
-    }))
-  };
-
-  const expectedFields = structuredClone(embed.fields);
-  const rebalanced = rebalanceEmbedsForCharBudget([embed]);
-  assert.ok(rebalanced.length >= 2);
-  for (const part of rebalanced) {
-    assert.ok(countEmbedChars(part) <= 6000);
-  }
-  assert.deepEqual(
-    rebalanced.flatMap((part) => part.fields || []),
-    expectedFields,
-    "every field survives the split, in order"
-  );
-});
-
-test("rebalanceEmbedsForCharBudget keeps field order when a later field would still fit", () => {
-  const embed = {
-    color: 1942002,
-    author: { name: "Alice" },
-    description: "d".repeat(4096),
-    fields: [
-      { name: "Quoted post", value: "q".repeat(900), inline: false },
-      { name: "Original post", value: "o".repeat(1024), inline: false },
-      { name: "More images", value: "m".repeat(100), inline: false }
-    ]
-  };
-
-  const expectedFields = structuredClone(embed.fields);
-  const rebalanced = rebalanceEmbedsForCharBudget([embed]);
-  for (const part of rebalanced) {
-    assert.ok(countEmbedChars(part) <= 6000, `part has ${countEmbedChars(part)} embed chars, Discord allows 6000`);
-  }
-  assert.deepEqual(
-    rebalanced.flatMap((part) => part.fields || []),
-    expectedFields,
-    "every field survives the split unchanged, in its original order across the primary and continued embeds"
-  );
 });
 
 test("a post's first photo sits on its card and the next on a same-url embed that Discord merges into a grid", () => {

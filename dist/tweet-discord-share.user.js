@@ -834,56 +834,6 @@ function countEmbedChars(embed) {
   return total;
 }
 
-function rebalanceEmbedFields(embed, maxChars = DISCORD_EMBED_LIMITS.totalEmbedChars) {
-  if (countEmbedChars(embed) <= maxChars) return [embed];
-
-  const fields = [...(embed.fields || [])];
-  if (!fields.length) return [embed];
-
-  const base = { ...embed };
-  delete base.fields;
-  const kept = [];
-  const spilled = [];
-
-  for (const field of fields) {
-    const trial = pruneEmbed({ ...base, fields: [...kept, field] });
-    if (!spilled.length && countEmbedChars(trial) <= maxChars) {
-      kept.push(field);
-    } else {
-      spilled.push(field);
-    }
-  }
-
-  const primary = pruneEmbed(kept.length ? { ...embed, fields: kept } : base);
-  if (!spilled.length) return [primary];
-
-  const spillEmbeds = [];
-  let batch = [];
-  for (const field of spilled) {
-    const trial = pruneEmbed({ color: embed.color, fields: [...batch, field] });
-    if (countEmbedChars(trial) <= maxChars || !batch.length) {
-      batch.push(field);
-    } else {
-      spillEmbeds.push(pruneEmbed({ color: embed.color, fields: batch }));
-      batch = [field];
-    }
-  }
-  if (batch.length) spillEmbeds.push(pruneEmbed({ color: embed.color, fields: batch }));
-
-  const parts = [primary, ...spillEmbeds].filter((part) => countEmbedChars(part) > 0);
-  return parts.map((part, index) => {
-    if (index === 0) return part;
-    return pruneEmbed({
-      ...part,
-      title: truncate(`Continued (${index + 1}/${parts.length})`, DISCORD_EMBED_LIMITS.title)
-    });
-  });
-}
-
-function rebalanceEmbedsForCharBudget(embeds, maxChars = DISCORD_EMBED_LIMITS.totalEmbedChars) {
-  return embeds.flatMap((embed) => rebalanceEmbedFields(embed, maxChars));
-}
-
 function pruneEmbed(embed) {
   const next = { ...embed };
   for (const key of Object.keys(next)) {
@@ -976,7 +926,7 @@ function cardEmbeds(card) {
       footer: index === last ? card.footer : undefined
     })
   );
-  const [first, ...rest] = rebalanceEmbedsForCharBudget(textEmbeds);
+  const [first, ...rest] = textEmbeds;
   // Discord merges embeds that share the first one's url into a grid of up to four images inside it.
   const photos = gallery.map((url) => pruneEmbed({ color: card.color, url: card.url, image: { url } }));
   return [first, ...photos, ...rest];
