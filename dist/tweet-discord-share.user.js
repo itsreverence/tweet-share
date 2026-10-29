@@ -935,21 +935,26 @@ function cardEmbeds(card) {
   return [[first, ...firstGrid], ...moreGrids, ...rest.map((embed) => [embed])];
 }
 
-// Files upload with the first message, so only its embeds can show them. A photo packed into a
-// later message links its source instead, and its file stays off the first message so Discord
-// does not show it there as well.
+function shareMessages(tweet, options) {
+  return packEmbedsIntoMessages(shareCards(tweet, options).flatMap(cardEmbeds));
+}
+
+// Files upload with the first message, so only the photos it shows, and every video, are worth downloading. A photo
+// packed into a later message links its source instead.
+function uploadCandidateUrls(tweet, options = {}) {
+  const [first] = shareMessages(tweet, options);
+  const shown = new Set(first.map((embed) => embed.image?.url).filter(Boolean).map(mediaUrlIdentity));
+  return collectMediaAttachmentUrls(tweet, options).filter((url) => isPlayableTweetVideoUrl(url) || shown.has(mediaUrlIdentity(url)));
+}
+
 function assignUploads(messages, attachments) {
   const fileFor = (url) => url && attachments.find((file) => mediaUrlIdentity(file.sourceUrl) === mediaUrlIdentity(url));
   const [first, ...later] = messages;
-  const linkedLater = new Set(later.flat().map((embed) => fileFor(embed.image?.url)).filter(Boolean));
   const firstWithUploads = first.map((embed) => {
     const file = fileFor(embed.image?.url);
     return file ? { ...embed, image: { url: `attachment://${file.filename}` } } : embed;
   });
-  return {
-    messages: [firstWithUploads, ...later],
-    files: attachments.filter((file) => !linkedLater.has(file)).map((file) => file.filename)
-  };
+  return { messages: [firstWithUploads, ...later], files: attachments.map((file) => file.filename) };
 }
 
 // Same-url embeds only merge within one message, so each group of embeds moves to the next message whole.
@@ -1025,7 +1030,7 @@ function buildEmbedDiscordPayloads(tweet, options = {}) {
   const allVideoEntries = collectShareVideoEntries(tweet, options);
   const fallbackVideoUrlSet = new Set(options.fallbackVideoUrls ?? allVideoEntries.map((entry) => entry.url));
   const videoEntries = allVideoEntries.filter((entry) => fallbackVideoUrlSet.has(entry.url));
-  const packed = packEmbedsIntoMessages(shareCards(tweet, options).flatMap(cardEmbeds));
+  const packed = shareMessages(tweet, options);
   const { messages: groups, files } = assignUploads(packed, options.attachments || []);
 
   const messages = groups.map((group, index) =>
@@ -1625,7 +1630,7 @@ async function shareToDestination(destinationId, tweet, options = {}) {
   }));
   const uploadedCount = messages.reduce((count, message) => count + message.files.length, 0);
 
-  if (resolved.skipped.length > 0 && attachments.length === 0) {
+  if (resolved.skipped.length > 0 && uploadedCount === 0) {
     const skippedSummary = summarizeSkippedMedia(resolved.skipped);
     showToast(`Media could not upload (${skippedSummary}); sent available fallback content.`, "info");
   }
@@ -4230,7 +4235,7 @@ function summarizeSkippedMedia(skipped = []) {
 }
 
 function collectMediaAttachmentItems(tweet, shareOptions = {}) {
-  const urls = collectMediaAttachmentUrls(tweet, shareOptions);
+  const urls = uploadCandidateUrls(tweet, shareOptions);
   const mediaByUrl = new Map();
 
   function addMedia(post) {

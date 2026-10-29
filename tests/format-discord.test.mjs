@@ -18,11 +18,11 @@ function loadFormatContext() {
     performance: { getEntriesByType: () => [] },
     document: { querySelectorAll: () => [] }
   };
-  runInNewContext(`${code}\nthis.exports = { buildDiscordPayloads, buildPlainFallbackPayloads, discordEmbedTimestamp, packEmbedsIntoMessages, hasQuoteTweet, truncate };`, context);
+  runInNewContext(`${code}\nthis.exports = { buildDiscordPayloads, buildPlainFallbackPayloads, discordEmbedTimestamp, packEmbedsIntoMessages, hasQuoteTweet, truncate, uploadCandidateUrls };`, context);
   return context.exports;
 }
 
-const { buildDiscordPayloads, buildPlainFallbackPayloads, discordEmbedTimestamp, packEmbedsIntoMessages, hasQuoteTweet, truncate } = loadFormatContext();
+const { buildDiscordPayloads, buildPlainFallbackPayloads, discordEmbedTimestamp, packEmbedsIntoMessages, hasQuoteTweet, truncate, uploadCandidateUrls } = loadFormatContext();
 
 const sampleTweet = {
   url: "https://x.com/alice/status/1",
@@ -655,6 +655,34 @@ test("photos past a card's first four form further grids of four under urls of t
   assert.equal([...grids.keys()][0], sampleTweet.url, "the first grid is the card's");
   assert.ok([...grids.keys()].every((url, index) => index === 0 || url.startsWith(`${sampleTweet.url}#`)), "later grids tag the post's url");
   assert.equal(embeds.filter((embed) => embed.author).length, 1, "only the card names the author");
+});
+
+test("only the first message's photos and every video are upload candidates, and later messages link their photos", () => {
+  const mainPhoto = "https://pbs.twimg.com/media/main1.jpg";
+  const quoteVideo = "https://video.twimg.com/ext_tw_video/2/pu/vid/1280x720/quote.mp4";
+  const quotePhotos = ["q1", "q2", "q3"].map((name) => `https://pbs.twimg.com/media/${name}.jpg`);
+  const tweet = {
+    ...sampleTweet,
+    text: `${"Long post. ".repeat(800)}end`,
+    media: [{ type: "image", url: mainPhoto }],
+    quote: {
+      url: "https://x.com/bob/status/2",
+      author: { displayName: "Bob", username: "bob" },
+      text: "Quoted",
+      media: [...quotePhotos.map((url) => ({ type: "image", url })), { type: "video", url: quoteVideo }]
+    }
+  };
+
+  assert.deepEqual(Array.from(uploadCandidateUrls(tweet)), [mainPhoto, quoteVideo], "the quote's photos land in a later message, so they are not downloaded");
+  assert.deepEqual(Array.from(uploadCandidateUrls(tweet, { includeQuote: false })), [mainPhoto]);
+
+  const attachments = [{ filename: "media_0.jpg", sourceUrl: mainPhoto }, { filename: "media_1.mp4", sourceUrl: quoteVideo }];
+  const payloads = buildDiscordPayloads(tweet, { attachments, fallbackVideoUrls: [] });
+  assert.ok(payloads.length >= 2, "the share spans messages");
+  assert.deepEqual(Array.from(payloads[0]._files), ["media_0.jpg", "media_1.mp4"], "the first message uploads both files");
+  assert.equal(payloads[0].embeds[0].image.url, "attachment://media_0.jpg");
+  assert.deepEqual(Array.from(payloads.slice(1).flatMap(embedImageUrls)), quotePhotos, "later messages link the quote's photos from their source");
+  assert.ok(payloads.slice(1).every((payload) => payload._files === undefined), "later messages upload nothing");
 });
 
 test("video, images, and quote media stay in order with no photo labels", () => {

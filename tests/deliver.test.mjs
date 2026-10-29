@@ -256,6 +256,76 @@ test("partial video success uploads resolved media and retains skipped link once
   assert.doesNotMatch(JSON.stringify(calls.multipart[0].payload), /main\.mp4|skipped\.mp4|Plays below/);
 });
 
+const quoteWithPhotosAndVideo = (videoUrl) => ({
+  url: "https://x.com/alice/status/3",
+  author: { displayName: "Alice", username: "alice" },
+  text: `${"Long post. ".repeat(800)}end`,
+  media: [],
+  quote: {
+    url: "https://x.com/bob/status/2",
+    author: { displayName: "Bob", username: "bob" },
+    text: "Quoted",
+    media: [
+      { type: "image", url: "https://pbs.twimg.com/media/q1.jpg" },
+      { type: "image", url: "https://pbs.twimg.com/media/q2.jpg" },
+      { type: "image", url: "https://pbs.twimg.com/media/q3.jpg" },
+      { type: "video", url: videoUrl }
+    ]
+  }
+});
+
+test("photos that a later message links are never downloaded, so they cannot spend the upload budget", async () => {
+  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
+  await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
+  const fetched = [];
+
+  await shareToDestination("main", quoteWithPhotosAndVideo(mainVideoUrl), {
+    fetchMediaSize: () => 10 * 1024 * 1024 - 5,
+    fetchMediaBytes(url) {
+      fetched.push(url);
+      return { byteLength: /\.mp4/.test(url) ? 10 * 1024 * 1024 - 5 : 5 * 1024 * 1024 };
+    }
+  });
+
+  assert.deepEqual(fetched, [mainVideoUrl], "only the video is downloaded");
+  assert.equal(calls.multipart.length, 1, "the video uploads with the first message");
+  assert.deepEqual(Array.from(calls.multipart[0].files, (file) => file.contentType), ["video/mp4"]);
+  const linked = calls.requests.flatMap((entry) => (entry.body.embeds || []).map((embed) => embed.image?.url)).filter(Boolean);
+  assert.deepEqual(linked, ["https://pbs.twimg.com/media/q1.jpg", "https://pbs.twimg.com/media/q2.jpg", "https://pbs.twimg.com/media/q3.jpg"], "the later message links the quote's photos");
+  assert.equal(calls.toasts.length, 0, "nothing was skipped, so there is nothing to report");
+});
+
+test("a video that cannot upload is reported even when no file uploads at all", async () => {
+  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
+  await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
+
+  await shareToDestination("main", quoteWithPhotosAndVideo(skippedVideoUrl), {
+    fetchMediaSize: () => 15 * 1024 * 1024,
+    fetchMediaBytes: () => ({ byteLength: 15 * 1024 * 1024 })
+  });
+
+  assert.equal(calls.multipart.length, 0, "nothing uploads");
+  assert.ok(calls.requests.at(-1).body.content.includes(skippedVideoUrl), "the video follows as a link");
+  assert.deepEqual(calls.toasts.map((toast) => toast.message), ["Media could not upload (1 too large); sent available fallback content."]);
+});
+
+test("a photo skipped for the upload budget keeps its link, and the toast counts what uploaded", async () => {
+  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
+  await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
+  const photos = ["a", "b", "c"].map((name) => `https://pbs.twimg.com/media/${name}.jpg`);
+
+  await shareToDestination("main", { ...sampleTweet, media: photos.map((url) => ({ type: "image", url })) }, {
+    includeQuote: false,
+    fetchMediaBytes: () => ({ byteLength: 9 * 1024 * 1024 })
+  });
+
+  assert.equal(calls.multipart.length, 1);
+  assert.deepEqual(Array.from(calls.multipart[0].files, (file) => file.filename), ["media_0.jpg", "media_1.jpg"], "two photos fit the 24 MiB request budget");
+  const shown = Array.from(calls.multipart[0].payload.embeds, (embed) => embed.image.url);
+  assert.deepEqual(shown, ["attachment://media_0.jpg", "attachment://media_1.jpg", photos[2]], "the third photo stays a link in the same card");
+  assert.deepEqual(calls.toasts.map((toast) => toast.message), ["Uploaded 2 files; 1 too large."]);
+});
+
 test("multipart network failure is surfaced without an automatic JSON retry", async () => {
   const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext({
     multipartError: new Error("ambiguous network failure")

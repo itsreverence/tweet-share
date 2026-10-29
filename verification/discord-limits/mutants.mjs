@@ -141,14 +141,10 @@ const mutants = [
     expect: PRESERVES
   },
   {
-    name: "a later message names an attachment:// file that only the first message uploads",
+    name: "the upload plan lists the photos of every message, not only the first",
     file: "05-format-discord.js",
-    find: "messages: [firstWithUploads, ...later],",
-    replace:
-      "messages: [firstWithUploads, ...later.map((group) => group.map((embed) => {\n" +
-      "      const file = fileFor(embed.image?.url);\n" +
-      "      return file ? { ...embed, image: { url: `attachment://${file.filename}` } } : embed;\n" +
-      "    }))],",
+    find: "const [first] = shareMessages(tweet, options);",
+    replace: "const first = shareMessages(tweet, options).flat();",
     expect: PHOTO_ONCE
   },
   {
@@ -159,10 +155,10 @@ const mutants = [
     expect: PHOTO_ONCE
   },
   {
-    name: "a file whose photo a later message links still uploads with the first",
-    file: "05-format-discord.js",
-    find: "files: attachments.filter((file) => !linkedLater.has(file)).map((file) => file.filename)",
-    replace: "files: attachments.map((file) => file.filename)",
+    name: "delivery downloads every photo, not only the ones the first message shows",
+    file: "13-media-fetch.js",
+    find: "const urls = uploadCandidateUrls(tweet, shareOptions);",
+    replace: "const urls = collectMediaAttachmentUrls(tweet, shareOptions);",
     expect: PHOTO_ONCE
   },
   {

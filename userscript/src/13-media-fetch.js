@@ -97,7 +97,7 @@ function summarizeSkippedMedia(skipped = []) {
 }
 
 function collectMediaAttachmentItems(tweet, shareOptions = {}) {
-  const urls = collectMediaAttachmentUrls(tweet, shareOptions);
+  const urls = uploadCandidateUrls(tweet, shareOptions);
   const mediaByUrl = new Map();
 
   function addMedia(post) {

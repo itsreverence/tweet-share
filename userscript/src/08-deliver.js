@@ -41,7 +41,7 @@ async function shareToDestination(destinationId, tweet, options = {}) {
   }));
   const uploadedCount = messages.reduce((count, message) => count + message.files.length, 0);
 
-  if (resolved.skipped.length > 0 && attachments.length === 0) {
+  if (resolved.skipped.length > 0 && uploadedCount === 0) {
     const skippedSummary = summarizeSkippedMedia(resolved.skipped);
     showToast(`Media could not upload (${skippedSummary}); sent available fallback content.`, "info");
   }
