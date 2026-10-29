@@ -240,8 +240,7 @@ const tweetWithMarkedQuote = fc
       quote: { ...quote, url: quote.url.replace("https://x.com/", "https://twitter.com/"), text: value }
     }))
   )
-  .map(withDistinctMediaIds)
-  .filter((t) => t.quote.text || mediaItems(t.quote).length > 0);
+  .map(withDistinctMediaIds);
 const tweetWithShareableImages = tweetOf(twimgImageItem);
 // Extraction sometimes gives the main post a quoted post's photo as well, so a quote can repeat a photo the main post shows.
 const tweetWithRepeatedPhoto = tweetWithShareableImages

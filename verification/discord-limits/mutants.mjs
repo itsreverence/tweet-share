@@ -270,6 +270,13 @@ const mutants = [
     expect: QUOTE_ONLY_WHEN_INCLUDED
   },
   {
+    name: "a quoted post with only a permalink is dropped",
+    file: "05-format-discord.js",
+    find: "return Boolean(hasQuoteCandidate(tweet) || quote.text || mediaLinks(quote).length > 0);",
+    replace: "return Boolean(quote.text || mediaLinks(quote).length > 0);",
+    expect: QUOTE_ONLY_WHEN_INCLUDED
+  },
+  {
     name: "multipart uploads send an empty payload_json",
     file: "01-http.js",
     find: 'formData.append("payload_json", JSON.stringify(payloadJson || {}));',

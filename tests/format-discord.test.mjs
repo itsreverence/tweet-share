@@ -117,6 +117,18 @@ test("the content is one small link to the post, and the quoted post's link ends
   assert.equal(quoteField.value, `> Quoted text\n${viewQuotedPost(tweet.quote.url)}`);
 });
 
+test("a quoted post with only a permalink keeps its View quoted post link", () => {
+  const tweet = {
+    ...sampleTweet,
+    quote: { url: "https://x.com/bob/status/2", author: { displayName: "Bob", username: "bob" }, text: "", media: [] }
+  };
+
+  assert.equal(hasQuoteTweet(tweet), true);
+  const quoteField = buildDiscordPayloads(tweet)[0].embeds[0].fields.find((field) => field.name === "Quoting Bob (@bob)");
+  assert.equal(quoteField.value, viewQuotedPost(tweet.quote.url));
+  assert.equal(buildDiscordPayloads(tweet, { includeQuote: false })[0].embeds[0].fields, undefined, "excluding the quote drops the link");
+});
+
 test("webhook sender is branded while the embed shows the tweet author once", () => {
   const payloads = buildDiscordPayloads(sampleTweet, { includeQuote: false });
   assert.equal(payloads[0].username, "Tweet Share");

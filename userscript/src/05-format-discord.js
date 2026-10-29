@@ -406,10 +406,9 @@ function hasQuoteCandidate(tweet) {
 }
 
 function hasQuoteTweet(tweet) {
-  if (!tweet?.quote) return false;
-  const quote = tweet.quote;
-  const distinctUrl = hasQuoteCandidate(tweet);
-  return Boolean((distinctUrl || quote.text || mediaLinks(quote).length > 0) && (quote.text || mediaLinks(quote).length > 0));
+  const quote = tweet?.quote;
+  if (!quote) return false;
+  return Boolean(hasQuoteCandidate(tweet) || quote.text || mediaLinks(quote).length > 0);
 }
 
 function buildDiscordPayloads(tweet, options = {}) {
