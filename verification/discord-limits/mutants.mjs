@@ -180,7 +180,10 @@ const mutants = [
         "author: isQuote ? embedAuthorBlock(post, `Quoting ${label}`, post.url) : embedAuthorBlock(post, label, profileUrl),",
         "author: isQuote ? embedAuthorBlock(post, `Quoting ${label}`) : embedAuthorBlock(post, label, profileUrl),"
       ],
-      ["url: post.url || \"\"", "url: isQuote ? \"\" : post.url || \"\""]
+      [
+        "const quoteUrl = tweet.quote.url && tweet.quote.url !== url ? tweet.quote.url : gridUrl(url, \"quote\");",
+        "const quoteUrl = gridUrl(url, \"quote\");"
+      ]
     ],
     expect: QUOTE_ONLY_WHEN_INCLUDED
   },
@@ -236,8 +239,8 @@ const mutants = [
   {
     name: "embed shares drop an included quoted post",
     file: "05-format-discord.js",
-    find: "if (shareOptions.includeQuote === false || !hasQuoteTweet(tweet)) return [postCard(tweet, \"main\", { images })];",
-    replace: "return [postCard(tweet, \"main\", { images })];",
+    find: "if (shareOptions.includeQuote === false || !hasQuoteTweet(tweet)) return [postCard(tweet, \"main\", { images, url })];",
+    replace: "return [postCard(tweet, \"main\", { images, url })];",
     expect: QUOTE_ONLY_WHEN_INCLUDED
   },
   {

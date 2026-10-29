@@ -878,7 +878,13 @@ function cardPhotoUrls(post, alreadyShown = []) {
   return urls;
 }
 
-function postCard(post, kind, { images, fields = [] }) {
+// Discord merges the embeds of a message that share a url into one grid of up to four images, so every grid in a
+// share needs a url of its own. A tag turns one url into another that opens the same post.
+function gridUrl(base, tag) {
+  return base ? `${base}${base.includes("#") ? "-" : "#"}${tag}` : "";
+}
+
+function postCard(post, kind, { images, fields = [], url }) {
   const isQuote = kind === "quote";
   const label = authorLabel(post);
   const profileUrl = post.author?.username ? `https://x.com/${post.author.username}` : undefined;
@@ -892,20 +898,22 @@ function postCard(post, kind, { images, fields = [] }) {
     images,
     date: discordEmbedTimestamp(post.createdAt),
     footer: { text: "X" },
-    url: post.url || ""
+    url
   };
 }
 
 function shareCards(tweet, shareOptions = {}) {
+  const url = tweet.url || "";
   const images = cardPhotoUrls(tweet);
-  if (shareOptions.includeQuote === false || !hasQuoteTweet(tweet)) return [postCard(tweet, "main", { images })];
+  if (shareOptions.includeQuote === false || !hasQuoteTweet(tweet)) return [postCard(tweet, "main", { images, url })];
 
   const quoteImages = cardPhotoUrls(tweet.quote, images);
   // In one card a quote's photos would read as the main post's, so a quote with photos gets its own.
   if (quoteImages.length) {
-    return [postCard(tweet, "main", { images }), postCard(tweet.quote, "quote", { images: quoteImages })];
+    const quoteUrl = tweet.quote.url && tweet.quote.url !== url ? tweet.quote.url : gridUrl(url, "quote");
+    return [postCard(tweet, "main", { images, url }), postCard(tweet.quote, "quote", { images: quoteImages, url: quoteUrl })];
   }
-  return [postCard(tweet, "main", { images, fields: buildInlineQuoteFields(tweet.quote) })];
+  return [postCard(tweet, "main", { images, fields: buildInlineQuoteFields(tweet.quote), url })];
 }
 
 function cardEmbeds(card) {

@@ -563,6 +563,31 @@ test("each card's extra photos share that card's url, so the two grids stay apar
   );
 });
 
+test("a quote card with no url of its own still groups its photos, under a url the main card does not use", () => {
+  const quote = {
+    url: "",
+    author: { displayName: "Bob", username: "bob" },
+    text: "quote",
+    media: [
+      { type: "image", url: "https://pbs.twimg.com/media/q1.jpg" },
+      { type: "image", url: "https://pbs.twimg.com/media/q2.jpg" },
+      { type: "image", url: "https://pbs.twimg.com/media/q3.jpg" }
+    ]
+  };
+
+  for (const [what, url] of [["an empty quote url", ""], ["the main post's own url", sampleTweet.url]]) {
+    const embeds = buildDiscordPayloads({ ...sampleTweet, quote: { ...quote, url } })[0].embeds;
+    const [main, ...quoteEmbeds] = embeds;
+    assert.equal(main.url, sampleTweet.url);
+    assert.equal(quoteEmbeds.length, 3, `${what}: the quote host and two photo embeds`);
+    assert.ok(quoteEmbeds[0].url, `${what}: the quote card has a url`);
+    assert.notEqual(quoteEmbeds[0].url, main.url, `${what}: the quote card's url differs from the main card's`);
+    assert.deepEqual(quoteEmbeds.map((embed) => embed.url), Array(3).fill(quoteEmbeds[0].url), `${what}: the quote's photos share its url`);
+    assert.deepEqual(quoteEmbeds.map((embed) => embed.image.url), quote.media.map((item) => item.url));
+    assert.equal(quoteEmbeds[0].author.url, url || undefined, `${what}: the author link stays the quoted post's own url`);
+  }
+});
+
 test("video, images, and quote media stay in order with no photo labels", () => {
   const videoUrl = "https://video.twimg.com/ext_tw_video/1/pu/vid/abc/1280x720/main.mp4";
   const tweet = {
