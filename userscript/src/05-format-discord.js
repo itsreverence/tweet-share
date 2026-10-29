@@ -11,7 +11,7 @@ function webhookSenderName() {
 // subtext, or emphasis, and a bare URL in it must not autolink, which escaping its colon prevents. Embed author names
 // and titles render no markdown, so they keep the name as written.
 function escapeMarkdown(value) {
-  return String(value).replace(/[\\*_~|`[\]()>#:]/g, "\\$&");
+  return value.replace(/[\\*_~|`[\]()>#:]/g, "\\$&");
 }
 
 function authorLabel(post, format = (value) => value) {
@@ -209,7 +209,8 @@ function shareCards(tweet, shareOptions = {}) {
   if (shareOptions.includeQuote === false || !hasQuoteTweet(tweet)) return [postCard(tweet, "main", { images: cardPhotoUrls(tweet), url })];
 
   // Extraction can give the main post a photo that belongs to its quote, so the quote keeps every photo of its own and
-  // the main card shows the rest. In one card a quote's photos would read as the main post's, so a quote with photos gets its own.
+  // the main card shows the rest. In one card a quote's photos would read as the main post's, so a quote with photos
+  // gets its own.
   const quoteImages = cardPhotoUrls(tweet.quote);
   const images = cardPhotoUrls(tweet, quoteImages);
   if (quoteImages.length) {
