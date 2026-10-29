@@ -1,9 +1,3 @@
-function formatAuthor(tweet) {
-  const author = tweet.author?.displayName || tweet.author?.username || "Unknown author";
-  const username = tweet.author?.username ? `@${tweet.author.username}` : "";
-  return [author, username].filter(Boolean).join(" ");
-}
-
 function tweetAuthorAvatarUrl(tweet) {
   const url = highResolutionProfileImageUrl(tweet.author?.avatarUrl);
   return isHttpsUrl(url) ? url : undefined;
@@ -13,17 +7,9 @@ function webhookSenderName() {
   return WEBHOOK_SENDER_NAME;
 }
 
-function embedAuthorDisplayName(tweet) {
-  const displayName = String(tweet.author?.displayName || "").trim();
-  const username = String(tweet.author?.username || "").trim();
-  if (displayName) return truncate(displayName, DISCORD_EMBED_LIMITS.authorName);
-  if (username) return truncate(`@${username}`, DISCORD_EMBED_LIMITS.authorName);
-  return "Unknown author";
-}
-
-function authorLabel(tweet) {
-  const displayName = String(tweet.author?.displayName || "").trim();
-  const username = String(tweet.author?.username || "").trim();
+function authorLabel(post) {
+  const displayName = String(post.author?.displayName || "").trim();
+  const username = String(post.author?.username || "").trim();
   const handle = username ? `@${username}` : "";
   if (displayName && handle) return `${displayName} (${handle})`;
   return displayName || handle || "Unknown author";
@@ -33,19 +19,20 @@ function webhookSenderAvatarUrl() {
   return WEBHOOK_SENDER_AVATAR_URL;
 }
 
-function uniqueMediaLinks(items) {
-  return items.filter((item, index, all) => {
-    if (!item.url) return false;
-    const key = item.kind === "image" ? (tweetImageMediaKey(item.url) || item.url) : item.url;
-    return all.findIndex((candidate) => {
-      const candidateKey = candidate.kind === "image" ? (tweetImageMediaKey(candidate.url) || candidate.url) : candidate.url;
-      return candidateKey === key;
-    }) === index;
-  });
-}
-
+// Size variants of one photo share its twimg media ID, so they count as one item.
 function mediaUrlIdentity(url) {
   return isTweetImageMediaUrl(url) ? (tweetImageMediaKey(url) || url) : url;
+}
+
+function distinctMedia(items, urlOf) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const url = urlOf(item);
+    const identity = mediaUrlIdentity(url);
+    if (!url || seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
 }
 
 function tweetHasEmbedImageMedia(tweet) {
@@ -61,7 +48,7 @@ function needsMediaPostPrefix(rootTweet, shareOptions = {}) {
 function mediaCaption(kind, postTweet, index, shareOptions = {}, rootTweet = postTweet) {
   const label = kind === "video" ? `Video ${index + 1}` : `Image ${index + 1}`;
   if (!needsMediaPostPrefix(rootTweet, shareOptions)) return label;
-  return `${embedAuthorDisplayName(postTweet)} · ${label}`;
+  return `${authorLabel(postTweet)} · ${label}`;
 }
 
 function videoCaption(postTweet, index, shareOptions = {}, rootTweet = postTweet) {
@@ -69,23 +56,22 @@ function videoCaption(postTweet, index, shareOptions = {}, rootTweet = postTweet
   const label = `Video ${index + 1}`;
   if (!includeQuote || !hasQuoteTweet(rootTweet)) return label;
   const bothPostsHaveVideo = directPlayableVideoUrls(rootTweet).length > 0 && directPlayableVideoUrls(rootTweet.quote).length > 0;
-  return bothPostsHaveVideo || needsMediaPostPrefix(rootTweet, shareOptions) ? `${embedAuthorDisplayName(postTweet)} · ${label}` : label;
+  return bothPostsHaveVideo || needsMediaPostPrefix(rootTweet, shareOptions) ? `${authorLabel(postTweet)} · ${label}` : label;
 }
 
 function mediaLinks(tweet, shareOptions = {}) {
-  const rootTweet = shareOptions.rootTweet || tweet;
   const videos = directPlayableVideoUrls(tweet).map((url, index) => ({
     kind: "video",
-    label: videoCaption(tweet, index, shareOptions, rootTweet),
+    label: videoCaption(tweet, index, shareOptions),
     url
   }));
   const images = imageMedia(tweet).map((item, index) => ({
     kind: "image",
-    label: mediaCaption("image", tweet, index, shareOptions, rootTweet),
+    label: mediaCaption("image", tweet, index, shareOptions),
     url: item.url
   }));
 
-  return uniqueMediaLinks([...videos, ...images]);
+  return distinctMedia([...videos, ...images], (item) => item.url);
 }
 
 function collectMediaAttachmentUrls(tweet, shareOptions = {}) {
@@ -105,13 +91,7 @@ function collectMediaAttachmentUrls(tweet, shareOptions = {}) {
     }
   }
 
-  return urls.filter((url, index, all) => {
-    const key = isTweetImageMediaUrl(url) ? (tweetImageMediaKey(url) || url) : url;
-    return all.findIndex((candidate) => {
-      const candidateKey = isTweetImageMediaUrl(candidate) ? (tweetImageMediaKey(candidate) || candidate) : candidate;
-      return candidateKey === key;
-    }) === index;
-  });
+  return distinctMedia(urls, (url) => url);
 }
 
 function isHttpsUrl(url) {
@@ -385,7 +365,7 @@ function formatMediaLinkPlain(item) {
 
 function buildCompactPlainBody(tweet, options = {}) {
   const { includeQuote = true } = options;
-  const lines = [formatAuthor(tweet)];
+  const lines = [authorLabel(tweet)];
 
   if (tweet.text) lines.push(tweet.text);
   for (const item of mediaLinks(tweet, options)) lines.push(formatMediaLinkPlain(item));
@@ -393,7 +373,7 @@ function buildCompactPlainBody(tweet, options = {}) {
 
   if (includeQuote && hasQuoteTweet(tweet)) {
     lines.push("");
-    lines.push(`↳ ${formatAuthor(tweet.quote)}`);
+    lines.push(`↳ ${authorLabel(tweet.quote)}`);
     if (tweet.quote.text) lines.push(tweet.quote.text);
     for (const item of mediaLinks(tweet.quote)) lines.push(formatMediaLinkPlain(item));
     if (tweet.quote.url) lines.push(tweet.quote.url);
@@ -405,7 +385,7 @@ function buildCompactPlainBody(tweet, options = {}) {
 function buildPlainFallbackPayloads(tweet, options = {}) {
   const body = buildCompactPlainBody(tweet, options);
   const chunks = splitText(body, MESSAGE_CHUNK_LIMIT);
-  const parts = chunks.length ? chunks : [body || formatAuthor(tweet)];
+  const parts = chunks.length ? chunks : [body || authorLabel(tweet)];
   const files = (options.attachments || []).map((file) => file.filename);
 
   return parts.map((content, index) => ({

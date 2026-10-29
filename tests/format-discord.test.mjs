@@ -18,11 +18,11 @@ function loadFormatContext() {
     performance: { getEntriesByType: () => [] },
     document: { querySelectorAll: () => [] }
   };
-  runInNewContext(`${code}\nthis.exports = { buildDiscordPayloads, discordEmbedTimestamp, packEmbedsIntoMessages, hasQuoteTweet, truncate };`, context);
+  runInNewContext(`${code}\nthis.exports = { buildDiscordPayloads, buildPlainFallbackPayloads, discordEmbedTimestamp, packEmbedsIntoMessages, hasQuoteTweet, truncate };`, context);
   return context.exports;
 }
 
-const { buildDiscordPayloads, discordEmbedTimestamp, packEmbedsIntoMessages, hasQuoteTweet, truncate } = loadFormatContext();
+const { buildDiscordPayloads, buildPlainFallbackPayloads, discordEmbedTimestamp, packEmbedsIntoMessages, hasQuoteTweet, truncate } = loadFormatContext();
 
 const sampleTweet = {
   url: "https://x.com/alice/status/1",
@@ -127,6 +127,18 @@ test("a quoted post with only a permalink keeps its View quoted post link", () =
   const quoteField = buildDiscordPayloads(tweet)[0].embeds[0].fields.find((field) => field.name === "Quoting Bob (@bob)");
   assert.equal(quoteField.value, viewQuotedPost(tweet.quote.url));
   assert.equal(buildDiscordPayloads(tweet, { includeQuote: false })[0].embeds[0].fields, undefined, "excluding the quote drops the link");
+});
+
+test("the plain fallback names each author the way the cards do", () => {
+  const tweet = {
+    ...sampleTweet,
+    media: [],
+    quote: { url: "https://x.com/bob/status/2", author: { displayName: "Bob", username: "bob" }, text: "Quoted", media: [] }
+  };
+
+  const [payload] = buildPlainFallbackPayloads(tweet);
+  assert.deepEqual(payload.content.split("\n"), ["Alice (@alice)", "Hello world", tweet.url, "", "↳ Bob (@bob)", "Quoted", tweet.quote.url]);
+  assert.equal(buildPlainFallbackPayloads({ ...tweet, author: { username: "alice" } })[0].content.split("\n")[0], "@alice");
 });
 
 test("webhook sender is branded while the embed shows the tweet author once", () => {
@@ -494,7 +506,7 @@ test("main and quoted fallback videos identify ownership once", () => {
 
   const payloads = buildDiscordPayloads(tweet);
   assert.equal(payloads.length, 2);
-  assert.equal(payloads[1].content, `-# Alice · Video 1\n${mainVideo}\n-# Bob · Video 1\n${quoteVideo}`);
+  assert.equal(payloads[1].content, `-# Alice (@alice) · Video 1\n${mainVideo}\n-# Bob (@bob) · Video 1\n${quoteVideo}`);
 
   const mainFields = payloads[0].embeds[0]?.fields || [];
   assert.equal(mainFields.some((field) => /Video/.test(field.name)), false);
