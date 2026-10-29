@@ -166,10 +166,10 @@ const mutants = [
     expect: PHOTO_ONCE
   },
   {
-    name: "a quote card repeats a photo the main card already shows",
+    name: "the main card repeats a photo the quote card shows",
     file: "05-format-discord.js",
-    find: "const quoteImages = cardPhotoUrls(tweet.quote, images);",
-    replace: "const quoteImages = cardPhotoUrls(tweet.quote);",
+    find: "const images = cardPhotoUrls(tweet, quoteImages);",
+    replace: "const images = cardPhotoUrls(tweet);",
     expect: PHOTO_ONCE
   },
   {
@@ -239,8 +239,8 @@ const mutants = [
   {
     name: "embed shares drop an included quoted post",
     file: "05-format-discord.js",
-    find: "if (shareOptions.includeQuote === false || !hasQuoteTweet(tweet)) return [postCard(tweet, \"main\", { images, url })];",
-    replace: "return [postCard(tweet, \"main\", { images, url })];",
+    find: "if (shareOptions.includeQuote === false || !hasQuoteTweet(tweet)) return [postCard(tweet, \"main\", { images: cardPhotoUrls(tweet), url })];",
+    replace: "return [postCard(tweet, \"main\", { images: cardPhotoUrls(tweet), url })];",
     expect: QUOTE_ONLY_WHEN_INCLUDED
   },
   {

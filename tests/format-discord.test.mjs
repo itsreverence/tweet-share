@@ -285,31 +285,42 @@ test("uploaded photos, matched across size variants, show once inside the card t
   assert.deepEqual(Array.from(payloads[0]._files), ["media_0.jpg", "media_1.jpg", "media_2.jpg"]);
 });
 
-test("inline quote images are deduplicated when extraction also assigns them to the main post", () => {
+test("a quote whose photos extraction also put on the main post keeps its own card, and shows each photo once", () => {
   const duplicatedImages = ["one", "two", "three"].map((name) => ({
     type: "image",
     url: `https://pbs.twimg.com/media/${name}.jpg`
   }));
   const tweet = {
     ...sampleTweet,
-    media: duplicatedImages,
+    createdAt: "2026-06-10T21:06:19.000Z",
+    media: [{ type: "image", url: "https://pbs.twimg.com/media/main.jpg" }, ...duplicatedImages],
     quote: {
       url: "https://x.com/bob/status/2",
       author: { displayName: "Bob", username: "bob" },
-      text: "Distinct quoted post text",
+      text: `${"q".repeat(1500)}QUOTE_END`,
+      createdAt: "2026-06-11T10:00:00.000Z",
       media: duplicatedImages
     }
   };
 
-  const embeds = buildDiscordPayloads(tweet)[0].embeds;
-  const imageUrls = embeds.flatMap((embed) => embed.image?.url ? [embed.image.url] : []);
-  assert.ok(embeds[0].fields.some((field) => field.name === "Quoting Bob (@bob)"), "a quote whose photos the main post already shows stays inline");
-
-  assert.deepEqual(Array.from(imageUrls), [
-    "https://pbs.twimg.com/media/one.jpg",
-    "https://pbs.twimg.com/media/two.jpg",
-    "https://pbs.twimg.com/media/three.jpg"
-  ]);
+  const payloads = buildDiscordPayloads(tweet);
+  const embeds = [...payloads.flatMap((payload) => payload.embeds)];
+  const mainCard = embeds[0];
+  const quoteCard = embeds.find((embed) => embed.author?.name === "Quoting Bob (@bob)");
+  assert.ok(quoteCard, "the quote is a card");
+  assert.equal(mainCard.fields, undefined, "the main card has no inline quote field");
+  assert.ok(quoteCard.description.endsWith("QUOTE_END"), "the quote card keeps the whole quoted text");
+  assert.equal(quoteCard.timestamp, "2026-06-11T10:00:00.000Z", "the quote card keeps the quote's date");
+  assert.deepEqual(
+    embeds.filter((embed) => embed.url === tweet.url).map((embed) => embed.image?.url),
+    ["https://pbs.twimg.com/media/main.jpg"],
+    "the main card shows only the photo that is its own"
+  );
+  assert.deepEqual(
+    embeds.filter((embed) => embed.url === tweet.quote.url).map((embed) => embed.image?.url),
+    duplicatedImages.map((item) => item.url),
+    "the quote card shows the shared photos"
+  );
 });
 
 test("a video quote stays inline, and both posts' videos follow as links", () => {

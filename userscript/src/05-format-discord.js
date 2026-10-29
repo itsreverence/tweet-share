@@ -219,11 +219,12 @@ function postCard(post, kind, { images, fields = [], url }) {
 
 function shareCards(tweet, shareOptions = {}) {
   const url = tweet.url || "";
-  const images = cardPhotoUrls(tweet);
-  if (shareOptions.includeQuote === false || !hasQuoteTweet(tweet)) return [postCard(tweet, "main", { images, url })];
+  if (shareOptions.includeQuote === false || !hasQuoteTweet(tweet)) return [postCard(tweet, "main", { images: cardPhotoUrls(tweet), url })];
 
-  const quoteImages = cardPhotoUrls(tweet.quote, images);
-  // In one card a quote's photos would read as the main post's, so a quote with photos gets its own.
+  // Extraction can give the main post a photo that belongs to its quote, so the quote keeps every photo of its own and
+  // the main card shows the rest. In one card a quote's photos would read as the main post's, so a quote with photos gets its own.
+  const quoteImages = cardPhotoUrls(tweet.quote);
+  const images = cardPhotoUrls(tweet, quoteImages);
   if (quoteImages.length) {
     const quoteUrl = tweet.quote.url && tweet.quote.url !== url ? tweet.quote.url : gridUrl(url, "quote");
     return [postCard(tweet, "main", { images, url }), postCard(tweet.quote, "quote", { images: quoteImages, url: quoteUrl })];
