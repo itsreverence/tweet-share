@@ -21,6 +21,13 @@ const GRID_IN_ONE_MESSAGE = "embeds that share a url, which Discord merges into 
 
 const mutants = [
   {
+    name: "split extra photo grids from their card",
+    file: "05-format-discord.js",
+    find: "return [[first, ...firstGrid, ...moreGrids.flat()], ...rest.map((embed) => [embed])];",
+    replace: "return [[first, ...firstGrid], ...moreGrids, ...rest.map((embed) => [embed])];",
+    expect: GRID_IN_ONE_MESSAGE
+  },
+  {
     name: "truncate keeps limit - 1 characters before the ellipsis",
     file: "02-utils.js",
     find: "textValue.slice(0, limit - suffix.length)",

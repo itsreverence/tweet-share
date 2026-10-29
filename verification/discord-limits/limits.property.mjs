@@ -500,18 +500,30 @@ test("every photo shows once: an attachment:// image names a file uploaded with 
   });
 });
 
+const tweetWithExtraGrids = fc.tuple(fc.integer({ min: 2, max: 6 }), fc.integer({ min: 5, max: 8 })).map(([chunks, photos]) => ({
+  url: "https://x.com/alice/status/1",
+  text: Array.from({ length: chunks }, (_, i) => `x${i}`).join(" ".repeat(4100)),
+  media: Array.from({ length: 4 }, (_, i) => ({ type: "image", url: `https://pbs.twimg.com/media/main${i}.jpg` })),
+  quote: {
+    url: "https://x.com/bob/status/2",
+    text: "quote",
+    media: Array.from({ length: photos }, (_, i) => ({ type: "image", url: `https://pbs.twimg.com/media/quote${i}.jpg` }))
+  }
+}));
+
 test("embeds that share a url, which Discord merges into one grid, are sent in one message", async () => {
-  await runShare(tweetWithShareableImages, (t, o, requests) => {
+  await runShare(fc.oneof(tweetWithShareableImages, tweetWithExtraGrids), (t, o, requests) => {
     const problems = [];
     const firstMessageOf = new Map();
     requests.forEach(({ payload }, m) => {
       (payload.embeds || []).forEach((embed, i) => {
         if (!embed.url) return;
-        const first = firstMessageOf.get(embed.url);
+        const cardUrl = embed.url.replace(/[#-]\d+$/, "");
+        const first = firstMessageOf.get(cardUrl);
         if (first !== undefined && first !== m) {
           problems.push(`message ${m + 1} embed ${i + 1} has url ${embed.url}, which message ${first + 1} also uses, so its photo leaves that card's grid`);
         }
-        firstMessageOf.set(embed.url, first ?? m);
+        firstMessageOf.set(cardUrl, first ?? m);
       });
     });
     return report(problems);

@@ -933,7 +933,7 @@ function cardEmbeds(card) {
     const grid = gridUrl(card.url, moreGrids.length + 2);
     moreGrids.push(gallery.slice(start, start + GRID_PHOTOS).map((url) => photoEmbed(url, grid)));
   }
-  return [[first, ...firstGrid], ...moreGrids, ...rest.map((embed) => [embed])];
+  return [[first, ...firstGrid, ...moreGrids.flat()], ...rest.map((embed) => [embed])];
 }
 
 function shareMessages(tweet, options) {

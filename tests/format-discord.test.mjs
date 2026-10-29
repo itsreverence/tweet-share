@@ -776,3 +776,20 @@ test("long text splits at the last paragraph break, else line break, else senten
   assert.ok(unbroken.startsWith(`${cut} `), "then the last space, so no word is cut");
   assert.equal(firstChunk("x".repeat(5000)).length, limit, "a hard cut only when nothing else fits");
 });
+
+
+test("all extra photo grids stay with their card when the first message is nearly full", () => {
+  const photos = (prefix, count) => Array.from({ length: count }, (_, i) => ({ type: "image", url: `https://pbs.twimg.com/media/${prefix}${i}.jpg` }));
+  const tweet = {
+    ...sampleTweet,
+    text: ["x0", "x1"].join(" ".repeat(4100)),
+    media: photos("main", 4),
+    quote: { url: "https://x.com/bob/status/2", text: "quote", media: photos("quote", 8) }
+  };
+  const payloads = buildDiscordPayloads(tweet);
+  const quoteMessage = payloads.findIndex((payload) => payload.embeds.some((embed) => embed.url === tweet.quote.url && embed.author));
+  const quoteEmbeds = payloads[quoteMessage].embeds.filter((embed) => embed.url === tweet.quote.url || embed.url?.startsWith(`${tweet.quote.url}#`));
+  assert.equal(quoteEmbeds.length, 8, "all eight quote photos share the host's message");
+  assert.equal(payloads.flatMap(embedImageUrls).length, 12);
+  assert.ok(payloads.every((payload) => payload.embeds.length <= 10));
+});
