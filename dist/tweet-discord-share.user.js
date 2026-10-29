@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweet Discord Share
 // @namespace    https://github.com/itsreverence/tweet-share
-// @version      0.6.35
+// @version      0.6.36
 // @description  Share X/Twitter posts to Discord channels via webhooks (no server required).
 // @homepageURL  https://github.com/itsreverence/tweet-share
 // @supportURL   https://github.com/itsreverence/tweet-share/issues
