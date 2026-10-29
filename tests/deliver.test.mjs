@@ -233,7 +233,7 @@ test("all skipped video media sends one playable fallback URL", async () => {
   assert.equal(calls.requests.length, 2);
   assert.equal(calls.requests[1].body.content, mainVideoUrl);
   assert.doesNotMatch(JSON.stringify(calls.requests), /Plays below|poster/);
-  assert.ok(calls.toasts.some((toast) => /fallback content/i.test(toast.message)));
+  assert.deepEqual(calls.toasts.map((toast) => toast.message), ["Media not uploaded; 1 failed to download."]);
 });
 
 test("partial video success uploads resolved media and retains skipped link once", async () => {
@@ -306,7 +306,7 @@ test("a video that cannot upload is reported even when no file uploads at all", 
 
   assert.equal(calls.multipart.length, 0, "nothing uploads");
   assert.ok(calls.requests.at(-1).body.content.includes(skippedVideoUrl), "the video follows as a link");
-  assert.deepEqual(calls.toasts.map((toast) => toast.message), ["Media could not upload (1 too large); sent available fallback content."]);
+  assert.deepEqual(calls.toasts.map((toast) => toast.message), ["Media not uploaded; video too large for Discord, sent as a link."]);
 });
 
 test("a photo skipped for the upload budget keeps its link, and the toast counts what uploaded", async () => {
@@ -457,4 +457,16 @@ test("a quoted video uploads before photos can spend its request budget", async 
   assert.deepEqual(Array.from(sent.payload.embeds, (embed) => embed.image?.url).filter(Boolean),
     ["attachment://media_1.jpg", "attachment://media_2.jpg", "attachment://media_3.jpg", photos[3]]);
   assert.equal(calls.requests.length, 0, "the uploaded video needs no fallback message");
+});
+
+
+test("a skipped oversized video is named in the toast when a photo uploads", async () => {
+  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
+  await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
+  await shareToDestination("main", { ...sampleTweet, media: [videoTweet.media[0], ...sampleTweet.media] }, {
+    fetchMediaSize: () => 15 * 1024 * 1024,
+    fetchMediaBytes: (url) => ({ byteLength: /\.mp4/.test(url) ? 15 * 1024 * 1024 : 100 })
+  });
+  assert.deepEqual(calls.toasts.map((toast) => toast.message),
+    ["Uploaded 1 file; video too large for Discord, sent as a link."]);
 });

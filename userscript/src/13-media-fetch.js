@@ -89,7 +89,10 @@ function summarizeSkippedMedia(skipped = []) {
     byReason[item.reason] = (byReason[item.reason] || 0) + 1;
   }
 
+  const oversizedVideos = skipped.filter((item) => item.reason === "size" && isPlayableTweetVideoUrl(item.sourceUrl)).length;
+  byReason.size -= oversizedVideos;
   const parts = [];
+  if (oversizedVideos) parts.push(`${oversizedVideos === 1 ? "video" : `${oversizedVideos} videos`} too large for Discord, sent as ${oversizedVideos === 1 ? "a link" : "links"}`);
   if (byReason.size) parts.push(`${byReason.size} too large`);
   if (byReason.fetch) parts.push(`${byReason.fetch} failed to download`);
   if (byReason.count) parts.push(`${byReason.count} over limit`);

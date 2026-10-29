@@ -1633,7 +1633,7 @@ async function shareToDestination(destinationId, tweet, options = {}) {
 
   if (resolved.skipped.length > 0 && uploadedCount === 0) {
     const skippedSummary = summarizeSkippedMedia(resolved.skipped);
-    showToast(`Media could not upload (${skippedSummary}); sent available fallback content.`, "info");
+    showToast(`Media not uploaded; ${skippedSummary}.`, "info");
   }
 
   for (let index = 0; index < messages.length; index += 1) {
@@ -4230,7 +4230,10 @@ function summarizeSkippedMedia(skipped = []) {
     byReason[item.reason] = (byReason[item.reason] || 0) + 1;
   }
 
+  const oversizedVideos = skipped.filter((item) => item.reason === "size" && isPlayableTweetVideoUrl(item.sourceUrl)).length;
+  byReason.size -= oversizedVideos;
   const parts = [];
+  if (oversizedVideos) parts.push(`${oversizedVideos === 1 ? "video" : `${oversizedVideos} videos`} too large for Discord, sent as ${oversizedVideos === 1 ? "a link" : "links"}`);
   if (byReason.size) parts.push(`${byReason.size} too large`);
   if (byReason.fetch) parts.push(`${byReason.fetch} failed to download`);
   if (byReason.count) parts.push(`${byReason.count} over limit`);
