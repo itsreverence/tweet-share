@@ -48,16 +48,17 @@ function appendPreviewInline(container, text) {
   container.append(text.slice(index));
 }
 
-// Discord draws a run of "> " lines as one quote with a bar beside it, and "-# " lines as small subtext.
+// Discord draws a run of "> " lines as one quote with a bar beside it, and "-# " lines as small subtext. A quote
+// holds subtext, but neither holds a quote.
 const PREVIEW_LINE_BLOCKS = [
-  { prefix: "> ", tag: "blockquote", className: `${PREVIEW_CLASS}__quote` },
+  { prefix: "> ", tag: "blockquote", className: `${PREVIEW_CLASS}__quote`, holdsBlocks: true },
   { prefix: "-# ", tag: "div", className: `${PREVIEW_CLASS}__subtext` }
 ];
 
-function appendPreviewMarkdown(container, value) {
+function appendPreviewMarkdown(container, value, blocks = PREVIEW_LINE_BLOCKS) {
   const runs = [];
   for (const line of String(value || "").split("\n")) {
-    const block = PREVIEW_LINE_BLOCKS.find((candidate) => line.startsWith(candidate.prefix));
+    const block = blocks.find((candidate) => line.startsWith(candidate.prefix));
     const text = block ? line.slice(block.prefix.length) : line;
     if (runs.length && runs.at(-1).block === block) runs.at(-1).lines.push(text);
     else runs.push({ block, lines: [text] });
@@ -69,7 +70,8 @@ function appendPreviewMarkdown(container, value) {
     }
     const element = document.createElement(block.tag);
     element.className = block.className;
-    appendPreviewInline(element, lines.join("\n"));
+    if (block.holdsBlocks) appendPreviewMarkdown(element, lines.join("\n"), blocks.filter((candidate) => candidate !== block));
+    else appendPreviewInline(element, lines.join("\n"));
     container.append(element);
   }
 }

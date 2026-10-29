@@ -183,7 +183,7 @@ function openDestinationMenu(anchor, article, destinations, options = {}) {
 
   function renderPrepared() {
     const options = shareOptions();
-    const attachmentUrls = collectMediaAttachmentUrls(preparedTweet, options);
+    const attachmentUrls = uploadCandidateUrls(preparedTweet, options);
     const payloads = buildDiscordPayloads(preparedTweet, { ...options, fallbackVideoUrls: [] });
     previewWrap.replaceChildren(renderDiscordPreview(payloads, { attachmentUrls }));
     summary.textContent = describeShare(preparedTweet, options, payloads.length);

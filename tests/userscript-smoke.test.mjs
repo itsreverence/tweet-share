@@ -493,6 +493,26 @@ test("the video note follows the quote toggle when only the quoted post has a vi
   assert.equal(attachmentHint(preview), "1 media file attached on send.", "without the quote, only the photo is attached");
 });
 
+test("the preview counts only the files that upload with the first message", async (t) => {
+  const view = openPage(t, { destinations: [general, friends], quote: true, text: `${"Long post. ".repeat(800)}end` });
+  view.document.querySelector('[role="link"] [data-testid="tweetText"]').insertAdjacentHTML("afterend", photoMarkup("QuotePhoto"));
+
+  const preview = expandPreview(view, await openPreview(view));
+  const cards = previewCards(preview);
+  assert.ok(cards.length >= 3, "the long post splits, and the quote card follows in a later message");
+  assert.deepEqual(photoIds(cards.at(-1)), ["QuotePhoto"], "the quote card, in a later message, links its photo");
+  assert.equal(attachmentHint(preview), "1 media file attached on send.", "only the main photo uploads, with the first message");
+});
+
+test("the preview draws subtext inside a quoted post as subtext", async (t) => {
+  const view = openPage(t, { destinations: [general, friends], quote: "Headline\n-# small print" });
+
+  const preview = expandPreview(view, await openPreview(view));
+  const quote = preview.querySelector("blockquote");
+  assert.equal(quote.querySelector(".tds-preview__subtext")?.textContent, "small print", "the quoted line is subtext inside the quote");
+  assert.ok(!renderedLines(view, preview).some((line) => line.includes("-# ")), "no literal -# is shown");
+});
+
 test("the preview starts collapsed unless Always show preview is on", async (t) => {
   for (const alwaysShowPreview of [false, true]) {
     const view = openPage(t, {
