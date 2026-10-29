@@ -793,3 +793,23 @@ test("all extra photo grids stay with their card when the first message is nearl
   assert.equal(payloads.flatMap(embedImageUrls).length, 12);
   assert.ok(payloads.every((payload) => payload.embeds.length <= 10));
 });
+
+test("a card with more photos than one message holds keeps every grid whole and no message over ten embeds", () => {
+  const photos = Array.from({ length: 14 }, (_, index) => ({ type: "image", url: `https://pbs.twimg.com/media/p${index + 1}.jpg` }));
+  const payloads = buildDiscordPayloads({ ...sampleTweet, media: photos }, { includeQuote: false });
+
+  for (const [index, payload] of payloads.entries()) {
+    assert.ok(payload.embeds.length <= 10, `message ${index + 1} has ${payload.embeds.length} embeds`);
+  }
+  const shown = payloads.flatMap((payload) => payload.embeds.map((embed) => embed.image?.url).filter(Boolean));
+  assert.deepEqual([...shown], photos.map((item) => item.url), "every photo is shown once, in order");
+  const messageOfGrid = new Map();
+  for (const [index, payload] of payloads.entries()) {
+    for (const embed of payload.embeds) {
+      if (!embed.url) continue;
+      assert.ok(!messageOfGrid.has(embed.url) || messageOfGrid.get(embed.url) === index, `grid ${embed.url} sits in one message`);
+      messageOfGrid.set(embed.url, index);
+    }
+  }
+  assert.equal(messageOfGrid.get(sampleTweet.url), 0, "the card's own grid sits with the card");
+});

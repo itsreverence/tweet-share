@@ -933,7 +933,11 @@ function cardEmbeds(card) {
     const grid = gridUrl(card.url, moreGrids.length + 2);
     moreGrids.push(gallery.slice(start, start + GRID_PHOTOS).map((url) => photoEmbed(url, grid)));
   }
-  return [[first, ...firstGrid, ...moreGrids.flat()], ...rest.map((embed) => [embed])];
+  const host = [first, ...firstGrid];
+  while (moreGrids.length && host.length + moreGrids[0].length <= DISCORD_EMBED_LIMITS.embedsPerMessage) {
+    host.push(...moreGrids.shift());
+  }
+  return [host, ...moreGrids, ...rest.map((embed) => [embed])];
 }
 
 function shareMessages(tweet, options) {

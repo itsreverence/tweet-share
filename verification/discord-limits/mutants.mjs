@@ -23,8 +23,8 @@ const mutants = [
   {
     name: "split extra photo grids from their card",
     file: "05-format-discord.js",
-    find: "return [[first, ...firstGrid, ...moreGrids.flat()], ...rest.map((embed) => [embed])];",
-    replace: "return [[first, ...firstGrid], ...moreGrids, ...rest.map((embed) => [embed])];",
+    find: "while (moreGrids.length && host.length + moreGrids[0].length <= DISCORD_EMBED_LIMITS.embedsPerMessage) {",
+    replace: "while (false) {",
     expect: GRID_IN_ONE_MESSAGE
   },
   {
@@ -143,7 +143,7 @@ const mutants = [
   {
     name: "drop a card's photos after its first",
     file: "05-format-discord.js",
-    find: "return [[first, ...firstGrid], ...moreGrids, ...rest.map((embed) => [embed])];",
+    find: "return [host, ...moreGrids, ...rest.map((embed) => [embed])];",
     replace: "return [[first], ...rest.map((embed) => [embed])];",
     expect: PRESERVES
   },
