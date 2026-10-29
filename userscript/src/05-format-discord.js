@@ -191,6 +191,8 @@ function cardPhotoUrls(post, alreadyShown = []) {
   return urls;
 }
 
+const GRID_PHOTOS = 4;
+
 // Discord merges the embeds of a message that share a url into one grid of up to four images, so every grid in a
 // share needs a url of its own. A tag turns one url into another that opens the same post.
 function gridUrl(base, tag) {
@@ -248,9 +250,14 @@ function cardEmbeds(card) {
     })
   );
   const [first, ...rest] = textEmbeds;
-  // Discord merges embeds that share the first one's url into a grid of up to four images inside it.
-  const photos = gallery.map((url) => pruneEmbed({ color: card.color, url: card.url, image: { url } }));
-  return [[first, ...photos], ...rest.map((embed) => [embed])];
+  const photoEmbed = (url, grid) => pruneEmbed({ color: card.color, url: grid, image: { url } });
+  const firstGrid = gallery.slice(0, GRID_PHOTOS - 1).map((url) => photoEmbed(url, card.url));
+  const moreGrids = [];
+  for (let start = GRID_PHOTOS - 1; start < gallery.length; start += GRID_PHOTOS) {
+    const grid = gridUrl(card.url, moreGrids.length + 2);
+    moreGrids.push(gallery.slice(start, start + GRID_PHOTOS).map((url) => photoEmbed(url, grid)));
+  }
+  return [[first, ...firstGrid], ...moreGrids, ...rest.map((embed) => [embed])];
 }
 
 // Files upload with the first message, so only its embeds can show them. A photo packed into a

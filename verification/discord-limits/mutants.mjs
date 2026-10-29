@@ -136,7 +136,7 @@ const mutants = [
   {
     name: "drop a card's photos after its first",
     file: "05-format-discord.js",
-    find: "return [[first, ...photos], ...rest.map((embed) => [embed])];",
+    find: "return [[first, ...firstGrid], ...moreGrids, ...rest.map((embed) => [embed])];",
     replace: "return [[first], ...rest.map((embed) => [embed])];",
     expect: PRESERVES
   },

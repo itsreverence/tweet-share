@@ -588,6 +588,21 @@ test("a quote card with no url of its own still groups its photos, under a url t
   }
 });
 
+test("photos past a card's first four form further grids of four under urls of their own", () => {
+  const photos = Array.from({ length: 9 }, (_, index) => ({ type: "image", url: `https://pbs.twimg.com/media/p${index + 1}.jpg` }));
+  const payloads = buildDiscordPayloads({ ...sampleTweet, media: photos }, { includeQuote: false });
+
+  assert.equal(payloads.length, 1);
+  const embeds = [...payloads[0].embeds];
+  assert.deepEqual(embeds.map((embed) => embed.image.url), photos.map((item) => item.url), "every photo is shown, in order");
+  const grids = new Map();
+  for (const embed of embeds) grids.set(embed.url, (grids.get(embed.url) || 0) + 1);
+  assert.deepEqual([...grids.values()], [4, 4, 1], "grids of four");
+  assert.equal([...grids.keys()][0], sampleTweet.url, "the first grid is the card's");
+  assert.ok([...grids.keys()].every((url, index) => index === 0 || url.startsWith(`${sampleTweet.url}#`)), "later grids tag the post's url");
+  assert.equal(embeds.filter((embed) => embed.author).length, 1, "only the card names the author");
+});
+
 test("video, images, and quote media stay in order with no photo labels", () => {
   const videoUrl = "https://video.twimg.com/ext_tw_video/1/pu/vid/abc/1280x720/main.mp4";
   const tweet = {
