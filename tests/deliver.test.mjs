@@ -437,3 +437,24 @@ test("shareToDestination reports how many messages were sent before a follow-up 
     /Sent 1 of 2 Discord messages before delivery failed: follow-up failed/
   );
 });
+
+
+test("a quoted video uploads before photos can spend its request budget", async () => {
+  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
+  await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
+  const photos = ["a", "b", "c", "d"].map((name) => `https://pbs.twimg.com/media/${name}.jpg`);
+  await shareToDestination("main", {
+    ...sampleTweet,
+    media: photos.map((url) => ({ type: "image", url })),
+    quote: { url: "https://x.com/bob/status/2", text: "video", media: [{ type: "video", url: mainVideoUrl }] }
+  }, {
+    fetchMediaSize: () => 9 * 1024 * 1024,
+    fetchMediaBytes: (url) => ({ byteLength: (url === mainVideoUrl ? 9 : 4.5) * 1024 * 1024 })
+  });
+  const sent = calls.multipart[0];
+  assert.equal(sent.files.filter((file) => file.contentType === "video/mp4").length, 1);
+  assert.equal(sent.files.length, 4, "the video and three photos fit");
+  assert.deepEqual(Array.from(sent.payload.embeds, (embed) => embed.image?.url).filter(Boolean),
+    ["attachment://media_1.jpg", "attachment://media_2.jpg", "attachment://media_3.jpg", photos[3]]);
+  assert.equal(calls.requests.length, 0, "the uploaded video needs no fallback message");
+});

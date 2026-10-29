@@ -170,7 +170,8 @@ async function resolveAttachmentsForTweet(tweet, shareOptions = {}) {
   const attachments = [];
   const skipped = [];
   let totalBytes = 0;
-  const candidates = collectMediaAttachmentItems(tweet, shareOptions);
+  const candidates = collectMediaAttachmentItems(tweet, shareOptions)
+    .sort((a, b) => Number(b.type === "video") - Number(a.type === "video"));
 
   for (const media of candidates) {
     if (attachments.length >= ATTACHMENT_MAX_COUNT) {
