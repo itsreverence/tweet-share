@@ -237,8 +237,10 @@ const tweetOf = (image) =>
 const tweet = tweetOf(imageItem);
 const QUOTE_MARK = "‡quoted‡";
 const quoteText = fc.oneof(text.map((value) => `${QUOTE_MARK} ${value}`), fc.constant(""));
+const statusIdOf = (url) => /\/status\/(\d+)/.exec(url)?.[1];
 const tweetWithMarkedQuote = fc
   .oneof(fc.tuple(postArb(mediaOf(imageItem)), postArb(mediaOf(imageItem))), fc.tuple(postArb(fullMedia), postArb(fullMedia)))
+  .filter(([main, quote]) => statusIdOf(main.url) !== statusIdOf(quote.url))
   .chain(([main, quote]) =>
     quoteText.map((value) => ({
       ...main,
