@@ -231,10 +231,9 @@ test("all skipped video media sends one playable fallback URL", async () => {
 
   assert.equal(calls.multipart.length, 0);
   assert.equal(calls.requests.length, 2);
-  assert.equal(calls.requests[1].body.content, `_Video:_\n${mainVideoUrl}`);
-  assert.equal(calls.requests[1].body.content.split(mainVideoUrl).length - 1, 1);
+  assert.equal(calls.requests[1].body.content, mainVideoUrl);
   assert.doesNotMatch(JSON.stringify(calls.requests), /Plays below|poster/);
-  assert.ok(calls.toasts.some((toast) => /fallback content/i.test(toast.message)));
+  assert.deepEqual(calls.toasts.map((toast) => toast.message), ["Media not uploaded; 1 failed to download."]);
 });
 
 test("partial video success uploads resolved media and retains skipped link once", async () => {
@@ -255,6 +254,76 @@ test("partial video success uploads resolved media and retains skipped link once
   assert.ok(calls.requests[0].body.content.includes(skippedVideoUrl));
   assert.equal(calls.requests[0].body.content.split(skippedVideoUrl).length - 1, 1);
   assert.doesNotMatch(JSON.stringify(calls.multipart[0].payload), /main\.mp4|skipped\.mp4|Plays below/);
+});
+
+const quoteWithPhotosAndVideo = (videoUrl) => ({
+  url: "https://x.com/alice/status/3",
+  author: { displayName: "Alice", username: "alice" },
+  text: `${"Long post. ".repeat(800)}end`,
+  media: [],
+  quote: {
+    url: "https://x.com/bob/status/2",
+    author: { displayName: "Bob", username: "bob" },
+    text: "Quoted",
+    media: [
+      { type: "image", url: "https://pbs.twimg.com/media/q1.jpg" },
+      { type: "image", url: "https://pbs.twimg.com/media/q2.jpg" },
+      { type: "image", url: "https://pbs.twimg.com/media/q3.jpg" },
+      { type: "video", url: videoUrl }
+    ]
+  }
+});
+
+test("photos that a later message links are never downloaded, so they cannot spend the upload budget", async () => {
+  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
+  await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
+  const fetched = [];
+
+  await shareToDestination("main", quoteWithPhotosAndVideo(mainVideoUrl), {
+    fetchMediaSize: () => 10 * 1024 * 1024 - 5,
+    fetchMediaBytes(url) {
+      fetched.push(url);
+      return { byteLength: /\.mp4/.test(url) ? 10 * 1024 * 1024 - 5 : 5 * 1024 * 1024 };
+    }
+  });
+
+  assert.deepEqual(fetched, [mainVideoUrl], "only the video is downloaded");
+  assert.equal(calls.multipart.length, 1, "the video uploads with the first message");
+  assert.deepEqual(Array.from(calls.multipart[0].files, (file) => file.contentType), ["video/mp4"]);
+  const linked = calls.requests.flatMap((entry) => (entry.body.embeds || []).map((embed) => embed.image?.url)).filter(Boolean);
+  assert.deepEqual(linked, ["https://pbs.twimg.com/media/q1.jpg", "https://pbs.twimg.com/media/q2.jpg", "https://pbs.twimg.com/media/q3.jpg"], "the later message links the quote's photos");
+  assert.equal(calls.toasts.length, 0, "nothing was skipped, so there is nothing to report");
+});
+
+test("a video that cannot upload is reported even when no file uploads at all", async () => {
+  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
+  await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
+
+  await shareToDestination("main", quoteWithPhotosAndVideo(skippedVideoUrl), {
+    fetchMediaSize: () => 15 * 1024 * 1024,
+    fetchMediaBytes: () => ({ byteLength: 15 * 1024 * 1024 })
+  });
+
+  assert.equal(calls.multipart.length, 0, "nothing uploads");
+  assert.ok(calls.requests.at(-1).body.content.includes(skippedVideoUrl), "the video follows as a link");
+  assert.deepEqual(calls.toasts.map((toast) => toast.message), ["Media not uploaded; video too large for Discord, sent as a link."]);
+});
+
+test("a photo skipped for the upload budget keeps its link, and the toast counts what uploaded", async () => {
+  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
+  await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
+  const photos = ["a", "b", "c"].map((name) => `https://pbs.twimg.com/media/${name}.jpg`);
+
+  await shareToDestination("main", { ...sampleTweet, media: photos.map((url) => ({ type: "image", url })) }, {
+    includeQuote: false,
+    fetchMediaBytes: () => ({ byteLength: 9 * 1024 * 1024 })
+  });
+
+  assert.equal(calls.multipart.length, 1);
+  assert.deepEqual(Array.from(calls.multipart[0].files, (file) => file.filename), ["media_0.jpg", "media_1.jpg"], "two photos fit the 24 MiB request budget");
+  const shown = Array.from(calls.multipart[0].payload.embeds, (embed) => embed.image.url);
+  assert.deepEqual(shown, ["attachment://media_0.jpg", "attachment://media_1.jpg", photos[2]], "the third photo stays a link in the same card");
+  assert.deepEqual(calls.toasts.map((toast) => toast.message), ["Uploaded 2 files; 1 too large."]);
 });
 
 test("multipart network failure is surfaced without an automatic JSON retry", async () => {
@@ -367,4 +436,37 @@ test("shareToDestination reports how many messages were sent before a follow-up 
     }),
     /Sent 1 of 2 Discord messages before delivery failed: follow-up failed/
   );
+});
+
+
+test("a quoted video uploads before photos can spend its request budget", async () => {
+  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
+  await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
+  const photos = ["a", "b", "c", "d"].map((name) => `https://pbs.twimg.com/media/${name}.jpg`);
+  await shareToDestination("main", {
+    ...sampleTweet,
+    media: photos.map((url) => ({ type: "image", url })),
+    quote: { url: "https://x.com/bob/status/2", text: "video", media: [{ type: "video", url: mainVideoUrl }] }
+  }, {
+    fetchMediaSize: () => 9 * 1024 * 1024,
+    fetchMediaBytes: (url) => ({ byteLength: (url === mainVideoUrl ? 9 : 4.5) * 1024 * 1024 })
+  });
+  const sent = calls.multipart[0];
+  assert.equal(sent.files.filter((file) => file.contentType === "video/mp4").length, 1);
+  assert.equal(sent.files.length, 4, "the video and three photos fit");
+  assert.deepEqual(Array.from(sent.payload.embeds, (embed) => embed.image?.url).filter(Boolean),
+    ["attachment://media_1.jpg", "attachment://media_2.jpg", "attachment://media_3.jpg", photos[3]]);
+  assert.equal(calls.requests.length, 0, "the uploaded video needs no fallback message");
+});
+
+
+test("a skipped oversized video is named in the toast when a photo uploads", async () => {
+  const { shareToDestination, saveAllDestinations, calls } = loadDeliverContext();
+  await saveAllDestinations([{ id: "main", label: "Main", webhookUrl: validWebhook }]);
+  await shareToDestination("main", { ...sampleTweet, media: [videoTweet.media[0], ...sampleTweet.media] }, {
+    fetchMediaSize: () => 15 * 1024 * 1024,
+    fetchMediaBytes: (url) => ({ byteLength: /\.mp4/.test(url) ? 15 * 1024 * 1024 : 100 })
+  });
+  assert.deepEqual(calls.toasts.map((toast) => toast.message),
+    ["Uploaded 1 file; video too large for Discord, sent as a link."]);
 });

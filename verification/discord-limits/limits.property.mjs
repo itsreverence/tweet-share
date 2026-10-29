@@ -139,7 +139,12 @@ const repeatedBlock = fc.oneof(
   fc.constantFrom("a", "a ", " a", "😀", "a\n", "word ")
 );
 const longText = fc.tuple(repeatedBlock, length).map(([s, n]) => s.repeat(Math.ceil(n / s.length)).slice(0, n));
-const text = fc.oneof(shortProse, longText);
+// A whitespace run that reaches past the chunk limit leaves splitText a chunk of one word, so six words fill six embeds.
+const whitespaceRun = fc.tuple(fc.constantFrom(" ", "\n"), fc.integer({ min: 4090, max: 4100 })).map(([char, count]) => char.repeat(count));
+const wordsBetweenLongWhitespace = fc
+  .array(fc.tuple(fc.stringMatching(/^[A-Za-z0-9]{1,12}$/), whitespaceRun), { minLength: 1, maxLength: 6 })
+  .map((pairs) => pairs.flat().join(""));
+const text = fc.oneof(shortProse, longText, wordsBetweenLongWhitespace);
 const statusId = fc.bigInt({ min: 1n, max: 10n ** 19n }).map(String);
 const username = fc.stringMatching(/^[A-Za-z0-9_]{1,15}$/, { size: "max" });
 const author = fc.record(
@@ -232,24 +237,23 @@ const tweetOf = (image) =>
 const tweet = tweetOf(imageItem);
 const QUOTE_MARK = "‡quoted‡";
 const quoteText = fc.oneof(text.map((value) => `${QUOTE_MARK} ${value}`), fc.constant(""));
+const statusIdOf = (url) => /\/status\/(\d+)/.exec(url)?.[1];
 const tweetWithMarkedQuote = fc
   .oneof(fc.tuple(postArb(mediaOf(imageItem)), postArb(mediaOf(imageItem))), fc.tuple(postArb(fullMedia), postArb(fullMedia)))
+  .filter(([main, quote]) => statusIdOf(main.url) !== statusIdOf(quote.url))
   .chain(([main, quote]) =>
     quoteText.map((value) => ({
       ...main,
       quote: { ...quote, url: quote.url.replace("https://x.com/", "https://twitter.com/"), text: value }
     }))
   )
-  .map(withDistinctMediaIds)
-  .filter((t) => t.quote.text || mediaItems(t.quote).length > 0);
+  .map(withDistinctMediaIds);
 const tweetWithShareableImages = tweetOf(twimgImageItem);
-const options = fc.record(
-  {
-    includeQuote: fc.boolean(),
-    quoteLayout: fc.constantFrom("auto", "card", "inline")
-  },
-  { requiredKeys: [] }
-);
+// Extraction sometimes gives the main post a quoted post's photo as well, so a quote can repeat a photo the main post shows.
+const tweetWithRepeatedPhoto = tweetWithShareableImages
+  .filter((t) => Boolean(t.quote) && t.media.some((item) => item.type === "image"))
+  .map((t) => ({ ...t, quote: { ...t.quote, media: [t.media.find((item) => item.type === "image"), ...t.quote.media.slice(0, X_MAX_MEDIA_PER_POST - 1)] } }));
+const options = fc.record({ includeQuote: fc.boolean() }, { requiredKeys: [] });
 const mediaSize = fc.oneof(
   fc.integer({ min: 1, max: 6 * MiB }),
   fc.constantFrom(10 * MiB - 1, 10 * MiB, 10 * MiB + 1),
@@ -460,6 +464,69 @@ test("every share carries the main post's text, permalink, and media, and quoted
       for (const item of mediaItems(t.quote)) if (!rendered(item)) missing.push(`quoted media ${item.url}`);
     }
     return report(missing.map((what) => `share is missing ${what}`));
+  });
+});
+
+const attachmentNameOf = (url) => /^attachment:\/\/(.+)$/.exec(url)?.[1];
+const photoKey = (url) => /pbs\.twimg\.com\/media\/([^.?/:]+)/.exec(url)?.[1] ?? url;
+
+test("every photo shows once: an attachment:// image names a file uploaded with that message, and an uploaded photo is never also linked", async () => {
+  await runShare(fc.oneof(tweetWithShareableImages, tweetWithRepeatedPhoto), (t, o, requests) => {
+    const problems = [];
+    const shownAt = new Map();
+    const named = new Set();
+    requests.forEach(({ payload, files }, m) => {
+      const uploaded = new Map(files.map((file) => [file.filename, file.sourceUrl]));
+      (payload.embeds || []).forEach((embed, i) => {
+        const url = embed.image?.url;
+        if (!url) return;
+        const where = `message ${m + 1} embed ${i + 1}`;
+        const name = attachmentNameOf(url);
+        if (name && !uploaded.has(name)) problems.push(`${where} shows ${url}, which is not uploaded with that message`);
+        if (name) named.add(`${m}:${name}`);
+        const key = photoKey(name ? uploaded.get(name) ?? url : url);
+        if (shownAt.has(key)) problems.push(`${where} shows the same photo as ${shownAt.get(key)}`);
+        shownAt.set(key, where);
+      });
+    });
+    // Discord lists an upload that no embed of its message names above the message, so an embed showing it would show it twice.
+    requests.forEach(({ files }, m) => {
+      for (const file of files) {
+        const shown = shownAt.get(photoKey(file.sourceUrl));
+        if (!named.has(`${m}:${file.filename}`) && shown) problems.push(`message ${m + 1} uploads ${file.filename} as a plain attachment, and ${shown} shows it again`);
+      }
+    });
+    return report(problems);
+  });
+});
+
+const tweetWithExtraGrids = fc.tuple(fc.integer({ min: 2, max: 6 }), fc.integer({ min: 5, max: 8 })).map(([chunks, photos]) => ({
+  url: "https://x.com/alice/status/1",
+  text: Array.from({ length: chunks }, (_, i) => `x${i}`).join(" ".repeat(4100)),
+  media: Array.from({ length: 4 }, (_, i) => ({ type: "image", url: `https://pbs.twimg.com/media/main${i}.jpg` })),
+  quote: {
+    url: "https://x.com/bob/status/2",
+    text: "quote",
+    media: Array.from({ length: photos }, (_, i) => ({ type: "image", url: `https://pbs.twimg.com/media/quote${i}.jpg` }))
+  }
+}));
+
+test("embeds that share a url, which Discord merges into one grid, are sent in one message", async () => {
+  await runShare(fc.oneof(tweetWithShareableImages, tweetWithExtraGrids), (t, o, requests) => {
+    const problems = [];
+    const firstMessageOf = new Map();
+    requests.forEach(({ payload }, m) => {
+      (payload.embeds || []).forEach((embed, i) => {
+        if (!embed.url) return;
+        const cardUrl = embed.url.replace(/[#-]\d+$/, "");
+        const first = firstMessageOf.get(cardUrl);
+        if (first !== undefined && first !== m) {
+          problems.push(`message ${m + 1} embed ${i + 1} has url ${embed.url}, which message ${first + 1} also uses, so its photo leaves that card's grid`);
+        }
+        firstMessageOf.set(cardUrl, first ?? m);
+      });
+    });
+    return report(problems);
   });
 });
 

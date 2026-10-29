@@ -89,7 +89,10 @@ function summarizeSkippedMedia(skipped = []) {
     byReason[item.reason] = (byReason[item.reason] || 0) + 1;
   }
 
+  const oversizedVideos = skipped.filter((item) => item.reason === "size" && isPlayableTweetVideoUrl(item.sourceUrl)).length;
+  byReason.size -= oversizedVideos;
   const parts = [];
+  if (oversizedVideos) parts.push(`${oversizedVideos === 1 ? "video" : `${oversizedVideos} videos`} too large for Discord, sent as ${oversizedVideos === 1 ? "a link" : "links"}`);
   if (byReason.size) parts.push(`${byReason.size} too large`);
   if (byReason.fetch) parts.push(`${byReason.fetch} failed to download`);
   if (byReason.count) parts.push(`${byReason.count} over limit`);
@@ -97,7 +100,7 @@ function summarizeSkippedMedia(skipped = []) {
 }
 
 function collectMediaAttachmentItems(tweet, shareOptions = {}) {
-  const urls = collectMediaAttachmentUrls(tweet, shareOptions);
+  const urls = uploadCandidateUrls(tweet, shareOptions);
   const mediaByUrl = new Map();
 
   function addMedia(post) {
@@ -169,9 +172,9 @@ async function resolveMediaAttachment(media, remainingBytes, options = {}) {
 async function resolveAttachmentsForTweet(tweet, shareOptions = {}) {
   const attachments = [];
   const skipped = [];
-  const resolvedUrls = [];
   let totalBytes = 0;
-  const candidates = collectMediaAttachmentItems(tweet, shareOptions);
+  const candidates = collectMediaAttachmentItems(tweet, shareOptions)
+    .sort((a, b) => Number(b.type === "video") - Number(a.type === "video"));
 
   for (const media of candidates) {
     if (attachments.length >= ATTACHMENT_MAX_COUNT) {
@@ -192,8 +195,6 @@ async function resolveAttachmentsForTweet(tweet, shareOptions = {}) {
         sourceUrl: resolved.url
       });
       totalBytes += resolved.size;
-      const primaryUrl = media.type === "video" ? normalizeTweetVideoUrl(media.url) : media.url;
-      resolvedUrls.push(primaryUrl, resolved.url);
       continue;
     }
 
@@ -204,5 +205,5 @@ async function resolveAttachmentsForTweet(tweet, shareOptions = {}) {
     });
   }
 
-  return { attachments, skipped, urls: unique(resolvedUrls.filter(Boolean)) };
+  return { attachments, skipped };
 }

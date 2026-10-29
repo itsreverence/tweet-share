@@ -279,12 +279,15 @@ test("sharing to the only destination posts the post to its webhook", async (t) 
   const messages = view.webhookPosts().map(postedMessage);
   assert.ok(messages.length >= 1, "the share POSTs to the webhook");
   const payloads = messages.map((message) => message.payload);
-  assert.ok(payloads.some((payload) => payload.content?.split("\n").some((line) => line === postUrl)), "a message carries the post URL");
+  assert.ok(payloads.some((payload) => payload.content?.includes(`](${postUrl})`)), "a message's content links the post URL");
   assert.ok(
     payloads.some((payload) => payload.embeds?.some((embed) => embed.description?.includes(postText))),
     "an embed description carries the post text"
   );
-  assert.equal(messages.flatMap((message) => message.files).length, 1, "the photo is uploaded as one file");
+  const files = messages.flatMap((message) => message.files);
+  assert.equal(files.length, 1, "the photo is uploaded as one file");
+  assert.equal(messages[0].files.length, 1, "the photo uploads with the message that shows it");
+  assert.equal(payloads[0].embeds[0].image?.url, `attachment://${files[0].name}`, "the card shows the uploaded photo");
   for (const [index, payload] of payloads.entries()) {
     assert.deepEqual(payload.allowed_mentions?.parse, [], `message ${index + 1} disables mentions`);
   }
@@ -360,17 +363,68 @@ test("the summary line names the post, its media, and the quote, and follows the
   assert.equal(summary.textContent, "Post by @alice · 1 media file", "unchecking the quote drops it from the summary");
 });
 
-test("the preview shows the post link and the quoted-post line on separate lines", async (t) => {
+test("the preview links the post and the quoted post", async (t) => {
   const view = openPage(t, { destinations: [general, friends], quote: true });
 
   const preview = expandPreview(view, await openPreview(view));
-  const lines = renderedLines(view, preview);
-  assert.ok(lines.some((line) => line === postUrl), `the post URL is a line of its own in ${JSON.stringify(lines)}`);
-  assert.ok(
-    lines.some((line) => line === "↳ 📑 Quoted post: https://x.com/bob/status/999"),
-    `the quoted-post line is a line of its own in ${JSON.stringify(lines)}`
+  assert.match(preview.querySelector(`a[href="${postUrl}"]`)?.textContent ?? "", /^Open on X/, "the content links the post");
+  assert.match(
+    preview.querySelector('a[href="https://x.com/bob/status/999"]')?.textContent ?? "",
+    /^View quoted post/,
+    "the quote field links the quoted post"
   );
-  assert.ok(preview.querySelector(`a[href="${postUrl}"]`), "the post URL is a link");
+});
+
+test("the preview draws the content as one small Open on X line, with no literal -#", async (t) => {
+  const view = openPage(t, { destinations: [general, friends] });
+
+  const preview = expandPreview(view, await openPreview(view));
+  const lines = renderedLines(view, preview);
+  assert.ok(lines.includes("Open on X (x.com)"), `the content line is shown in ${JSON.stringify(lines)}`);
+  assert.ok(!lines.some((line) => line.startsWith("-#")), `no literal "-#" is shown in ${JSON.stringify(lines)}`);
+  const fontSize = (node) => {
+    for (let element = node; element; element = element.parentElement) {
+      const size = parseFloat(view.window.getComputedStyle(element).fontSize);
+      if (size) return size;
+    }
+    return 0;
+  };
+  const link = preview.querySelector(`a[href="${postUrl}"]`);
+  const description = leafWithText(preview, postText);
+  assert.ok(fontSize(link) < fontSize(description), "the content line is smaller than the post text");
+});
+
+const photoMarkup = (id) => `<div data-testid="tweetPhoto"><img alt="Image" src="https://pbs.twimg.com/media/${id}?format=jpg&name=small"></div>`;
+const previewCards = (preview) => [...preview.querySelectorAll("article")];
+const photoIds = (card) => [...card.querySelectorAll('img[src*="pbs.twimg.com/media/"]')].map((img) => /\/media\/([^?]+)/.exec(img.src)[1]);
+
+test("the preview shows a post's photos inside its card, four as one grid", async (t) => {
+  const view = openPage(t, { destinations: [general, friends] });
+  view.document.querySelector('[data-testid="tweetPhoto"]').insertAdjacentHTML("afterend", ["Two", "Three", "Four"].map(photoMarkup).join(""));
+
+  const preview = expandPreview(view, await openPreview(view));
+  const cards = previewCards(preview);
+  assert.equal(cards.length, 1, "the four photos merge into the post's card");
+  assert.deepEqual(photoIds(cards[0]), ["SmokePhoto", "Two", "Three", "Four"]);
+  assert.ok(cards[0].textContent.includes(postText), "the photos share the card with the post text");
+});
+
+test("the preview shows a quoted post with a photo as its own card, with its photo and date", async (t) => {
+  const view = openPage(t, { destinations: [general, friends], quote: true });
+  view.document.querySelector('[role="link"] [data-testid="tweetText"]').insertAdjacentHTML(
+    "afterend",
+    `${photoMarkup("QuotePhoto")}<time datetime="2025-03-04T05:06:00.000Z">Mar 4</time>`
+  );
+
+  const preview = expandPreview(view, await openPreview(view));
+  const cards = previewCards(preview);
+  assert.equal(cards.length, 2);
+  assert.deepEqual(photoIds(cards[0]), ["SmokePhoto"], "the main card shows only the main post's photo");
+  assert.ok(cards[1].textContent.includes("Quoting Bob (@bob)"));
+  assert.ok(cards[1].textContent.includes(quoteText));
+  assert.deepEqual(photoIds(cards[1]), ["QuotePhoto"], "the quote card shows the quote's photo");
+  assert.ok(cards[1].textContent.includes("2025"), "the quote card shows the quote's own date");
+  assert.ok(!cards[0].textContent.includes("2025"));
 });
 
 test("the preview shows where masked links in the post and the quote really go, and draws quote lines as a quote", async (t) => {
@@ -378,7 +432,7 @@ test("the preview shows where masked links in the post and the quote really go, 
   const lure = "https://lure.example/win";
   const view = openPage(t, {
     destinations: [general, friends],
-    text: `Security notice [x.com/settings/security](${phish}) and _new_`,
+    text: `Security notice [x.com/settings/security](${phish}) and _new_ at https://example.com/notes`,
     quote: `Claim it [x.com/rewards](${lure}) today\nSecond line`
   });
 
@@ -389,7 +443,8 @@ test("the preview shows where masked links in the post and the quote really go, 
     assert.equal(link.title, href, "hovering shows the full destination");
     assert.match(accessibleName(link), new RegExp(`\\(${new URL(href).host.replace(".", "\\.")}\\)$`), "the link names the host it opens");
   }
-  assert.equal(preview.querySelector('a[href="https://x.com/alice/status/1234567890"]').textContent, postUrl, "a bare URL is shown as itself, with no host suffix");
+  assert.equal(preview.querySelector('a[href="https://example.com/notes"]')?.textContent, "https://example.com/notes", "a bare URL is shown as itself, with no host suffix");
+  assert.match(accessibleName(preview.querySelector(`a[href="${postUrl}"]`)), /\(x\.com\)$/, "the Open on X link names the host it opens");
   assert.equal(leafWithText(preview, "new")?.tagName, "EM", "italics in the post text render as italics");
 
   const lines = renderedLines(view, preview);
@@ -397,6 +452,16 @@ test("the preview shows where masked links in the post and the quote really go, 
   assert.ok(!lines.some((line) => line.startsWith(">")), `no literal "> " is shown in ${JSON.stringify(lines)}`);
   const quotes = [...preview.querySelectorAll("blockquote")].map((quote) => quote.textContent);
   assert.deepEqual(quotes, ["Claim it x.com/rewards (lure.example) today\nSecond line"], "the quoted post's lines sit in one block quote");
+});
+
+test("the preview shows markdown in a quoted author's name as text, not as a link", async (t) => {
+  const view = openPage(t, { destinations: [general, friends], quote: true });
+  view.document.querySelector('[role="link"] [data-testid="User-Name"] span').textContent = "[x.com/rewards](https://evil.example/win)";
+
+  const preview = expandPreview(view, await openPreview(view));
+  assert.equal(preview.querySelector('a[href="https://evil.example/win"]'), null, "the name is not a link");
+  const fieldNames = [...preview.querySelectorAll(".tds-preview__field-name")].map((node) => node.textContent);
+  assert.deepEqual(fieldNames, ["Quoting [x.com/rewards](https://evil.example/win) (@bob)"], "the name reads as written, with no backslashes");
 });
 
 const videoMarkup = '<div data-testid="videoPlayer"><video src="https://video.twimg.com/ext_tw_video/1/pu/vid/720x1280/smoke.mp4"></video></div>';
@@ -426,6 +491,26 @@ test("the video note follows the quote toggle when only the quoted post has a vi
 
   click(view, byText(menu, "label", "Include quoted post")[0].querySelector("input"));
   assert.equal(attachmentHint(preview), "1 media file attached on send.", "without the quote, only the photo is attached");
+});
+
+test("the preview counts only the files that upload with the first message", async (t) => {
+  const view = openPage(t, { destinations: [general, friends], quote: true, text: `${"Long post. ".repeat(800)}end` });
+  view.document.querySelector('[role="link"] [data-testid="tweetText"]').insertAdjacentHTML("afterend", photoMarkup("QuotePhoto"));
+
+  const preview = expandPreview(view, await openPreview(view));
+  const cards = previewCards(preview);
+  assert.ok(cards.length >= 3, "the long post splits, and the quote card follows in a later message");
+  assert.deepEqual(photoIds(cards.at(-1)), ["QuotePhoto"], "the quote card, in a later message, links its photo");
+  assert.equal(attachmentHint(preview), "1 media file attached on send.", "only the main photo uploads, with the first message");
+});
+
+test("the preview draws subtext inside a quoted post as subtext", async (t) => {
+  const view = openPage(t, { destinations: [general, friends], quote: "Headline\n-# small print" });
+
+  const preview = expandPreview(view, await openPreview(view));
+  const quote = preview.querySelector("blockquote");
+  assert.equal(quote.querySelector(".tds-preview__subtext")?.textContent, "small print", "the quoted line is subtext inside the quote");
+  assert.ok(!renderedLines(view, preview).some((line) => line.includes("-# ")), "no literal -# is shown");
 });
 
 test("the preview starts collapsed unless Always show preview is on", async (t) => {

@@ -16,8 +16,17 @@ const PRESERVES = "every share carries the main post's text, permalink, and medi
 const FALLBACK_PRESERVES = "plain-text fallback carries the main post's text and permalink";
 const QUOTE_ONLY_WHEN_INCLUDED = "a share carries the quoted post's text and permalink when included, and sends what it would without the quote when excluded";
 const TRUNCATE = "truncate(value, limit) returns at most limit characters for limits from 3 to 4096";
+const PHOTO_ONCE = "every photo shows once: an attachment:// image names a file uploaded with that message, and an uploaded photo is never also linked";
+const GRID_IN_ONE_MESSAGE = "embeds that share a url, which Discord merges into one grid, are sent in one message";
 
 const mutants = [
+  {
+    name: "split extra photo grids from their card",
+    file: "05-format-discord.js",
+    find: "while (moreGrids.length && host.length + moreGrids[0].length <= DISCORD_EMBED_LIMITS.embedsPerMessage) {",
+    replace: "while (false) {",
+    expect: GRID_IN_ONE_MESSAGE
+  },
   {
     name: "truncate keeps limit - 1 characters before the ellipsis",
     file: "02-utils.js",
@@ -28,16 +37,30 @@ const mutants = [
   {
     name: "description chunks larger than Discord allows",
     file: "05-format-discord.js",
-    find: "splitText(text, DISCORD_EMBED_LIMITS.description)",
-    replace: "splitText(text, 4200)",
+    find: "splitText(card.text, DISCORD_EMBED_LIMITS.description)",
+    replace: "splitText(card.text, 4200)",
     expect: PER_EMBED
   },
   {
     name: "ignore the 6000-char total when packing embeds",
     file: "05-format-discord.js",
-    find: "const exceedsCount = current.length > 0 &&",
-    replace: "const exceedsCount = false &&",
+    find: "const fitsChars = currentChars + groupChars <= DISCORD_EMBED_LIMITS.totalEmbedChars;",
+    replace: "const fitsChars = true;",
     expect: PER_MESSAGE
+  },
+  {
+    name: "ignore the 10-embed limit when packing embeds",
+    file: "05-format-discord.js",
+    find: "const fitsSlots = current.length + group.length <= DISCORD_EMBED_LIMITS.embedsPerMessage;",
+    replace: "const fitsSlots = true;",
+    expect: PER_MESSAGE
+  },
+  {
+    name: "pack each embed on its own, so a full message splits a card's grid from its card",
+    file: "05-format-discord.js",
+    find: "packEmbedsIntoMessages(shareCards(tweet, options).flatMap(cardEmbeds))",
+    replace: "packEmbedsIntoMessages(shareCards(tweet, options).flatMap(cardEmbeds).flat().map((embed) => [embed]))",
+    expect: GRID_IN_ONE_MESSAGE
   },
   {
     name: "fallback chunks larger than message content limit",
@@ -72,9 +95,9 @@ const mutants = [
   {
     name: "fallback splits the main permalink across two messages",
     file: "05-format-discord.js",
-    find: "const parts = chunks.length ? chunks : [body || formatAuthor(tweet)];",
+    find: "const parts = chunks.length ? chunks : [body || authorLabel(tweet, escapeMarkdown)];",
     replace:
-      "const parts = (chunks.length ? chunks : [body || formatAuthor(tweet)]).flatMap((chunk) => {\n" +
+      "const parts = (chunks.length ? chunks : [body || authorLabel(tweet, escapeMarkdown)]).flatMap((chunk) => {\n" +
       "    const cut = tweet.url ? chunk.indexOf(tweet.url) : -1;\n" +
       "    return cut < 0 ? [chunk] : [chunk.slice(0, cut + 12), chunk.slice(cut + 12)];\n" +
       "  });",
@@ -83,16 +106,16 @@ const mutants = [
   {
     name: "single video follow-up wraps its link in <> so Discord does not unfurl it",
     file: "05-format-discord.js",
-    find: "`_Video:_\\n${entries[0].url}`",
-    replace: "`_Video:_\\n<${entries[0].url}>`",
+    find: "return truncate(entries[0].url, DISCORD_LIMITS.content);",
+    replace: "return truncate(`<${entries[0].url}>`, DISCORD_LIMITS.content);",
     expect: PRESERVES
   },
   {
     name: "video follow-up wraps its links in a code block",
     file: "05-format-discord.js",
     edits: [
-      ["`_Video:_\\n${entries[0].url}`", "`_Video:_\\n\\`\\`\\`\\n${entries[0].url}\\n\\`\\`\\``"],
-      ["blocks.join(\"\\n\\n\")", "`\\`\\`\\`\\n${blocks.join(\"\\n\\n\")}\\n\\`\\`\\``"]
+      ["return truncate(entries[0].url, DISCORD_LIMITS.content);", "return truncate(`\\`\\`\\`\\n${entries[0].url}\\n\\`\\`\\``, DISCORD_LIMITS.content);"],
+      ["blocks.join(\"\\n\")", "`\\`\\`\\`\\n${blocks.join(\"\\n\")}\\n\\`\\`\\``"]
     ],
     expect: PRESERVES
   },
@@ -113,22 +136,65 @@ const mutants = [
   {
     name: "share content omits the main permalink",
     file: "05-format-discord.js",
-    find: "const lines = [];\n  if (tweet.url) lines.push(tweet.url);\n  if (resolveQuoteLayout",
-    replace: "const lines = [];\n  if (resolveQuoteLayout",
+    find: "`-# [Open on X](${tweet.url})`",
+    replace: "`-# Open on X`",
     expect: PRESERVES
   },
   {
-    name: "drop supplemental image embeds",
+    name: "drop a card's photos after its first",
     file: "05-format-discord.js",
-    find: "return [...withHints, ...supplements];",
-    replace: "return withHints;",
+    find: "return [host, ...moreGrids, ...rest.map((embed) => [embed])];",
+    replace: "return [[first], ...rest.map((embed) => [embed])];",
     expect: PRESERVES
+  },
+  {
+    name: "the upload plan lists the photos of every message, not only the first",
+    file: "05-format-discord.js",
+    find: "const [first] = shareMessages(tweet, options);",
+    replace: "const first = shareMessages(tweet, options).flat();",
+    expect: PHOTO_ONCE
+  },
+  {
+    name: "the first message keeps a photo's link although it uploads the file",
+    file: "05-format-discord.js",
+    find: "return file ? { ...embed, image: { url: `attachment://${file.filename}` } } : embed;",
+    replace: "return embed;",
+    expect: PHOTO_ONCE
+  },
+  {
+    name: "delivery downloads every photo, not only the ones the first message shows",
+    file: "13-media-fetch.js",
+    find: "const urls = uploadCandidateUrls(tweet, shareOptions);",
+    replace: "const urls = collectMediaAttachmentUrls(tweet, shareOptions);",
+    expect: PHOTO_ONCE
+  },
+  {
+    name: "the main card repeats a photo the quote card shows",
+    file: "05-format-discord.js",
+    find: "const images = cardPhotoUrls(tweet, quoteImages);",
+    replace: "const images = cardPhotoUrls(tweet);",
+    expect: PHOTO_ONCE
+  },
+  {
+    name: "a quote card drops every link to the quoted post",
+    file: "05-format-discord.js",
+    edits: [
+      [
+        "author: isQuote ? embedAuthorBlock(post, `Quoting ${label}`, post.url) : embedAuthorBlock(post, label, profileUrl),",
+        "author: isQuote ? embedAuthorBlock(post, `Quoting ${label}`) : embedAuthorBlock(post, label, profileUrl),"
+      ],
+      [
+        "const quoteUrl = tweet.quote.url && tweet.quote.url !== url ? tweet.quote.url : gridUrl(url, \"quote\");",
+        "const quoteUrl = gridUrl(url, \"quote\");"
+      ]
+    ],
+    expect: QUOTE_ONLY_WHEN_INCLUDED
   },
   {
     name: "embed descriptions strip spaces from the main text",
     file: "05-format-discord.js",
-    find: "description: chunk,",
-    replace: "description: chunk.replace(/ /g, \"\"),",
+    find: "      description,\n      url: index === 0 ? card.url : undefined,",
+    replace: "      description: description?.replace(/ /g, \"\"),\n      url: index === 0 ? card.url : undefined,",
     expect: PRESERVES
   },
   {
@@ -155,7 +221,7 @@ const mutants = [
   {
     name: "attachments hidden from embeds are never uploaded",
     file: "08-deliver.js",
-    find: "attachments.map((attachment, fileIndex)",
+    find: "files.map((attachment, fileIndex)",
     replace: "[].map((attachment, fileIndex)",
     expect: PRESERVES
   },
@@ -176,8 +242,8 @@ const mutants = [
   {
     name: "embed shares drop an included quoted post",
     file: "05-format-discord.js",
-    find: "if (shareOptions.includeQuote === false || !hasQuoteTweet(tweet)) return \"none\";",
-    replace: "return \"none\";",
+    find: "if (shareOptions.includeQuote === false || !hasQuoteTweet(tweet)) return [postCard(tweet, \"main\", { images: cardPhotoUrls(tweet), url })];",
+    replace: "return [postCard(tweet, \"main\", { images: cardPhotoUrls(tweet), url })];",
     expect: QUOTE_ONLY_WHEN_INCLUDED
   },
   {
@@ -190,17 +256,17 @@ const mutants = [
   {
     name: "embed shares leak part of an excluded quote's text past its opening",
     file: "05-format-discord.js",
-    find: "  if (tweet.url) lines.push(tweet.url);\n  if (resolveQuoteLayout(tweet, shareOptions) !== \"none\" && tweet.quote?.url) {",
+    find: "      content: index === 0 ? shareContentLine(tweet) : undefined,",
     replace:
-      "  if (tweet.url) lines.push(tweet.url);\n  if (shareOptions.includeQuote === false && tweet.quote?.text?.length > 100) lines.push(tweet.quote.text.slice(100, 200));\n  if (resolveQuoteLayout(tweet, shareOptions) !== \"none\" && tweet.quote?.url) {",
+      "      content: index === 0 ? [shareContentLine(tweet), options.includeQuote === false && tweet.quote?.text?.length > 100 ? tweet.quote.text.slice(100, 200) : \"\"].filter(Boolean).join(\"\\n\") : undefined,",
     expect: QUOTE_ONLY_WHEN_INCLUDED
   },
   {
     name: "embed shares leak an excluded quote's media that has no twimg media ID",
     file: "05-format-discord.js",
-    find: "  const embeds = [...buildTweetEmbedGroup(tweet, \"main\", shareOptions)];",
+    find: "packEmbedsIntoMessages(shareCards(tweet, options).flatMap(cardEmbeds))",
     replace:
-      "  const embeds = [...buildTweetEmbedGroup(tweet, \"main\", shareOptions)];\n  if (!includeQuote) for (const item of tweet.quote?.media || []) if (item.posterUrl || (item.type === \"image\" && !isTweetImageMediaUrl(item.url))) embeds.push({ image: { url: item.posterUrl || item.url } });",
+      "packEmbedsIntoMessages([...shareCards(tweet, options).flatMap(cardEmbeds), ...(options.includeQuote === false ? (tweet.quote?.media || []).filter((item) => item.posterUrl || (item.type === \"image\" && !isTweetImageMediaUrl(item.url))).map((item) => [{ image: { url: item.posterUrl || item.url } }]) : [])])",
     expect: QUOTE_ONLY_WHEN_INCLUDED
   },
   {
@@ -222,6 +288,13 @@ const mutants = [
     file: "05-format-discord.js",
     find: "for (const item of mediaLinks(tweet, options)) lines.push(formatMediaLinkPlain(item));",
     replace: "for (const item of mediaLinks(tweet)) lines.push(formatMediaLinkPlain(item));",
+    expect: QUOTE_ONLY_WHEN_INCLUDED
+  },
+  {
+    name: "a quoted post with only a permalink is dropped",
+    file: "05-format-discord.js",
+    find: "return Boolean(hasQuoteCandidate(tweet) || quote.text || mediaLinks(quote).length > 0);",
+    replace: "return Boolean(quote.text || mediaLinks(quote).length > 0);",
     expect: QUOTE_ONLY_WHEN_INCLUDED
   },
   {
