@@ -88,9 +88,9 @@ const mutants = [
   {
     name: "fallback splits the main permalink across two messages",
     file: "05-format-discord.js",
-    find: "const parts = chunks.length ? chunks : [body || authorLabel(tweet)];",
+    find: "const parts = chunks.length ? chunks : [body || authorLabel(tweet, escapeMarkdown)];",
     replace:
-      "const parts = (chunks.length ? chunks : [body || authorLabel(tweet)]).flatMap((chunk) => {\n" +
+      "const parts = (chunks.length ? chunks : [body || authorLabel(tweet, escapeMarkdown)]).flatMap((chunk) => {\n" +
       "    const cut = tweet.url ? chunk.indexOf(tweet.url) : -1;\n" +
       "    return cut < 0 ? [chunk] : [chunk.slice(0, cut + 12), chunk.slice(cut + 12)];\n" +
       "  });",

@@ -7,10 +7,17 @@ function webhookSenderName() {
   return WEBHOOK_SENDER_NAME;
 }
 
-function authorLabel(post) {
-  const displayName = String(post.author?.displayName || "").trim();
+// Discord renders markdown in message content and field names, so a name placed there must not pass as a link,
+// subtext, or emphasis, and a bare URL in it must not autolink, which escaping its colon prevents. Embed author names
+// and titles render no markdown, so they keep the name as written.
+function escapeMarkdown(value) {
+  return String(value).replace(/[\\*_~|`[\]()>#:]/g, "\\$&");
+}
+
+function authorLabel(post, format = (value) => value) {
+  const displayName = format(String(post.author?.displayName || "").trim());
   const username = String(post.author?.username || "").trim();
-  const handle = username ? `@${username}` : "";
+  const handle = username ? format(`@${username}`) : "";
   if (displayName && handle) return `${displayName} (${handle})`;
   return displayName || handle || "Unknown author";
 }
@@ -48,7 +55,7 @@ function needsMediaPostPrefix(rootTweet, shareOptions = {}) {
 function mediaCaption(kind, postTweet, index, shareOptions = {}, rootTweet = postTweet) {
   const label = kind === "video" ? `Video ${index + 1}` : `Image ${index + 1}`;
   if (!needsMediaPostPrefix(rootTweet, shareOptions)) return label;
-  return `${authorLabel(postTweet)} · ${label}`;
+  return `${authorLabel(postTweet, escapeMarkdown)} · ${label}`;
 }
 
 function videoCaption(postTweet, index, shareOptions = {}, rootTweet = postTweet) {
@@ -56,7 +63,7 @@ function videoCaption(postTweet, index, shareOptions = {}, rootTweet = postTweet
   const label = `Video ${index + 1}`;
   if (!includeQuote || !hasQuoteTweet(rootTweet)) return label;
   const bothPostsHaveVideo = directPlayableVideoUrls(rootTweet).length > 0 && directPlayableVideoUrls(rootTweet.quote).length > 0;
-  return bothPostsHaveVideo || needsMediaPostPrefix(rootTweet, shareOptions) ? `${authorLabel(postTweet)} · ${label}` : label;
+  return bothPostsHaveVideo || needsMediaPostPrefix(rootTweet, shareOptions) ? `${authorLabel(postTweet, escapeMarkdown)} · ${label}` : label;
 }
 
 function mediaLinks(tweet, shareOptions = {}) {
@@ -149,7 +156,7 @@ function buildInlineQuoteFields(quote) {
   if (!value) return [];
 
   return [{
-    name: truncate(`Quoting ${authorLabel(quote)}`, DISCORD_EMBED_LIMITS.fieldName),
+    name: truncate(`Quoting ${authorLabel(quote, escapeMarkdown)}`, DISCORD_EMBED_LIMITS.fieldName),
     value,
     inline: false
   }];
@@ -365,7 +372,7 @@ function formatMediaLinkPlain(item) {
 
 function buildCompactPlainBody(tweet, options = {}) {
   const { includeQuote = true } = options;
-  const lines = [authorLabel(tweet)];
+  const lines = [authorLabel(tweet, escapeMarkdown)];
 
   if (tweet.text) lines.push(tweet.text);
   for (const item of mediaLinks(tweet, options)) lines.push(formatMediaLinkPlain(item));
@@ -373,7 +380,7 @@ function buildCompactPlainBody(tweet, options = {}) {
 
   if (includeQuote && hasQuoteTweet(tweet)) {
     lines.push("");
-    lines.push(`↳ ${authorLabel(tweet.quote)}`);
+    lines.push(`↳ ${authorLabel(tweet.quote, escapeMarkdown)}`);
     if (tweet.quote.text) lines.push(tweet.quote.text);
     for (const item of mediaLinks(tweet.quote)) lines.push(formatMediaLinkPlain(item));
     if (tweet.quote.url) lines.push(tweet.quote.url);
@@ -385,7 +392,7 @@ function buildCompactPlainBody(tweet, options = {}) {
 function buildPlainFallbackPayloads(tweet, options = {}) {
   const body = buildCompactPlainBody(tweet, options);
   const chunks = splitText(body, MESSAGE_CHUNK_LIMIT);
-  const parts = chunks.length ? chunks : [body || authorLabel(tweet)];
+  const parts = chunks.length ? chunks : [body || authorLabel(tweet, escapeMarkdown)];
   const files = (options.attachments || []).map((file) => file.filename);
 
   return parts.map((content, index) => ({

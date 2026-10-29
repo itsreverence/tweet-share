@@ -26,15 +26,17 @@ function createMaskedPreviewLink(href, label) {
   return link;
 }
 
-// The inline markdown the formatter emits and post text can carry: masked links, bare URLs, and _italics_.
-const PREVIEW_INLINE_PATTERN = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>]+)|\b_([^_\n]+)_\b/g;
+// The inline markdown the formatter emits and post text can carry: escaped characters, masked links, bare URLs, and _italics_.
+const PREVIEW_INLINE_PATTERN = /\\([^A-Za-z0-9\s])|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>]+)|\b_([^_\n]+)_\b/g;
 
 function appendPreviewInline(container, text) {
   let index = 0;
   for (const match of text.matchAll(PREVIEW_INLINE_PATTERN)) {
-    const [whole, maskedLabel, maskedUrl, url, italic] = match;
+    const [whole, escaped, maskedLabel, maskedUrl, url, italic] = match;
     container.append(text.slice(index, match.index));
-    if (italic) {
+    if (escaped) {
+      container.append(escaped);
+    } else if (italic) {
       const emphasis = document.createElement("em");
       emphasis.textContent = italic;
       container.append(emphasis);
@@ -151,7 +153,7 @@ function createPreviewEmbed(embed, images) {
 
     const name = document.createElement("div");
     name.className = `${PREVIEW_CLASS}__field-name`;
-    name.textContent = field.name || "";
+    appendPreviewInline(name, field.name || "");
 
     const value = document.createElement("div");
     value.className = `${PREVIEW_CLASS}__field-value`;

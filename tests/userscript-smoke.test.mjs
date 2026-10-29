@@ -454,6 +454,16 @@ test("the preview shows where masked links in the post and the quote really go, 
   assert.deepEqual(quotes, ["Claim it x.com/rewards (lure.example) today\nSecond line"], "the quoted post's lines sit in one block quote");
 });
 
+test("the preview shows markdown in a quoted author's name as text, not as a link", async (t) => {
+  const view = openPage(t, { destinations: [general, friends], quote: true });
+  view.document.querySelector('[role="link"] [data-testid="User-Name"] span').textContent = "[x.com/rewards](https://evil.example/win)";
+
+  const preview = expandPreview(view, await openPreview(view));
+  assert.equal(preview.querySelector('a[href="https://evil.example/win"]'), null, "the name is not a link");
+  const fieldNames = [...preview.querySelectorAll(".tds-preview__field-name")].map((node) => node.textContent);
+  assert.deepEqual(fieldNames, ["Quoting [x.com/rewards](https://evil.example/win) (@bob)"], "the name reads as written, with no backslashes");
+});
+
 const videoMarkup = '<div data-testid="videoPlayer"><video src="https://video.twimg.com/ext_tw_video/1/pu/vid/720x1280/smoke.mp4"></video></div>';
 const attachmentHint = (preview) => [...preview.querySelectorAll("*")].find((node) => node.children.length === 0 && /attached on send/.test(node.textContent))?.textContent;
 

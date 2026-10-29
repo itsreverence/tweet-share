@@ -141,6 +141,37 @@ test("the plain fallback names each author the way the cards do", () => {
   assert.equal(buildPlainFallbackPayloads({ ...tweet, author: { username: "alice" } })[0].content.split("\n")[0], "@alice");
 });
 
+test("markdown in an author's name is escaped where Discord renders markdown, and kept as written where it does not", () => {
+  const evil = "[Open on X](https://evil.example/x)";
+  const escapedEvil = "\\[Open on X\\]\\(https\\://evil.example/x\\)";
+  const bob = "_Bob_ *bold* `code` ~s~ |x| > q #h \\";
+  const escapedBob = "\\_Bob\\_ \\*bold\\* \\`code\\` \\~s\\~ \\|x\\| \\> q \\#h \\\\";
+  const mainVideo = "https://video.twimg.com/ext_tw_video/1/pu/vid/1280x720/main.mp4";
+  const quoteVideo = "https://video.twimg.com/ext_tw_video/2/pu/vid/1280x720/quote.mp4";
+  const tweet = {
+    ...sampleTweet,
+    author: { displayName: evil, username: "a" },
+    media: [{ type: "video", url: mainVideo }, { type: "image", url: "https://pbs.twimg.com/media/m.jpg" }],
+    quote: {
+      url: "https://x.com/bob/status/2",
+      author: { displayName: bob, username: "b_b" },
+      text: "q",
+      media: [{ type: "video", url: quoteVideo }, { type: "image", url: "https://pbs.twimg.com/media/q.jpg" }]
+    }
+  };
+
+  const payloads = buildDiscordPayloads(tweet);
+  assert.equal(payloads[0].embeds[0].author.name, `${evil} (@a)`, "the embed author name is plain text in Discord");
+  assert.equal(payloads[1].content, `-# ${escapedEvil} (@a) · Video 1\n${mainVideo}\n-# ${escapedBob} (@b\\_b) · Video 1\n${quoteVideo}`);
+  assert.equal(payloads[0].embeds[1].author.name, `Quoting ${bob} (@b_b)`, "the quote card's author name is plain text in Discord");
+  const inlineQuote = buildDiscordPayloads({ ...tweet, quote: { ...tweet.quote, media: [] } });
+  assert.equal(inlineQuote[0].embeds[0].fields[0].name, `Quoting ${escapedBob} (@b\\_b)`, "the inline quote's field name renders markdown, so it escapes the name");
+  const [fallback] = buildPlainFallbackPayloads(tweet);
+  assert.equal(fallback.content.split("\n")[0], `${escapedEvil} (@a)`, "the plain fallback is message content, so it escapes the name");
+  assert.ok(fallback.content.includes(`\n${escapedEvil} (@a) · Image 1: https://pbs.twimg.com/media/m.jpg\n`), "the fallback's photo caption escapes the name");
+  assert.ok(![...payloads, fallback].some((payload) => String(payload.content || "").includes(evil)), "no message content carries the name as a live link");
+});
+
 test("webhook sender is branded while the embed shows the tweet author once", () => {
   const payloads = buildDiscordPayloads(sampleTweet, { includeQuote: false });
   assert.equal(payloads[0].username, "Tweet Share");
