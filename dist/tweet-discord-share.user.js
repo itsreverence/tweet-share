@@ -929,7 +929,7 @@ function cardEmbeds(card) {
   const [first, ...rest] = textEmbeds;
   // Discord merges embeds that share the first one's url into a grid of up to four images inside it.
   const photos = gallery.map((url) => pruneEmbed({ color: card.color, url: card.url, image: { url } }));
-  return [first, ...photos, ...rest];
+  return [[first, ...photos], ...rest.map((embed) => [embed])];
 }
 
 // Files upload with the first message, so only its embeds can show them. A photo packed into a
@@ -949,24 +949,25 @@ function assignUploads(messages, attachments) {
   };
 }
 
-function packEmbedsIntoMessages(embeds) {
+// Same-url embeds only merge within one message, so each group of embeds moves to the next message whole.
+function packEmbedsIntoMessages(groups) {
   const messages = [];
   let current = [];
   let currentChars = 0;
 
-  for (const embed of embeds) {
-    const embedChars = countEmbedChars(embed);
-    const exceedsCount = current.length > 0 && currentChars + embedChars > DISCORD_EMBED_LIMITS.totalEmbedChars;
-    const exceedsSlots = current.length >= DISCORD_EMBED_LIMITS.embedsPerMessage;
+  for (const group of groups) {
+    const groupChars = group.reduce((sum, embed) => sum + countEmbedChars(embed), 0);
+    const fitsSlots = current.length + group.length <= DISCORD_EMBED_LIMITS.embedsPerMessage;
+    const fitsChars = currentChars + groupChars <= DISCORD_EMBED_LIMITS.totalEmbedChars;
 
-    if (exceedsCount || exceedsSlots) {
+    if (current.length && !(fitsSlots && fitsChars)) {
       messages.push(current);
       current = [];
       currentChars = 0;
     }
 
-    current.push(embed);
-    currentChars += embedChars;
+    current.push(...group);
+    currentChars += groupChars;
   }
 
   if (current.length) messages.push(current);

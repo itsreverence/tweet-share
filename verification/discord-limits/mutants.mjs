@@ -17,6 +17,7 @@ const FALLBACK_PRESERVES = "plain-text fallback carries the main post's text and
 const QUOTE_ONLY_WHEN_INCLUDED = "a share carries the quoted post's text and permalink when included, and sends what it would without the quote when excluded";
 const TRUNCATE = "truncate(value, limit) returns at most limit characters for limits from 3 to 4096";
 const PHOTO_ONCE = "every photo shows once: an attachment:// image names a file uploaded with that message, and an uploaded photo is never also linked";
+const GRID_IN_ONE_MESSAGE = "embeds that share a url, which Discord merges into one grid, are sent in one message";
 
 const mutants = [
   {
@@ -36,9 +37,23 @@ const mutants = [
   {
     name: "ignore the 6000-char total when packing embeds",
     file: "05-format-discord.js",
-    find: "const exceedsCount = current.length > 0 &&",
-    replace: "const exceedsCount = false &&",
+    find: "const fitsChars = currentChars + groupChars <= DISCORD_EMBED_LIMITS.totalEmbedChars;",
+    replace: "const fitsChars = true;",
     expect: PER_MESSAGE
+  },
+  {
+    name: "ignore the 10-embed limit when packing embeds",
+    file: "05-format-discord.js",
+    find: "const fitsSlots = current.length + group.length <= DISCORD_EMBED_LIMITS.embedsPerMessage;",
+    replace: "const fitsSlots = true;",
+    expect: PER_MESSAGE
+  },
+  {
+    name: "pack each embed on its own, so a full message splits a card's grid from its card",
+    file: "05-format-discord.js",
+    find: "packEmbedsIntoMessages(shareCards(tweet, options).flatMap(cardEmbeds))",
+    replace: "packEmbedsIntoMessages(shareCards(tweet, options).flatMap(cardEmbeds).flat().map((embed) => [embed]))",
+    expect: GRID_IN_ONE_MESSAGE
   },
   {
     name: "fallback chunks larger than message content limit",
@@ -121,8 +136,8 @@ const mutants = [
   {
     name: "drop a card's photos after its first",
     file: "05-format-discord.js",
-    find: "return [first, ...photos, ...rest];",
-    replace: "return [first, ...rest];",
+    find: "return [[first, ...photos], ...rest.map((embed) => [embed])];",
+    replace: "return [[first], ...rest.map((embed) => [embed])];",
     expect: PRESERVES
   },
   {
@@ -245,7 +260,7 @@ const mutants = [
     file: "05-format-discord.js",
     find: "packEmbedsIntoMessages(shareCards(tweet, options).flatMap(cardEmbeds))",
     replace:
-      "packEmbedsIntoMessages([...shareCards(tweet, options).flatMap(cardEmbeds), ...(options.includeQuote === false ? (tweet.quote?.media || []).filter((item) => item.posterUrl || (item.type === \"image\" && !isTweetImageMediaUrl(item.url))).map((item) => ({ image: { url: item.posterUrl || item.url } })) : [])])",
+      "packEmbedsIntoMessages([...shareCards(tweet, options).flatMap(cardEmbeds), ...(options.includeQuote === false ? (tweet.quote?.media || []).filter((item) => item.posterUrl || (item.type === \"image\" && !isTweetImageMediaUrl(item.url))).map((item) => [{ image: { url: item.posterUrl || item.url } }]) : [])])",
     expect: QUOTE_ONLY_WHEN_INCLUDED
   },
   {

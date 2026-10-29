@@ -345,7 +345,7 @@ test("packEmbedsIntoMessages respects the 6000 character budget", () => {
     author: { name: `Part ${index + 1}` }
   }));
 
-  const packed = packEmbedsIntoMessages(embeds);
+  const packed = packEmbedsIntoMessages(embeds.map((embed) => [embed]));
   const embedTextLength = (embed) =>
     [embed.title, embed.description, embed.footer?.text, embed.author?.name, ...(embed.fields || []).flatMap((field) => [field.name, field.value])]
       .reduce((sum, value) => sum + String(value ?? "").length, 0);
@@ -356,6 +356,32 @@ test("packEmbedsIntoMessages respects the 6000 character budget", () => {
     assert.ok(total <= 6000, `message has ${total} embed chars, Discord allows 6000`);
     assert.ok(group.length <= 10, `message has ${group.length} embeds, Discord allows 10`);
   }
+});
+
+test("a card's photos stay in the message that holds its card when short chunks fill the first message", () => {
+  const photos = (prefix, count) => Array.from({ length: count }, (_, index) => ({ type: "image", url: `https://pbs.twimg.com/media/${prefix}${index + 1}.jpg` }));
+  const tweet = {
+    ...sampleTweet,
+    text: Array.from({ length: 6 }, (_, index) => `x${index}${" ".repeat(4100)}`).join(""),
+    media: photos("main", 4),
+    quote: { url: "https://x.com/bob/status/2", author: { displayName: "Bob", username: "bob" }, text: "quote", media: photos("q", 4) }
+  };
+
+  const payloads = buildDiscordPayloads(tweet);
+  const messagesByUrl = new Map();
+  payloads.forEach((payload, index) => {
+    for (const embed of payload.embeds || []) {
+      if (embed.url) messagesByUrl.set(embed.url, [...(messagesByUrl.get(embed.url) || []), index]);
+    }
+  });
+  assert.deepEqual([...messagesByUrl.keys()], [tweet.url, tweet.quote.url]);
+  for (const [url, messages] of messagesByUrl) {
+    assert.equal(new Set(messages).size, 1, `embeds with url ${url} sit in one message, not ${JSON.stringify(messages)}`);
+  }
+  for (const payload of payloads) assert.ok(payload.embeds.length <= 10, `${payload.embeds.length} embeds in one message`);
+  assert.equal(payloads.flatMap(embedImageUrls).length, 8, "every photo is shown");
+  const quoteHost = payloads.flatMap((payload) => payload.embeds).find((embed) => embed.author?.name === "Quoting Bob (@bob)");
+  assert.ok(quoteHost.image, "the quote card keeps its first photo");
 });
 
 test("a post's first photo sits on its card and the next on a same-url embed that Discord merges into a grid", () => {

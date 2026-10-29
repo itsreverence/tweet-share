@@ -139,7 +139,12 @@ const repeatedBlock = fc.oneof(
   fc.constantFrom("a", "a ", " a", "😀", "a\n", "word ")
 );
 const longText = fc.tuple(repeatedBlock, length).map(([s, n]) => s.repeat(Math.ceil(n / s.length)).slice(0, n));
-const text = fc.oneof(shortProse, longText);
+// A whitespace run that reaches past the chunk limit leaves splitText a chunk of one word, so six words fill six embeds.
+const whitespaceRun = fc.tuple(fc.constantFrom(" ", "\n"), fc.integer({ min: 4090, max: 4100 })).map(([char, count]) => char.repeat(count));
+const wordsBetweenLongWhitespace = fc
+  .array(fc.tuple(fc.stringMatching(/^[A-Za-z0-9]{1,12}$/), whitespaceRun), { minLength: 1, maxLength: 6 })
+  .map((pairs) => pairs.flat().join(""));
+const text = fc.oneof(shortProse, longText, wordsBetweenLongWhitespace);
 const statusId = fc.bigInt({ min: 1n, max: 10n ** 19n }).map(String);
 const username = fc.stringMatching(/^[A-Za-z0-9_]{1,15}$/, { size: "max" });
 const author = fc.record(
@@ -488,6 +493,24 @@ test("every photo shows once: an attachment:// image names a file uploaded with 
         const shown = shownAt.get(photoKey(file.sourceUrl));
         if (!named.has(`${m}:${file.filename}`) && shown) problems.push(`message ${m + 1} uploads ${file.filename} as a plain attachment, and ${shown} shows it again`);
       }
+    });
+    return report(problems);
+  });
+});
+
+test("embeds that share a url, which Discord merges into one grid, are sent in one message", async () => {
+  await runShare(tweetWithShareableImages, (t, o, requests) => {
+    const problems = [];
+    const firstMessageOf = new Map();
+    requests.forEach(({ payload }, m) => {
+      (payload.embeds || []).forEach((embed, i) => {
+        if (!embed.url) return;
+        const first = firstMessageOf.get(embed.url);
+        if (first !== undefined && first !== m) {
+          problems.push(`message ${m + 1} embed ${i + 1} has url ${embed.url}, which message ${first + 1} also uses, so its photo leaves that card's grid`);
+        }
+        firstMessageOf.set(embed.url, first ?? m);
+      });
     });
     return report(problems);
   });
