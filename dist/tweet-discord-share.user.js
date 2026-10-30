@@ -372,10 +372,6 @@ function decodeHtmlEntities(value) {
   return String(value || "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 }
 
-function normalizeTextForMatch(value) {
-  return String(value || "").replace(/\s+/g, " ").trim();
-}
-
 function isPlayableTweetVideoUrl(url) {
   return /^https:\/\/video\.twimg\.com\/.+\.mp4(?:\?|$)/.test(url || "") && !/\/aud\//.test(url || "");
 }
@@ -869,12 +865,12 @@ function formatQuoteFieldValue(text) {
   return trimmed ? trimmed.split("\n").map((line) => `> ${line}`).join("\n") : "";
 }
 
-// Null when the quote does not fit one field whole; the caller gives it a card instead, so none of it is lost.
+// Null when the quote does not fit one field whole, or has only media to show; the caller gives it a card instead, so
+// none of it is lost and its media stays labelled as the quote's.
 function buildInlineQuoteFields(quote) {
   const link = quote.url ? `[View quoted post](${quote.url})` : "";
   const value = [formatQuoteFieldValue(quote.text), link].filter(Boolean).join("\n");
-  if (value.length > DISCORD_EMBED_LIMITS.fieldValue) return null;
-  if (!value) return [];
+  if (!value || value.length > DISCORD_EMBED_LIMITS.fieldValue) return null;
 
   return [{
     name: truncate(`Quoting ${authorLabel(quote, escapeMarkdown)}`, DISCORD_EMBED_LIMITS.fieldName),
@@ -1352,28 +1348,6 @@ function tweetFromSyndication(data, fallback = {}) {
   };
 }
 
-// Two posts by one author can open alike, so only a lone match names the quoted post.
-function bestCachedTweetForQuote(quote, mainTweetId = "") {
-  const quoteText = normalizeTextForMatch(quote.text);
-  const quoteUsername = String(quote.author?.username || "").trim();
-  if (!quoteText || !quoteUsername) return null;
-
-  const matches = [];
-  for (const [id, cachedTweet] of TWEET_CACHE) {
-    if (id === mainTweetId || !/^\d+$/.test(String(id))) continue;
-    if (cachedTweet.author?.username !== quoteUsername) continue;
-
-    const cachedText = normalizeTextForMatch(cachedTweet.text);
-    if (cachedText === quoteText
-      || (quoteText.length >= 24 && cachedText.includes(quoteText))
-      || (cachedText.length >= 24 && quoteText.includes(cachedText))) {
-      matches.push(cachedTweet);
-    }
-  }
-
-  return matches.length === 1 ? matches[0] : null;
-}
-
 // X's quote box usually has no link of its own, so the parent's syndication result supplies the address.
 function fillQuoteUrl(quote, quotedTweet) {
   if (!quote || quote.url || !quotedTweet?.id_str) return;
@@ -1422,9 +1396,6 @@ async function enrichPost(tweet) {
   });
 
   fillQuoteUrl(tweet.quote, data?.quoted_tweet);
-  if (tweet.quote && !tweet.quote.url) {
-    tweet.quote.url = bestCachedTweetForQuote(tweet.quote, tweetId)?.url || "";
-  }
 
   if (hasQuoteCandidate(tweet)) {
     tweet.quote = await enrichPost(tweet.quote);
@@ -1610,7 +1581,8 @@ function extractQuote(article) {
   // A quote box with no link of its own still carries the quoted author's name, and a media-only one carries no text.
   const quotedContainer = outermostQuoteCandidate(contentQuoteCandidates)
     || outermostQuoteCandidate(scopedQuoteCandidates)
-    || quoteCandidates.find((node) => node !== article && node.querySelector('[data-testid="tweetText"], [data-testid="User-Name"]'));
+    || quoteCandidates.find((node) => node !== article && node.querySelector('[data-testid="tweetText"]'))
+    || quoteCandidates.find((node) => node !== article && node.querySelector('[data-testid="User-Name"]'));
 
   if (!quotedContainer && !quotedLink) return null;
 

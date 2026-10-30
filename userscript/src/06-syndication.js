@@ -170,28 +170,6 @@ function tweetFromSyndication(data, fallback = {}) {
   };
 }
 
-// Two posts by one author can open alike, so only a lone match names the quoted post.
-function bestCachedTweetForQuote(quote, mainTweetId = "") {
-  const quoteText = normalizeTextForMatch(quote.text);
-  const quoteUsername = String(quote.author?.username || "").trim();
-  if (!quoteText || !quoteUsername) return null;
-
-  const matches = [];
-  for (const [id, cachedTweet] of TWEET_CACHE) {
-    if (id === mainTweetId || !/^\d+$/.test(String(id))) continue;
-    if (cachedTweet.author?.username !== quoteUsername) continue;
-
-    const cachedText = normalizeTextForMatch(cachedTweet.text);
-    if (cachedText === quoteText
-      || (quoteText.length >= 24 && cachedText.includes(quoteText))
-      || (cachedText.length >= 24 && quoteText.includes(cachedText))) {
-      matches.push(cachedTweet);
-    }
-  }
-
-  return matches.length === 1 ? matches[0] : null;
-}
-
 // X's quote box usually has no link of its own, so the parent's syndication result supplies the address.
 function fillQuoteUrl(quote, quotedTweet) {
   if (!quote || quote.url || !quotedTweet?.id_str) return;
@@ -240,9 +218,6 @@ async function enrichPost(tweet) {
   });
 
   fillQuoteUrl(tweet.quote, data?.quoted_tweet);
-  if (tweet.quote && !tweet.quote.url) {
-    tweet.quote.url = bestCachedTweetForQuote(tweet.quote, tweetId)?.url || "";
-  }
 
   if (hasQuoteCandidate(tweet)) {
     tweet.quote = await enrichPost(tweet.quote);

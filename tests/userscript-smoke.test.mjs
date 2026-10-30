@@ -488,6 +488,16 @@ test("in a Firefox Xray sandbox the page's fetch and XMLHttpRequest stay untouch
   assert.match(view.webhookPosts().map(postedMessage)[0].payload.embeds[0].description, /^Start of a long post…\n\n.*cut off/i);
 });
 
+test("a name-only link ahead of the quote box does not hide the quote's own text from the panel", async (t) => {
+  const view = openPage(t, { destinations: [general], quote: "Bobs quoted words" });
+  const box = view.document.querySelector('[data-testid="tweetText"] ~ [role="link"], article [role="link"]');
+  box.querySelector('a[href="/bob/status/999"]').remove();
+  box.insertAdjacentHTML("beforebegin", '<div role="link"><div data-testid="User-Name"><span>Carol</span><span>@carol</span></div></div>');
+
+  click(view, (await openShareMenu(view))[0]);
+  await waitFor(() => /quoting @bob/i.test(view.document.body.textContent), "the panel naming Bob's quote");
+});
+
 test("sharing with no destinations opens settings and sends nothing", async (t) => {
   const view = openPage(t, { destinations: [] });
 

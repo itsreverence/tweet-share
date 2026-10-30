@@ -148,12 +148,12 @@ function formatQuoteFieldValue(text) {
   return trimmed ? trimmed.split("\n").map((line) => `> ${line}`).join("\n") : "";
 }
 
-// Null when the quote does not fit one field whole; the caller gives it a card instead, so none of it is lost.
+// Null when the quote does not fit one field whole, or has only media to show; the caller gives it a card instead, so
+// none of it is lost and its media stays labelled as the quote's.
 function buildInlineQuoteFields(quote) {
   const link = quote.url ? `[View quoted post](${quote.url})` : "";
   const value = [formatQuoteFieldValue(quote.text), link].filter(Boolean).join("\n");
-  if (value.length > DISCORD_EMBED_LIMITS.fieldValue) return null;
-  if (!value) return [];
+  if (!value || value.length > DISCORD_EMBED_LIMITS.fieldValue) return null;
 
   return [{
     name: truncate(`Quoting ${authorLabel(quote, escapeMarkdown)}`, DISCORD_EMBED_LIMITS.fieldName),

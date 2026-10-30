@@ -59,10 +59,6 @@ function decodeHtmlEntities(value) {
   return String(value || "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 }
 
-function normalizeTextForMatch(value) {
-  return String(value || "").replace(/\s+/g, " ").trim();
-}
-
 function isPlayableTweetVideoUrl(url) {
   return /^https:\/\/video\.twimg\.com\/.+\.mp4(?:\?|$)/.test(url || "") && !/\/aud\//.test(url || "");
 }

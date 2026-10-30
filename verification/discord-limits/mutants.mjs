@@ -298,7 +298,7 @@ const mutants = [
         "const value = [formatQuoteFieldValue(quote.text), link].filter(Boolean).join(\"\\n\");",
         "const value = truncate([formatQuoteFieldValue(quote.text), link].filter(Boolean).join(\"\\n\"), DISCORD_EMBED_LIMITS.fieldValue);"
       ],
-      ["  if (value.length > DISCORD_EMBED_LIMITS.fieldValue) return null;\n", ""]
+      ["  if (!value || value.length > DISCORD_EMBED_LIMITS.fieldValue) return null;\n", ""]
     ],
     expect: QUOTE_ONLY_WHEN_INCLUDED
   },

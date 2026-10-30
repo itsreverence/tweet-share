@@ -225,6 +225,18 @@ test("a quote card shows the quoted post's own date", () => {
   assert.equal(payloads[0].embeds[1].timestamp, "2026-06-11T10:00:00.000Z");
 });
 
+test("a quote with only a video and no link gets its own named card, so the video does not read as the main post's", () => {
+  const video = "https://video.twimg.com/ext_tw_video/777/pu/vid/1.mp4";
+  const [first, ...rest] = buildDiscordPayloads({
+    ...sampleTweet,
+    media: [],
+    quote: { url: "", author: { displayName: "Bob", username: "bob", avatarUrl: "" }, text: "", media: [{ type: "video", url: video }], createdAt: "" }
+  });
+
+  assert.ok(first.embeds.some((embed) => /^Quoting Bob/.test(embed.author?.name || "")));
+  assert.ok([first, ...rest].some((payload) => payload.content?.includes(video)));
+});
+
 test("a quote without photos stays inline in the main card, and its video follows as a link", () => {
   const payloads = buildDiscordPayloads(jamieQuoteTweet);
   const firstEmbed = payloads[0].embeds[0];
