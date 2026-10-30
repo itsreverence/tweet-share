@@ -564,6 +564,38 @@ test("a post cut off with no captured full text says so in its text", async () =
   assert.equal(tweet.textCutOff, true);
 });
 
+const cutOffNotes = (text) => String(text).split("[Post cut off.").length - 1;
+
+test("a cut-off quote that never got a link is marked cut off once, and leaves the main post alone", async () => {
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  const tweet = await syndication.enrichTweetMedia({
+    ...longPostParts({ textCutOff: false }),
+    quote: { url: "", author: { displayName: "Bob", username: "bob", avatarUrl: "" }, text: "Start of Bob's long quote", textCutOff: true, media: [], createdAt: "" }
+  });
+
+  assert.match(tweet.quote.text, /^Start of Bob's long quote…\n\n.*cut off.*Open on X/i);
+  assert.equal(cutOffNotes(tweet.quote.text), 1);
+  assert.equal(tweet.text, "The start of a long post");
+});
+
+test("a cut-off quote with a link, and a cut-off post above it, are each marked once", async () => {
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  const tweet = await syndication.enrichTweetMedia({
+    ...longPostParts(),
+    quote: { url: "https://x.com/bob/status/555", author: { displayName: "Bob", username: "bob", avatarUrl: "" }, text: "Start of Bob's long quote", textCutOff: true, media: [], createdAt: "" }
+  });
+
+  assert.equal(cutOffNotes(tweet.text), 1);
+  assert.equal(cutOffNotes(tweet.quote.text), 1);
+});
+
+test("a cut-off post already ending in an ellipsis gets no second one", async () => {
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  const tweet = await syndication.enrichTweetMedia(longPostParts({ text: "The start of a long post…" }));
+
+  assert.match(tweet.text, /^The start of a long post…\n\n/);
+});
+
 test("a complete post is left alone", async () => {
   const syndication = loadMediaContext(() => Promise.resolve(null));
   const tweet = await syndication.enrichTweetMedia(longPostParts({ textCutOff: false }));
