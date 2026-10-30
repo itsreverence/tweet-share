@@ -1602,9 +1602,10 @@ function extractQuote(article) {
   );
   const scopedQuoteCandidates = quoteOnlyCandidates.length ? quoteOnlyCandidates : linkedQuoteCandidates;
   const contentQuoteCandidates = scopedQuoteCandidates.filter(quoteCandidateHasContent);
+  // A quote box with no link of its own still carries the quoted author's name, and a media-only one carries no text.
   const quotedContainer = outermostQuoteCandidate(contentQuoteCandidates)
     || outermostQuoteCandidate(scopedQuoteCandidates)
-    || quoteCandidates.find((node) => node !== article && node.querySelector('[data-testid="tweetText"]'));
+    || quoteCandidates.find((node) => node !== article && node.querySelector('[data-testid="tweetText"], [data-testid="User-Name"]'));
 
   if (!quotedContainer && !quotedLink) return null;
 
