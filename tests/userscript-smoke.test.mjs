@@ -37,7 +37,8 @@ function openPage(t, {
     ["tds-destinations", destinations],
     ["tds-preferences", { alwaysShowPreview: false }]
   ]),
-  discordResponse = { status: 204, responseText: "" }
+  discordResponse = { status: 204, responseText: "" },
+  unsafeWindow
 }) {
   const dom = new JSDOM(page({ quote, text }), {
     url: postUrl,
@@ -68,6 +69,7 @@ function openPage(t, {
       setTimeout(() => details.onload(respond(details)), 0);
     }
   };
+  if (unsafeWindow) window.unsafeWindow = unsafeWindow;
   window.eval(userscript);
   const posts = () => requests.filter((request) => request.method === "POST");
   return {
@@ -307,6 +309,45 @@ test("emoji X draws as images stay in the post text and the author's name, and d
   assert.match(card.description, /📸: Getty \/ Caddix/);
   assert.match(card.author.name, /^Alice 🔥/);
   assert.equal(message.files.length, 1, "only the post's photo uploads");
+});
+
+test("a post X shows with Show more is marked cut off in the message and the toast, and its quote's link does not count", async (t) => {
+  const showMore = '<a data-testid="tweet-text-show-more-link" href="/alice/status/1234567890">Show more</a>';
+  const view = openPage(t, { destinations: [general], text: `Start of a long post</span></div>${showMore}<div><span>` });
+  click(view, (await openShareMenu(view))[0]);
+  const success = await waitFor(() => toast(view, "success"), "the success toast");
+  assert.match(success.textContent, /cut off/i);
+  assert.match(view.webhookPosts().map(postedMessage)[0].payload.embeds[0].description, /Start of a long post…\n\n.*cut off/i);
+});
+
+test("full text from traffic on the page itself completes a cut-off post, even when the script's own window is a sandbox", async (t) => {
+  const graphqlBody = {
+    rest_id: "1234567890",
+    core: { user_results: { result: { legacy: { name: "Alice", screen_name: "alice" } } } },
+    legacy: { full_text: "Start of a long post" },
+    note_tweet: { note_tweet_results: { result: { text: "Start of a long post and its ending" } } }
+  };
+  const graphqlResponse = { clone: () => ({ json: async () => graphqlBody }) };
+  const pageFetchCalls = [];
+  const pageWindow = {
+    fetch(...args) {
+      pageFetchCalls.push({ self: this, args });
+      return Promise.resolve(graphqlResponse);
+    },
+    XMLHttpRequest: class { open() {} send() {} }
+  };
+  const showMore = '<a data-testid="tweet-text-show-more-link" href="/alice/status/1234567890">Show more</a>';
+  const view = openPage(t, { destinations: [general], text: `Start of a long post</span></div>${showMore}<div><span>`, unsafeWindow: pageWindow });
+
+  const seen = await pageWindow.fetch("https://x.com/i/api/graphql/abc/HomeTimeline");
+  assert.equal(seen, graphqlResponse, "the page gets X's own response back");
+  assert.equal(pageFetchCalls[0].self, pageWindow, "X's fetch runs with the page as its receiver");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  click(view, (await openShareMenu(view))[0]);
+  const success = await waitFor(() => toast(view, "success"), "the success toast");
+  assert.doesNotMatch(success.textContent, /cut off/i);
+  assert.equal(view.webhookPosts().map(postedMessage)[0].payload.embeds[0].description, "Start of a long post and its ending");
 });
 
 test("sharing with no destinations opens settings and sends nothing", async (t) => {

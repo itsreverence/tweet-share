@@ -526,6 +526,50 @@ test("enrichTweetMedia merges cached image-only media when syndication is empty"
   assert.equal(tweet.media[0].url, "https://pbs.twimg.com/media/cached-image-only.jpg?format=jpg&name=orig");
 });
 
+const longPostParts = (overrides = {}) => ({
+  url: "https://x.com/fixture_author/status/1000000000000000001",
+  author: { displayName: "Fixture Author", username: "fixture_author", avatarUrl: "" },
+  text: "The start of a long post",
+  textCutOff: true,
+  media: [],
+  createdAt: "",
+  quote: null,
+  ...overrides
+});
+
+test("a post cut off on the timeline gets its full text, links expanded, from captured X traffic", async () => {
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  syndication.scanForVideoVariants({
+    rest_id: "1000000000000000001",
+    core: { user_results: { result: { legacy: { name: "Fixture Author", screen_name: "fixture_author" } } } },
+    legacy: { full_text: "The start of a long post https://t.co/short" },
+    note_tweet: { note_tweet_results: { result: {
+      text: "The start of a long post and its ending https://t.co/abc",
+      entity_set: { urls: [{ url: "https://t.co/abc", expanded_url: "https://github.com/example/project" }] }
+    } } }
+  });
+
+  const tweet = await syndication.enrichTweetMedia(longPostParts());
+
+  assert.equal(tweet.text, "The start of a long post and its ending https://github.com/example/project");
+  assert.equal(tweet.textCutOff, false);
+});
+
+test("a post cut off with no captured full text says so in its text", async () => {
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  const tweet = await syndication.enrichTweetMedia(longPostParts());
+
+  assert.match(tweet.text, /^The start of a long post…\n\n.*cut off.*Open on X/i);
+  assert.equal(tweet.textCutOff, true);
+});
+
+test("a complete post is left alone", async () => {
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  const tweet = await syndication.enrichTweetMedia(longPostParts({ textCutOff: false }));
+
+  assert.equal(tweet.text, "The start of a long post");
+});
+
 test("enrichTweetMedia takes a quote's missing link from the parent's quoted_tweet, unless it names someone else", async () => {
   const quoteLink = async (quotedName) => {
     const syndication = loadMediaContext((method, url) => Promise.resolve(
