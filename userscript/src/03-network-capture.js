@@ -175,13 +175,14 @@ function installNetworkCapture() {
   const xhrPrototype = pageWindow.XMLHttpRequest.prototype;
   const originalOpen = xhrPrototype.open;
   const originalSend = xhrPrototype.send;
+  const requestUrls = new WeakMap();
   xhrPrototype.open = function (method, url, ...rest) {
-    this.__tdsUrl = String(url || "");
+    requestUrls.set(this, String(url || ""));
     return originalOpen.call(this, method, url, ...rest);
   };
   xhrPrototype.send = function (...args) {
     this.addEventListener("load", () => {
-      if (!shouldCaptureApiUrl(this.__tdsUrl || "")) return;
+      if (!shouldCaptureApiUrl(requestUrls.get(this) || "")) return;
       try {
         scanForVideoVariants(JSON.parse(this.responseText));
       } catch {}
