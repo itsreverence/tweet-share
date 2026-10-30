@@ -526,6 +526,28 @@ test("enrichTweetMedia merges cached image-only media when syndication is empty"
   assert.equal(tweet.media[0].url, "https://pbs.twimg.com/media/cached-image-only.jpg?format=jpg&name=orig");
 });
 
+test("enrichTweetMedia takes a quote's missing link from the parent's quoted_tweet, unless it names someone else", async () => {
+  const quoteLink = async (quotedName) => {
+    const syndication = loadMediaContext((method, url) => Promise.resolve(
+      new URL(url).searchParams.get("id") === "1000000000000000001"
+        ? { id_str: "1000000000000000001", quoted_tweet: { id_str: "2000000000000000002", user: { screen_name: quotedName } } }
+        : null
+    ));
+    const tweet = await syndication.enrichTweetMedia({
+      url: "https://x.com/fixture_author/status/1000000000000000001",
+      author: { displayName: "Fixture Author", username: "fixture_author", avatarUrl: "" },
+      text: "Main post",
+      media: [],
+      createdAt: "",
+      quote: { url: "", author: { displayName: "Quoted", username: "quoted_user", avatarUrl: "" }, text: "Quoted words", media: [], createdAt: "" }
+    });
+    return tweet.quote.url;
+  };
+
+  assert.equal(await quoteLink("Quoted_User"), "https://x.com/Quoted_User/status/2000000000000000002");
+  assert.equal(await quoteLink("someone_else"), "");
+});
+
 test("enrichTweetMedia fills a link-only quote's text and photo from its syndication result", async () => {
   const quoteParent = { ...readFixture("quote-parent.json"), photos: [{ url: "https://pbs.twimg.com/media/QuoteParentPhoto.jpg" }] };
   const syndication = loadMediaContext((method, url) =>

@@ -1342,6 +1342,15 @@ function bestCachedTweetForQuote(quote, mainTweetId = "") {
   return null;
 }
 
+// X's quote box usually has no link of its own, so the parent's syndication result supplies the address.
+function fillQuoteUrl(quote, quotedTweet) {
+  if (!quote || quote.url || !quotedTweet?.id_str) return;
+  const username = String(quotedTweet.user?.screen_name || "");
+  const shownUsername = String(quote.author?.username || "");
+  if (shownUsername && shownUsername.toLowerCase() !== username.toLowerCase()) return;
+  quote.url = `https://x.com/${username || "i"}/status/${quotedTweet.id_str}`;
+}
+
 async function enrichTweetMedia(tweet) {
   const tweetId = tweetIdFromUrl(tweet.url);
   const data = await fetchSyndicationTweet(tweetId);
@@ -1362,6 +1371,8 @@ async function enrichTweetMedia(tweet) {
     videoUrl,
     posterUrl
   });
+
+  fillQuoteUrl(tweet.quote, data?.quoted_tweet);
 
   if (hasQuoteCandidate(tweet)) {
     tweet.quote = await enrichTweetMedia(tweet.quote);
