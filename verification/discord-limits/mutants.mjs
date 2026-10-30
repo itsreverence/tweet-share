@@ -291,6 +291,18 @@ const mutants = [
     expect: QUOTE_ONLY_WHEN_INCLUDED
   },
   {
+    name: "a long photo-less quote is cut to fit the inline field",
+    file: "05-format-discord.js",
+    edits: [
+      [
+        "const value = [formatQuoteFieldValue(quote.text), link].filter(Boolean).join(\"\\n\");",
+        "const value = truncate([formatQuoteFieldValue(quote.text), link].filter(Boolean).join(\"\\n\"), DISCORD_EMBED_LIMITS.fieldValue);"
+      ],
+      ["  if (value.length > DISCORD_EMBED_LIMITS.fieldValue) return null;\n", ""]
+    ],
+    expect: QUOTE_ONLY_WHEN_INCLUDED
+  },
+  {
     name: "a quoted post with only a permalink is dropped",
     file: "05-format-discord.js",
     find: "return Boolean(hasQuoteCandidate(tweet) || quote.text || mediaLinks(quote).length > 0);",

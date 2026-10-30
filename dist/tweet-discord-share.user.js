@@ -844,16 +844,16 @@ function pruneEmbed(embed) {
   return next;
 }
 
-function formatQuoteFieldValue(text, limit) {
+function formatQuoteFieldValue(text) {
   const trimmed = String(text || "").trim();
-  if (!trimmed) return "";
-  return truncate(trimmed.split("\n").map((line) => `> ${line}`).join("\n"), limit);
+  return trimmed ? trimmed.split("\n").map((line) => `> ${line}`).join("\n") : "";
 }
 
+// Null when the quote does not fit one field whole; the caller gives it a card instead, so none of it is lost.
 function buildInlineQuoteFields(quote) {
   const link = quote.url ? `[View quoted post](${quote.url})` : "";
-  const room = DISCORD_EMBED_LIMITS.fieldValue - (link ? link.length + 1 : 0);
-  const value = [formatQuoteFieldValue(quote.text, room), link].filter(Boolean).join("\n");
+  const value = [formatQuoteFieldValue(quote.text), link].filter(Boolean).join("\n");
+  if (value.length > DISCORD_EMBED_LIMITS.fieldValue) return null;
   if (!value) return [];
 
   return [{
@@ -911,14 +911,13 @@ function shareCards(tweet, shareOptions = {}) {
 
   // Extraction can give the main post a photo that belongs to its quote, so the quote keeps every photo of its own and
   // the main card shows the rest. In one card a quote's photos would read as the main post's, so a quote with photos
-  // gets its own.
+  // gets its own, as does a quote whose text would not fit a field whole.
   const quoteImages = cardPhotoUrls(tweet.quote);
   const images = cardPhotoUrls(tweet, quoteImages);
-  if (quoteImages.length) {
-    const quoteUrl = tweet.quote.url && tweet.quote.url !== url ? tweet.quote.url : gridUrl(url, "quote");
-    return [postCard(tweet, "main", { images, url }), postCard(tweet.quote, "quote", { images: quoteImages, url: quoteUrl })];
-  }
-  return [postCard(tweet, "main", { images, fields: buildInlineQuoteFields(tweet.quote), url })];
+  const fields = quoteImages.length ? null : buildInlineQuoteFields(tweet.quote);
+  if (fields) return [postCard(tweet, "main", { images, fields, url })];
+  const quoteUrl = tweet.quote.url && tweet.quote.url !== url ? tweet.quote.url : gridUrl(url, "quote");
+  return [postCard(tweet, "main", { images, url }), postCard(tweet.quote, "quote", { images: quoteImages, url: quoteUrl })];
 }
 
 function cardEmbeds(card) {
