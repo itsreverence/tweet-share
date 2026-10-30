@@ -362,9 +362,10 @@ test("full text from traffic on the page itself completes a cut-off post, even w
   const showMore = '<a data-testid="tweet-text-show-more-link" href="/alice/status/1234567890">Show more</a>';
   const view = openPage(t, { destinations: [general], text: `Start of a long post</span></div>${showMore}<div><span>`, unsafeWindow: pageWindow });
 
-  const seen = await pageWindow.fetch("https://x.com/i/api/graphql/abc/HomeTimeline");
+  const { fetch } = pageWindow;
+  const seen = await fetch("https://x.com/i/api/graphql/abc/HomeTimeline");
   assert.equal(seen, graphqlResponse, "the page gets X's own response back");
-  assert.equal(pageFetchCalls[0].self, pageWindow, "X's fetch runs with the page as its receiver");
+  assert.equal(pageFetchCalls[0].self, pageWindow, "X's fetch runs with the page as its receiver, however X called it");
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   click(view, (await openShareMenu(view))[0]);
@@ -393,6 +394,70 @@ test("a quoted video post whose box shows only its author is the quote, so unche
 
   await waitFor(() => toast(view, "success"), "the success toast");
   assert.doesNotMatch(sentText(view.webhookPosts()), /quote\.mp4/, "the quoted post's video is not sent as the main post's");
+});
+
+test("full text from X's XMLHttpRequest traffic on the page completes a cut-off post", async (t) => {
+  const loadListeners = [];
+  const pageWindow = {
+    XMLHttpRequest: class {
+      open() {}
+      send() {}
+      addEventListener(type, listener) {
+        if (type === "load") loadListeners.push(listener);
+      }
+    }
+  };
+  const showMore = '<a data-testid="tweet-text-show-more-link" href="/alice/status/1234567890">Show more</a>';
+  const view = openPage(t, { destinations: [general], text: `Start of a long post</span></div>${showMore}<div><span>`, unsafeWindow: pageWindow });
+
+  const request = new pageWindow.XMLHttpRequest();
+  request.open("GET", "https://x.com/i/api/graphql/abc/HomeTimeline");
+  request.send();
+  request.responseText = JSON.stringify({
+    rest_id: "1234567890",
+    core: { user_results: { result: { legacy: { name: "Alice", screen_name: "alice" } } } },
+    legacy: { full_text: "Start of a long post" },
+    note_tweet: { note_tweet_results: { result: { text: "Start of a long post and its ending" } } }
+  });
+  for (const listener of loadListeners) listener.call(request);
+
+  click(view, (await openShareMenu(view))[0]);
+  const success = await waitFor(() => toast(view, "success"), "the success toast");
+  assert.doesNotMatch(success.textContent, /cut off/i);
+  assert.equal(view.webhookPosts().map(postedMessage)[0].payload.embeds[0].description, "Start of a long post and its ending");
+});
+
+const cutOffQuoteBox = `<div role="link" tabindex="0">
+    <div data-testid="User-Name"><span>Bob</span><span>@bob</span></div>
+    <div data-testid="tweetText"><span>Start of Bob's long quote</span></div>
+    <span data-testid="tweet-text-show-more-link">Show more</span>
+  </div>`;
+
+test("a quote X shows with Show more is marked cut off in its field and the toast, and the main post is not", async (t) => {
+  const view = openPage(t, { destinations: [general] });
+  addToPost(view, cutOffQuoteBox);
+
+  const menu = await openPreview(view);
+  click(view, channelButtons(menu, "General")[0]);
+  const success = await waitFor(() => toast(view, "success"), "the success toast");
+
+  assert.match(success.textContent, /cut off/i);
+  const [card] = view.webhookPosts().map(postedMessage)[0].payload.embeds;
+  assert.equal(card.description, postText, "the main post is not marked");
+  assert.match(card.fields[0].value, /^> Start of Bob's long quote…\n> \n> .*cut off/i);
+});
+
+test("with the quote unchecked, its cut-off text marks neither the toast nor the message", async (t) => {
+  const view = openPage(t, { destinations: [general] });
+  addToPost(view, cutOffQuoteBox);
+
+  const menu = await openPreview(view);
+  click(view, byText(menu, "label", "Include quoted post")[0]);
+  click(view, channelButtons(menu, "General")[0]);
+  const success = await waitFor(() => toast(view, "success"), "the success toast");
+
+  assert.doesNotMatch(success.textContent, /cut off/i);
+  assert.doesNotMatch(sentText(view.webhookPosts()), /cut off/i);
 });
 
 test("in a Firefox Xray sandbox the page's fetch and XMLHttpRequest stay untouched, and a cut-off post says so", async (t) => {

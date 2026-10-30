@@ -527,6 +527,7 @@ test("enrichTweetMedia merges cached image-only media when syndication is empty"
   assert.equal(tweet.media[0].url, "https://pbs.twimg.com/media/cached-image-only.jpg?format=jpg&name=orig");
 });
 
+const fixtureAuthor = { user_results: { result: { legacy: { name: "Fixture Author", screen_name: "fixture_author" } } } };
 const longPostParts = (overrides = {}) => ({
   url: "https://x.com/fixture_author/status/1000000000000000001",
   author: { displayName: "Fixture Author", username: "fixture_author", avatarUrl: "" },
@@ -553,6 +554,22 @@ test("a post cut off on the timeline gets its full text, links expanded, from ca
   const tweet = await syndication.enrichTweetMedia(longPostParts());
 
   assert.equal(tweet.text, "The start of a long post and its ending https://github.com/example/project");
+  assert.equal(tweet.textCutOff, false);
+});
+
+test("a post's full text survives a later capture of it that carries only the short text", async () => {
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  syndication.scanForVideoVariants({
+    rest_id: "1000000000000000001",
+    core: fixtureAuthor,
+    legacy: { full_text: "The start of a long post" },
+    note_tweet: { note_tweet_results: { result: { text: "The start of a long post and its ending" } } }
+  });
+  syndication.scanForVideoVariants({ id_str: "1000000000000000001", user_id_str: "42", full_text: "The start of a long post" });
+
+  const tweet = await syndication.enrichTweetMedia(longPostParts());
+
+  assert.equal(tweet.text, "The start of a long post and its ending");
   assert.equal(tweet.textCutOff, false);
 });
 
@@ -602,8 +619,6 @@ test("a complete post is left alone", async () => {
 
   assert.equal(tweet.text, "The start of a long post");
 });
-
-const fixtureAuthor = { user_results: { result: { legacy: { name: "Fixture Author", screen_name: "fixture_author" } } } };
 
 test("captured text drops the t.co links that stand for a post's media and reads X's escaped characters", async () => {
   const syndication = loadMediaContext(() => Promise.resolve(null));
