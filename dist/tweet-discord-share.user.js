@@ -1378,7 +1378,20 @@ function fillQuoteUrl(quote, quotedTweet) {
   quote.url = `https://x.com/${username || "i"}/status/${quotedTweet.id_str}`;
 }
 
+function noteTextCutOff(post) {
+  if (!post?.textCutOff) return;
+  const text = String(post.text || "").trimEnd();
+  post.text = `${text.endsWith("…") ? text : `${text}…`}\n\n${TEXT_CUT_OFF_NOTE}`;
+}
+
 async function enrichTweetMedia(tweet) {
+  tweet = await enrichPost(tweet);
+  noteTextCutOff(tweet);
+  noteTextCutOff(tweet.quote);
+  return tweet;
+}
+
+async function enrichPost(tweet) {
   const tweetId = tweetIdFromUrl(tweet.url);
   const data = await fetchSyndicationTweet(tweetId);
   const cachedTweet = tweetId ? TWEET_CACHE.get(tweetId) : null;
@@ -1393,9 +1406,6 @@ async function enrichTweetMedia(tweet) {
   if (cachedTweet?.fullText) {
     tweet.text = cachedTweet.fullText;
     tweet.textCutOff = false;
-  }
-  if (tweet.textCutOff) {
-    tweet.text = `${tweet.text}…\n\n${TEXT_CUT_OFF_NOTE}`;
   }
   const videoUrl = normalizeTweetVideoUrl(bestSyndicationVideoUrl(data));
   const posterUrl = syndicationPosterUrl(data);
@@ -1412,7 +1422,7 @@ async function enrichTweetMedia(tweet) {
   }
 
   if (hasQuoteCandidate(tweet)) {
-    tweet.quote = await enrichTweetMedia(tweet.quote);
+    tweet.quote = await enrichPost(tweet.quote);
   }
 
   if (!hasQuoteTweet(tweet)) {
