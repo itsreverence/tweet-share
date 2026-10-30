@@ -81,6 +81,11 @@ function extractText(article, excludedNodes = []) {
     .join("\n\n");
 }
 
+function textIsCutOff(article, excludedNodes = []) {
+  return [...article.querySelectorAll('[data-testid="tweet-text-show-more-link"]')]
+    .some((node) => !isInsideExcludedNode(node, excludedNodes));
+}
+
 function imageNodePixelSize(img) {
   return Math.max(
     Number(img.naturalWidth || 0),
@@ -172,6 +177,7 @@ function extractQuote(article) {
     url: quotedLink ? normalizeTweetUrl(quotedLink) : "",
     author: quotedContainer ? extractAuthor(quotedContainer) : { displayName: "", username: "", avatarUrl: "" },
     text: quotedContainer ? extractText(quotedContainer) : "",
+    textCutOff: quotedContainer ? textIsCutOff(quotedContainer) : false,
     media: quotedContainer ? extractMedia(quotedContainer) : [],
     createdAt: quotedContainer ? extractTimestamp(quotedContainer) : "",
     container: quotedContainer || null
@@ -216,6 +222,7 @@ function extractTweet(article) {
     url: tweetUrlFromArticle(article),
     author: extractAuthor(article),
     text: extractText(article, excludedMediaNodes),
+    textCutOff: textIsCutOff(article, excludedMediaNodes),
     media: extractMedia(article, excludedMediaNodes),
     createdAt: extractTimestamp(article),
     quote

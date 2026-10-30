@@ -18,6 +18,7 @@
 // @grant        GM.setValue
 // @grant        GM.registerMenuCommand
 // @grant        GM_xmlhttpRequest
+// @grant        unsafeWindow
 // @connect      discord.com
 // @connect      cdn.syndication.twimg.com
 // @connect      pbs.twimg.com
@@ -70,6 +71,7 @@ const WEBHOOK_SEND_DELAY_MS = 750;
 const CACHE_MAX_ENTRIES = 300;
 
 const VIDEO_VARIANT_CACHE = new Map();
+const TEXT_CUT_OFF_NOTE = "[Post cut off. Open on X for the rest.]";
 const TWEET_CACHE = new Map();
 const USER_CACHE = new Map();
 
@@ -516,6 +518,15 @@ function mediaFromLegacyTweet(legacy) {
   }));
 }
 
+function noteTweetText(node) {
+  const note = node.note_tweet?.note_tweet_results?.result;
+  let value = String(note?.text || "");
+  for (const { url, expanded_url: expandedUrl } of note?.entity_set?.urls || []) {
+    if (url && expandedUrl) value = value.split(url).join(expandedUrl);
+  }
+  return value;
+}
+
 function cacheTweetResult(node) {
   const legacy = node.legacy || node;
   const userResult = node.core?.user_results?.result;
@@ -526,6 +537,7 @@ function cacheTweetResult(node) {
   const id = String(node.rest_id || node.id_str || legacy.id_str || "");
   if (!id) return;
 
+  const fullText = noteTweetText(node) || TWEET_CACHE.get(id)?.fullText || "";
   TWEET_CACHE.set(id, {
     url: username ? `https://x.com/${username}/status/${id}` : `https://x.com/i/status/${id}`,
     author: {
@@ -533,7 +545,8 @@ function cacheTweetResult(node) {
       username,
       avatarUrl: highResolutionProfileImageUrl(userLegacy.profile_image_url_https || userLegacy.profile_image_url || "")
     },
-    text: legacy.full_text || legacy.text || node.text || "",
+    text: fullText || legacy.full_text || legacy.text || node.text || "",
+    fullText,
     media: mediaFromLegacyTweet(legacy),
     createdAt: legacy.created_at || ""
   });
@@ -581,25 +594,30 @@ function shouldCaptureApiUrl(url) {
 }
 
 function installNetworkCapture() {
-  const originalFetch = window.fetch;
+  // Managers run this script in a sandbox, so X's own requests only pass through the page's window.
+  const pageWindow = typeof unsafeWindow === "undefined" ? window : unsafeWindow;
+  const originalFetch = pageWindow.fetch;
   if (typeof originalFetch === "function") {
-    window.fetch = async function (...args) {
-      const response = await originalFetch.apply(this, args);
-      const url = String(args[0]?.url || args[0] || "");
-      if (shouldCaptureApiUrl(url)) {
-        response.clone().json().then(scanForVideoVariants).catch(() => {});
-      }
+    pageWindow.fetch = async function (...args) {
+      const response = await originalFetch.apply(pageWindow, args);
+      try {
+        const url = String(args[0]?.url || args[0] || "");
+        if (shouldCaptureApiUrl(url)) {
+          response.clone().json().then(scanForVideoVariants).catch(() => {});
+        }
+      } catch {}
       return response;
     };
   }
 
-  const originalOpen = XMLHttpRequest.prototype.open;
-  const originalSend = XMLHttpRequest.prototype.send;
-  XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+  const xhrPrototype = pageWindow.XMLHttpRequest.prototype;
+  const originalOpen = xhrPrototype.open;
+  const originalSend = xhrPrototype.send;
+  xhrPrototype.open = function (method, url, ...rest) {
     this.__tdsUrl = String(url || "");
     return originalOpen.call(this, method, url, ...rest);
   };
-  XMLHttpRequest.prototype.send = function (...args) {
+  xhrPrototype.send = function (...args) {
     this.addEventListener("load", () => {
       if (!shouldCaptureApiUrl(this.__tdsUrl || "")) return;
       try {
@@ -1363,6 +1381,13 @@ async function enrichTweetMedia(tweet) {
     tweet.createdAt = tweet.createdAt || cachedTweet.createdAt || "";
     tweet.media = mergeTweetMedia(tweet.media || [], cachedTweet.media || []);
   }
+  if (cachedTweet?.fullText) {
+    tweet.text = cachedTweet.fullText;
+    tweet.textCutOff = false;
+  }
+  if (tweet.textCutOff) {
+    tweet.text = `${tweet.text}…\n\n${TEXT_CUT_OFF_NOTE}`;
+  }
   const videoUrl = normalizeTweetVideoUrl(bestSyndicationVideoUrl(data));
   const posterUrl = syndicationPosterUrl(data);
   const cachedVideoUrl = bestCachedVideoUrlForTweet(tweet);
@@ -1469,6 +1494,11 @@ function extractText(article, excludedNodes = []) {
     .join("\n\n");
 }
 
+function textIsCutOff(article, excludedNodes = []) {
+  return [...article.querySelectorAll('[data-testid="tweet-text-show-more-link"]')]
+    .some((node) => !isInsideExcludedNode(node, excludedNodes));
+}
+
 function imageNodePixelSize(img) {
   return Math.max(
     Number(img.naturalWidth || 0),
@@ -1560,6 +1590,7 @@ function extractQuote(article) {
     url: quotedLink ? normalizeTweetUrl(quotedLink) : "",
     author: quotedContainer ? extractAuthor(quotedContainer) : { displayName: "", username: "", avatarUrl: "" },
     text: quotedContainer ? extractText(quotedContainer) : "",
+    textCutOff: quotedContainer ? textIsCutOff(quotedContainer) : false,
     media: quotedContainer ? extractMedia(quotedContainer) : [],
     createdAt: quotedContainer ? extractTimestamp(quotedContainer) : "",
     container: quotedContainer || null
@@ -1604,6 +1635,7 @@ function extractTweet(article) {
     url: tweetUrlFromArticle(article),
     author: extractAuthor(article),
     text: extractText(article, excludedMediaNodes),
+    textCutOff: textIsCutOff(article, excludedMediaNodes),
     media: extractMedia(article, excludedMediaNodes),
     createdAt: extractTimestamp(article),
     quote
@@ -2400,7 +2432,8 @@ async function runShare(article, destinationId, options = {}, preparedTweet = nu
   try {
     const tweet = preparedTweet ?? await prepareShareTweet(article);
     await shareToDestination(destinationId, tweet, options);
-    showToast(`Sent to ${await destinationLabel(destinationId)}`, "success");
+    const cutOff = tweet.textCutOff || (options.includeQuote !== false && tweet.quote?.textCutOff);
+    showToast(`Sent to ${await destinationLabel(destinationId)}${cutOff ? ". Post text was cut off; open it on X for the rest." : ""}`, "success");
   } catch (error) {
     console.error(error);
     showToast(error.message, "error");

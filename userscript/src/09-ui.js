@@ -34,7 +34,8 @@ async function runShare(article, destinationId, options = {}, preparedTweet = nu
   try {
     const tweet = preparedTweet ?? await prepareShareTweet(article);
     await shareToDestination(destinationId, tweet, options);
-    showToast(`Sent to ${await destinationLabel(destinationId)}`, "success");
+    const cutOff = tweet.textCutOff || (options.includeQuote !== false && tweet.quote?.textCutOff);
+    showToast(`Sent to ${await destinationLabel(destinationId)}${cutOff ? ". Post text was cut off; open it on X for the rest." : ""}`, "success");
   } catch (error) {
     console.error(error);
     showToast(error.message, "error");

@@ -218,6 +218,13 @@ async function enrichTweetMedia(tweet) {
     tweet.createdAt = tweet.createdAt || cachedTweet.createdAt || "";
     tweet.media = mergeTweetMedia(tweet.media || [], cachedTweet.media || []);
   }
+  if (cachedTweet?.fullText) {
+    tweet.text = cachedTweet.fullText;
+    tweet.textCutOff = false;
+  }
+  if (tweet.textCutOff) {
+    tweet.text = `${tweet.text}…\n\n${TEXT_CUT_OFF_NOTE}`;
+  }
   const videoUrl = normalizeTweetVideoUrl(bestSyndicationVideoUrl(data));
   const posterUrl = syndicationPosterUrl(data);
   const cachedVideoUrl = bestCachedVideoUrlForTweet(tweet);

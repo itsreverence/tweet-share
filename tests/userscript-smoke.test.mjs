@@ -311,7 +311,7 @@ test("emoji X draws as images stay in the post text and the author's name, and d
   assert.equal(message.files.length, 1, "only the post's photo uploads");
 });
 
-test("a post X shows with Show more is marked cut off in the message and the toast, and its quote's link does not count", async (t) => {
+test("a post X shows with Show more is marked cut off in the message and the toast", async (t) => {
   const showMore = '<a data-testid="tweet-text-show-more-link" href="/alice/status/1234567890">Show more</a>';
   const view = openPage(t, { destinations: [general], text: `Start of a long post</span></div>${showMore}<div><span>` });
   click(view, (await openShareMenu(view))[0]);
