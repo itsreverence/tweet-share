@@ -54,6 +54,11 @@ function discordEmbedTimestamp(createdAt) {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
+// X's API escapes these three in post text.
+function decodeHtmlEntities(value) {
+  return String(value || "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+}
+
 function normalizeTextForMatch(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }

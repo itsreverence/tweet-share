@@ -72,7 +72,17 @@ function noteTweetText(node) {
   for (const { url, expanded_url: expandedUrl } of note?.entity_set?.urls || []) {
     if (url && expandedUrl) value = value.split(url).join(expandedUrl);
   }
-  return value;
+  return decodeHtmlEntities(value);
+}
+
+// The text X sends names a post's media by t.co links the page never shows.
+function legacyTweetText(node) {
+  const legacy = node.legacy || node;
+  let value = String(legacy.full_text || legacy.text || node.text || "");
+  for (const { url } of legacy.extended_entities?.media || legacy.entities?.media || []) {
+    if (url) value = value.split(url).join("");
+  }
+  return decodeHtmlEntities(value).replace(/[ \t]+$/gm, "").trim();
 }
 
 function cacheTweetResult(node) {
@@ -93,7 +103,7 @@ function cacheTweetResult(node) {
       username,
       avatarUrl: highResolutionProfileImageUrl(userLegacy.profile_image_url_https || userLegacy.profile_image_url || "")
     },
-    text: fullText || legacy.full_text || legacy.text || node.text || "",
+    text: fullText || legacyTweetText(node),
     fullText,
     media: mediaFromLegacyTweet(legacy),
     createdAt: legacy.created_at || ""
