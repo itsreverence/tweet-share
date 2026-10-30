@@ -4,6 +4,7 @@ import { createContext, runInNewContext } from "node:vm";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { JSDOM } from "jsdom";
 
 /*
 Fixture refresh notes:
@@ -625,6 +626,74 @@ test("enrichTweetMedia takes a quote's missing link from the parent's quoted_twe
   assert.equal(await quoteLink("someone_else"), "");
 });
 
+const bobsPost = (id, legacy, fullText) => ({
+  rest_id: id,
+  core: { user_results: { result: { legacy: { name: "Bob", screen_name: "bob" } } } },
+  legacy: { full_text: legacy.text || "", created_at: "Tue May 26 12:00:00 +0000 2026", extended_entities: legacy.media ? { media: legacy.media } : undefined },
+  ...(fullText ? { note_tweet: { note_tweet_results: { result: { text: fullText } } } } : {})
+});
+
+// A timeline post by Alice whose quote box, as X often draws it, carries no link to the quoted post.
+function articleQuoting(quoteBoxHtml) {
+  const dom = new JSDOM(`<article>
+    <div data-testid="User-Name"><span>Alice</span><span>@alice</span></div>
+    <a href="/alice/status/111"><time datetime="2026-06-10T12:00:00.000Z"></time></a>
+    <div data-testid="tweetText">Main body</div>
+    <div role="link" tabindex="0"><div data-testid="User-Name"><span>Bob</span><span>@bob</span></div>${quoteBoxHtml}</div>
+  </article>`, { url: "https://x.com/home" });
+  return dom.window.document.querySelector("article");
+}
+
+const syndicationById = (results) => (method, url) => Promise.resolve(results[new URL(url).searchParams.get("id")] || null);
+
+test("the parent's syndication result names the quoted post before any captured post by the same author", async () => {
+  const quoted = "The launch happens tomorrow morning, and here is why it matters.";
+  const syndication = loadMediaContext(syndicationById({
+    111: { id_str: "111", quoted_tweet: { id_str: "999", user: { screen_name: "bob" } } },
+    999: { id_str: "999", text: "The launch happens tomorrow morning, and here is why it matters.", user: { name: "Bob", screen_name: "bob" } }
+  }));
+  syndication.scanForVideoVariants(bobsPost("555", {
+    text: "The launch happens tomorrow morning",
+    media: [{ type: "photo", media_url_https: "https://pbs.twimg.com/media/OtherPost.jpg" }]
+  }));
+
+  const tweet = await syndication.enrichTweetMedia(syndication.extractTweet(articleQuoting(`<div data-testid="tweetText">${quoted}</div>`)));
+
+  assert.equal(tweet.quote.url, "https://x.com/bob/status/999");
+  assert.equal(tweet.quote.text, quoted);
+  assert.deepEqual(tweet.quote.media, [], "nothing of the other post comes along");
+});
+
+test("a quote with no link and no syndication answer takes the one captured post by its author whose full text matches", async () => {
+  const fullText = "Weekly update from the team, part one, and everything that follows it";
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  syndication.scanForVideoVariants(bobsPost("555", { text: "Weekly update https://t.co/short" }, fullText));
+
+  const tweet = await syndication.enrichTweetMedia({
+    ...longPostParts({ textCutOff: false }),
+    quote: { url: "", author: { displayName: "Bob", username: "bob", avatarUrl: "" }, text: "Weekly update from the team, part one", textCutOff: true, media: [], createdAt: "" }
+  });
+
+  assert.equal(tweet.quote.url, "https://x.com/bob/status/555");
+  assert.equal(tweet.quote.text, fullText);
+  assert.equal(tweet.quote.textCutOff, false);
+});
+
+test("a quote with no link stays unresolved when two captured posts by its author match its visible text", async () => {
+  const opening = "This is a recurring opening longer than twenty four characters";
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  syndication.scanForVideoVariants(bobsPost("888", { text: `${opening} OLD post ending` }));
+  syndication.scanForVideoVariants(bobsPost("999", { text: `${opening} CORRECT post ending` }));
+
+  const tweet = await syndication.enrichTweetMedia(syndication.extractTweet(articleQuoting(
+    `<div data-testid="tweetText">${opening}</div><span data-testid="tweet-text-show-more-link">Show more</span>`
+  )));
+
+  assert.equal(tweet.quote.url, "");
+  assert.match(tweet.quote.text, new RegExp(`^${opening}`));
+  assert.doesNotMatch(tweet.quote.text, /post ending/, "neither post's ending is borrowed");
+});
+
 test("enrichTweetMedia fills a link-only quote's text and photo from its syndication result", async () => {
   const quoteParent = { ...readFixture("quote-parent.json"), photos: [{ url: "https://pbs.twimg.com/media/QuoteParentPhoto.jpg" }] };
   const syndication = loadMediaContext((method, url) =>
@@ -1037,61 +1106,24 @@ test("extractQuote with link only does not borrow main tweet author metadata", (
   assert.equal(quote.createdAt, "");
 });
 
-test("bestCachedTweetForQuote prefers status id and requires author match for fuzzy text", () => {
+test("bestCachedTweetForQuote names the one cached post by the quote's author whose text matches, else nothing", () => {
   TWEET_CACHE.clear();
-  cacheTweetResult({
-    rest_id: "200",
-    legacy: {
-      full_text: "Exact quoted tweet body for testing",
-      created_at: "Tue May 26 12:00:00 +0000 2026"
-    },
-    core: {
-      user_results: {
-        result: {
-          legacy: { name: "Bob", screen_name: "bob", profile_image_url_https: "https://pbs.twimg.com/profile_images/b.jpg" }
-        }
-      }
-    }
+  const cache = (id, screenName, text) => cacheTweetResult({
+    rest_id: id,
+    legacy: { full_text: text },
+    core: { user_results: { result: { legacy: { name: screenName, screen_name: screenName } } } }
   });
-  cacheTweetResult({
-    rest_id: "999",
-    legacy: { full_text: "Exact quoted tweet body for testing but from wrong user" },
-    core: {
-      user_results: {
-        result: {
-          legacy: { name: "Eve", screen_name: "eve", profile_image_url_https: "https://pbs.twimg.com/profile_images/e.jpg" }
-        }
-      }
-    }
-  });
+  cache("200", "bob", "Exact quoted tweet body for testing");
+  cache("999", "eve", "Exact quoted tweet body for testing but from wrong user");
+  const quoteBy = (username, text) => bestCachedTweetForQuote({ url: "", author: { username }, text }, "100");
 
-  const byId = bestCachedTweetForQuote({
-    url: "https://x.com/bob/status/200",
-    author: { username: "bob" },
-    text: ""
-  }, "100");
-  assert.equal(byId?.author?.username, "bob");
+  assert.equal(quoteBy("bob", "Exact quoted tweet body for testing")?.url, "https://x.com/bob/status/200");
+  assert.equal(quoteBy("alice", "Exact quoted tweet body for testing"), null, "another author's post never matches");
+  assert.equal(quoteBy("bob", "quoted"), null, "a short text is no evidence");
+  assert.equal(quoteBy("bob", ""), null, "an empty text matches nothing, however many posts the author has");
 
-  const fuzzy = bestCachedTweetForQuote({
-    url: "",
-    author: { username: "bob" },
-    text: "Exact quoted tweet body for testing"
-  }, "100");
-  assert.equal(fuzzy?.author?.username, "bob");
-
-  const wrongUser = bestCachedTweetForQuote({
-    url: "",
-    author: { username: "alice" },
-    text: "Exact quoted tweet body for testing"
-  }, "100");
-  assert.equal(wrongUser, null);
-
-  const shortText = bestCachedTweetForQuote({
-    url: "",
-    author: { username: "bob" },
-    text: "quoted"
-  }, "100");
-  assert.equal(shortText, null);
+  cache("201", "bob", "Exact quoted tweet body for testing, posted again with more");
+  assert.equal(quoteBy("bob", "Exact quoted tweet body for testing"), null, "two matching posts leave the quote unresolved");
 });
 
 test("tweetUrlFromArticle falls back to the page URL when no status link exists", () => {
