@@ -177,6 +177,27 @@ const sentStatusIds = (requests) =>
       .flatMap((url) => /\/status\/(\d+)/.exec(url)?.[1] ?? [])
   );
 
+// X's own requests, as the script sees them through unsafeWindow. `respond` plays one GraphQL response to the page.
+function pageTraffic() {
+  const bodies = [];
+  const pageWindow = {
+    fetch() {
+      return Promise.resolve({ clone: () => ({ json: async () => bodies.shift() }) });
+    },
+    XMLHttpRequest: class { open() {} send() {} addEventListener() {} }
+  };
+  const respond = async (body) => {
+    bodies.push(body);
+    await pageWindow.fetch("https://x.com/i/api/graphql/abc/HomeTimeline");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  };
+  return { pageWindow, respond };
+}
+
+function addToPost(view, html) {
+  view.document.querySelector('article [role="group"]').insertAdjacentHTML("beforebegin", html);
+}
+
 async function openPreview(view, share) {
   const [item] = await openShareMenu(view, share);
   click(view, item);
@@ -348,6 +369,28 @@ test("full text from traffic on the page itself completes a cut-off post, even w
   const success = await waitFor(() => toast(view, "success"), "the success toast");
   assert.doesNotMatch(success.textContent, /cut off/i);
   assert.equal(view.webhookPosts().map(postedMessage)[0].payload.embeds[0].description, "Start of a long post and its ending");
+});
+
+test("a quoted video post whose box shows only its author is the quote, so unchecking the quote keeps its video out", async (t) => {
+  const { pageWindow, respond } = pageTraffic();
+  const view = openPage(t, { destinations: [general], unsafeWindow: pageWindow });
+  addToPost(view, `<div role="link" tabindex="0">
+    <div data-testid="User-Name"><span>Bob</span><span>@bob</span></div>
+    <video poster="https://pbs.twimg.com/ext_tw_video_thumb/777/pu/img/abc.jpg"></video>
+  </div>`);
+  await respond({
+    id_str: "777",
+    media_url_https: "https://pbs.twimg.com/ext_tw_video_thumb/777/pu/img/abc.jpg",
+    video_info: { variants: [{ content_type: "video/mp4", bitrate: 800000, url: "https://video.twimg.com/ext_tw_video/777/pu/vid/avc1/720x720/quote.mp4" }] }
+  });
+
+  const menu = await openPreview(view);
+  assert.match(leafWithText(menu, "Post by @alice")?.textContent ?? "", /quoting @bob$/, "the summary names the quoted post's author");
+  click(view, byText(menu, "label", "Include quoted post")[0]);
+  click(view, channelButtons(menu, "General")[0]);
+
+  await waitFor(() => toast(view, "success"), "the success toast");
+  assert.doesNotMatch(sentText(view.webhookPosts()), /quote\.mp4/, "the quoted post's video is not sent as the main post's");
 });
 
 test("sharing with no destinations opens settings and sends nothing", async (t) => {
