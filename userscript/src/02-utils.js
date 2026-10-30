@@ -10,10 +10,6 @@ function unique(values) {
   return [...new Set(values.filter(Boolean))];
 }
 
-function text(node, selector) {
-  return node.querySelector(selector)?.textContent?.trim() || "";
-}
-
 function absoluteUrl(url) {
   try {
     return new URL(url, location.href).toString();

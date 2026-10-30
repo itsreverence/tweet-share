@@ -293,6 +293,22 @@ test("sharing to the only destination posts the post to its webhook", async (t) 
   }
 });
 
+test("emoji X draws as images stay in the post text and the author's name, and do not count as media", async (t) => {
+  const emoji = (alt) => `<img alt="${alt}" src="https://abs-0.twimg.com/emoji/v2/svg/1f4f8.svg">`;
+  const view = openPage(t, { destinations: [general], text: `Great shot\n\n<span>${emoji("📸")}</span>: Getty / Caddix` });
+  view.document.querySelector('[data-testid="User-Name"] a span').innerHTML = `<div dir="ltr"><span>Alice ${emoji("🔥")}</span></div>`;
+
+  const items = await openShareMenu(view);
+  click(view, items[0]);
+  await waitFor(() => toast(view, "success"), "the success toast");
+
+  const [message] = view.webhookPosts().map(postedMessage);
+  const card = message.payload.embeds[0];
+  assert.match(card.description, /📸: Getty \/ Caddix/);
+  assert.match(card.author.name, /^Alice 🔥/);
+  assert.equal(message.files.length, 1, "only the post's photo uploads");
+});
+
 test("sharing with no destinations opens settings and sends nothing", async (t) => {
   const view = openPage(t, { destinations: [] });
 

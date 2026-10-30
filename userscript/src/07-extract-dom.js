@@ -16,6 +16,18 @@ function statusLinksFromArticle(article) {
     .filter((url, index, all) => /\/status\/\d+/.test(url) && all.indexOf(url) === index);
 }
 
+// X draws emoji as <img alt="📸">, which text reads would drop.
+function restoreEmojiImages(clone) {
+  for (const img of clone.querySelectorAll('img[alt]')) {
+    img.replaceWith(img.getAttribute("alt"));
+  }
+  return clone;
+}
+
+function textWithEmoji(node) {
+  return node ? restoreEmojiImages(node.cloneNode(true)).textContent.trim() : "";
+}
+
 function extractAuthor(article) {
   const userNameBlock = article.querySelector('[data-testid="User-Name"]');
   const avatar = article.querySelector('[data-testid^="UserAvatar-Container"] img, img[src*="profile_images"]');
@@ -26,9 +38,9 @@ function extractAuthor(article) {
     .map((link) => link.getAttribute("href") || "")
     .find((href) => /^\/[^/]+$/.test(href));
   const username = usernameText.slice(1) || profileLink?.slice(1) || "";
-  const displayName = text(userNameBlock || article, 'a[href^="/"] div[dir="ltr"] span')
+  const displayName = textWithEmoji((userNameBlock || article).querySelector('a[href^="/"] div[dir="ltr"] span'))
     || [...(userNameBlock || article).querySelectorAll("span")]
-      .map((span) => span.textContent?.trim() || "")
+      .map(textWithEmoji)
       .find((value) => value && value !== usernameText && !/^@/.test(value)) || "";
 
   return {
@@ -48,7 +60,7 @@ function normalizeTweetBodyText(value) {
 
 function readTweetTextNode(node) {
   if (typeof node.cloneNode === "function") {
-    const clone = node.cloneNode(true);
+    const clone = restoreEmojiImages(node.cloneNode(true));
     for (const anchor of clone.querySelectorAll("a")) {
       const compact = String(anchor.textContent || "").replace(/\s+/g, "");
       if (/^https?:\/\//i.test(compact) || /^[\w.-]+\.[a-z]{2,}\//i.test(compact)) {
