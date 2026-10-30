@@ -38,7 +38,8 @@ function openPage(t, {
     ["tds-preferences", { alwaysShowPreview: false }]
   ]),
   discordResponse = { status: 204, responseText: "" },
-  unsafeWindow
+  unsafeWindow,
+  exportFunction
 }) {
   const dom = new JSDOM(page({ quote, text }), {
     url: postUrl,
@@ -70,6 +71,7 @@ function openPage(t, {
     }
   };
   if (unsafeWindow) window.unsafeWindow = unsafeWindow;
+  if (exportFunction) window.exportFunction = exportFunction;
   window.eval(userscript);
   const posts = () => requests.filter((request) => request.method === "POST");
   return {
@@ -391,6 +393,34 @@ test("a quoted video post whose box shows only its author is the quote, so unche
 
   await waitFor(() => toast(view, "success"), "the success toast");
   assert.doesNotMatch(sentText(view.webhookPosts()), /quote\.mp4/, "the quoted post's video is not sent as the main post's");
+});
+
+test("in a Firefox Xray sandbox the page's fetch and XMLHttpRequest stay untouched, and a cut-off post says so", async (t) => {
+  const { pageWindow, respond } = pageTraffic();
+  const { fetch, XMLHttpRequest } = pageWindow;
+  const { open, send } = XMLHttpRequest.prototype;
+  const showMore = '<a data-testid="tweet-text-show-more-link" href="/alice/status/1234567890">Show more</a>';
+  const view = openPage(t, {
+    destinations: [general],
+    text: `Start of a long post</span></div>${showMore}<div><span>`,
+    unsafeWindow: pageWindow,
+    exportFunction: () => {}
+  });
+
+  assert.equal(pageWindow.fetch, fetch, "the page's fetch is its own");
+  assert.equal(XMLHttpRequest.prototype.open, open, "the page's XMLHttpRequest.open is its own");
+  assert.equal(XMLHttpRequest.prototype.send, send, "the page's XMLHttpRequest.send is its own");
+  await respond({
+    rest_id: "1234567890",
+    core: { user_results: { result: { legacy: { name: "Alice", screen_name: "alice" } } } },
+    legacy: { full_text: "Start of a long post" },
+    note_tweet: { note_tweet_results: { result: { text: "Start of a long post and its ending" } } }
+  });
+
+  click(view, (await openShareMenu(view))[0]);
+  const success = await waitFor(() => toast(view, "success"), "the success toast");
+  assert.match(success.textContent, /cut off/i);
+  assert.match(view.webhookPosts().map(postedMessage)[0].payload.embeds[0].description, /^Start of a long post…\n\n.*cut off/i);
 });
 
 test("sharing with no destinations opens settings and sends nothing", async (t) => {
