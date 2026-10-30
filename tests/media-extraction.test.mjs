@@ -570,6 +570,39 @@ test("a complete post is left alone", async () => {
   assert.equal(tweet.text, "The start of a long post");
 });
 
+const fixtureAuthor = { user_results: { result: { legacy: { name: "Fixture Author", screen_name: "fixture_author" } } } };
+
+test("captured text drops the t.co links that stand for a post's media and reads X's escaped characters", async () => {
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  syndication.scanForVideoVariants({
+    rest_id: "1000000000000000001",
+    core: fixtureAuthor,
+    legacy: {
+      full_text: "Tom &amp; Jerry &lt;3 https://t.co/photo",
+      entities: { media: [{ url: "https://t.co/photo", type: "photo", media_url_https: "https://pbs.twimg.com/media/Photo.jpg" }] }
+    }
+  });
+
+  const tweet = await syndication.enrichTweetMedia(longPostParts({ text: "", textCutOff: false }));
+
+  assert.equal(tweet.text, "Tom & Jerry <3");
+  assert.equal(tweet.media[0]?.url, "https://pbs.twimg.com/media/Photo.jpg?format=jpg&name=orig");
+});
+
+test("a captured long post's full text reads X's escaped characters", async () => {
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  syndication.scanForVideoVariants({
+    rest_id: "1000000000000000001",
+    core: fixtureAuthor,
+    legacy: { full_text: "Tom &amp; Jerry" },
+    note_tweet: { note_tweet_results: { result: { text: "Tom &amp; Jerry &lt;3 &gt;:)" } } }
+  });
+
+  const tweet = await syndication.enrichTweetMedia(longPostParts());
+
+  assert.equal(tweet.text, "Tom & Jerry <3 >:)");
+});
+
 test("enrichTweetMedia takes a quote's missing link from the parent's quoted_tweet, unless it names someone else", async () => {
   const quoteLink = async (quotedName) => {
     const syndication = loadMediaContext((method, url) => Promise.resolve(
