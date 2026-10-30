@@ -240,24 +240,19 @@ test("a quote without photos stays inline in the main card, and its video follow
   assert.match(payloads[1].content, /q\.mp4/);
 });
 
-test("inline quote field stays within Discord's 1024-char field limit for long quoted posts", () => {
-  const discordFieldValueLimit = 1024;
-  const tweet = {
-    ...jamieQuoteTweet,
-    quote: { ...jamieQuoteTweet.quote, text: "Long quoted sentence. ".repeat(50) }
-  };
-  assert.ok(tweet.quote.text.length > 1050, "quoted text is longer than one field");
+test("a quote whose text does not fit a field gets its own card with all of its text", () => {
+  const quoteText = `${"Long quoted sentence. ".repeat(50)}THE END`;
+  const tweet = { ...jamieQuoteTweet, quote: { ...jamieQuoteTweet.quote, text: quoteText } };
+  assert.ok(quoteText.length > 1024, "quoted text is longer than one field");
 
   const payloads = buildDiscordPayloads(tweet);
-  const quoteField = payloads[0].embeds[0].fields.find((field) => field.name === "Quoting Aaron Rupar (@atrupar)");
-  assert.ok(quoteField, "inline quote field is present");
-  assert.ok(
-    quoteField.value.length <= discordFieldValueLimit,
-    `quote field is ${quoteField.value.length} chars, Discord allows ${discordFieldValueLimit}`
-  );
-  const [quoted, link] = quoteField.value.split("\n");
-  assert.ok(quoted.endsWith("..."), "truncated quote ends with an ellipsis");
-  assert.equal(link, viewQuotedPost(tweet.quote.url), "truncation keeps the link to the quoted post whole");
+  const [mainCard, quoteCard] = payloads[0].embeds;
+  assert.equal(mainCard.description, jamieQuoteTweet.text);
+  assert.equal(mainCard.fields, undefined, "the main card has no inline quote field");
+  assert.equal(quoteCard.author.name, "Quoting Aaron Rupar (@atrupar)");
+  assert.equal(quoteCard.author.url, tweet.quote.url, "the quote card's author links the quoted post");
+  assert.equal(quoteCard.description, quoteText, "the quote card carries the whole quoted text");
+  assert.match(payloads.at(-1).content, /q\.mp4/, "the quote's video still follows as a link");
 });
 
 test("each post's photos sit in its own card when both posts have photos", () => {
