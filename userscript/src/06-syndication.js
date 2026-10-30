@@ -170,31 +170,26 @@ function tweetFromSyndication(data, fallback = {}) {
   };
 }
 
+// Two posts by one author can open alike, so only a lone match names the quoted post.
 function bestCachedTweetForQuote(quote, mainTweetId = "") {
   const quoteText = normalizeTextForMatch(quote.text);
   const quoteUsername = String(quote.author?.username || "").trim();
-  const quoteId = quote.url ? tweetIdFromUrl(quote.url) : "";
-  if (!quoteText && !quoteUsername && !quoteId) return null;
+  if (!quoteText || !quoteUsername) return null;
 
-  if (quoteId && quoteId !== mainTweetId) {
-    const byId = TWEET_CACHE.get(quoteId);
-    if (byId) return byId;
-  }
-
-  if (!quoteUsername) return null;
-
+  const matches = [];
   for (const [id, cachedTweet] of TWEET_CACHE) {
     if (id === mainTweetId || !/^\d+$/.test(String(id))) continue;
     if (cachedTweet.author?.username !== quoteUsername) continue;
 
     const cachedText = normalizeTextForMatch(cachedTweet.text);
-    if (!quoteText) return cachedTweet;
-    if (cachedText === quoteText) return cachedTweet;
-    if (quoteText.length >= 24 && cachedText.includes(quoteText)) return cachedTweet;
-    if (cachedText.length >= 24 && quoteText.includes(cachedText)) return cachedTweet;
+    if (cachedText === quoteText
+      || (quoteText.length >= 24 && cachedText.includes(quoteText))
+      || (cachedText.length >= 24 && quoteText.includes(cachedText))) {
+      matches.push(cachedTweet);
+    }
   }
 
-  return null;
+  return matches.length === 1 ? matches[0] : null;
 }
 
 // X's quote box usually has no link of its own, so the parent's syndication result supplies the address.
@@ -235,6 +230,9 @@ async function enrichTweetMedia(tweet) {
   });
 
   fillQuoteUrl(tweet.quote, data?.quoted_tweet);
+  if (tweet.quote && !tweet.quote.url) {
+    tweet.quote.url = bestCachedTweetForQuote(tweet.quote, tweetId)?.url || "";
+  }
 
   if (hasQuoteCandidate(tweet)) {
     tweet.quote = await enrichTweetMedia(tweet.quote);

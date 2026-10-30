@@ -183,7 +183,7 @@ function extractQuote(article) {
     container: quotedContainer || null
   };
 
-  const cachedQuote = quote.url ? TWEET_CACHE.get(tweetIdFromUrl(quote.url)) : bestCachedTweetForQuote(quote, tweetIdFromUrl(mainUrl));
+  const cachedQuote = quote.url ? TWEET_CACHE.get(tweetIdFromUrl(quote.url)) : null;
   if (cachedQuote) {
     quote.url = cachedQuote.url || quote.url;
     quote.author = mergeAuthor(cachedQuote.author, quote.author);

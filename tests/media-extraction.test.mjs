@@ -661,7 +661,7 @@ test("the parent's syndication result names the quoted post before any captured 
 
   assert.equal(tweet.quote.url, "https://x.com/bob/status/999");
   assert.equal(tweet.quote.text, quoted);
-  assert.deepEqual(tweet.quote.media, [], "nothing of the other post comes along");
+  assert.equal(tweet.quote.media.length, 0, "nothing of the other post comes along");
 });
 
 test("a quote with no link and no syndication answer takes the one captured post by its author whose full text matches", async () => {
