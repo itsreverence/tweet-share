@@ -179,15 +179,22 @@ function fillQuoteUrl(quote, quotedTweet) {
   quote.url = `https://x.com/${username || "i"}/status/${quotedTweet.id_str}`;
 }
 
+function linkStem(url) {
+  return url.replace(/^https?:\/\//i, "").replace(/^www\./i, "");
+}
+
 function expandShortLinks(text, entities) {
+  const urls = (entities?.urls || []).filter(({ expanded_url: expandedUrl }) => expandedUrl);
   let value = String(text || "");
-  for (const { url, display_url: displayUrl, expanded_url: expandedUrl } of entities?.urls || []) {
-    if (!expandedUrl) continue;
+  for (const { url, expanded_url: expandedUrl } of urls) {
     if (url) value = value.split(url).join(expandedUrl);
-    // X's quote box shows a shortened link as plain text, with no t.co address behind it.
-    if (displayUrl?.endsWith("…")) value = value.split(`https://${displayUrl}`).join(displayUrl).split(displayUrl).join(expandedUrl);
   }
-  return value;
+  // X's quote box shows a shortened link as plain text, cut further along than the data's display_url.
+  return value.replace(/[^\s()]+…/g, (shown) => {
+    const stem = linkStem(shown.slice(0, -1));
+    const match = /[./]/.test(stem) && urls.find(({ expanded_url: expandedUrl }) => linkStem(expandedUrl).startsWith(stem));
+    return match ? match.expanded_url : shown;
+  });
 }
 
 function noteTextCutOff(post) {
