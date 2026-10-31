@@ -10,7 +10,7 @@
 
 ## Bug reports
 
-Use the [bug report form](https://github.com/itsreverence/tweet-share/issues/new?template=bug_report.yml). Include the userscript version, browser, userscript manager, reproduction steps, and whether the post is public/protected—without copying private content.
+Use the [bug report form](https://github.com/itsreverence/tweet-share/issues/new?template=bug_report.yml). Include the userscript version, browser, userscript manager, the text from the manager menu's **Copy diagnostics** item, reproduction steps, and whether the post is public/protected—without copying private content.
 
 Never include:
 

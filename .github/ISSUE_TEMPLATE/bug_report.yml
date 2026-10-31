@@ -28,6 +28,12 @@ body:
       placeholder: Violentmonkey 2.x or Tampermonkey 5.x
     validations:
       required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: On x.com, open your userscript manager's menu and select Copy diagnostics, then paste here. It holds no posts, names, or webhooks.
+      render: text
   - type: dropdown
     id: surface
     attributes:

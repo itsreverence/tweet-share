@@ -522,6 +522,45 @@ test("a name-only link ahead of the quote box does not hide the quote's own text
   await waitFor(() => /quoting @bob/i.test(view.document.body.textContent), "the panel naming Bob's quote");
 });
 
+test("Copy diagnostics copies capture state and the manager, and nothing about channels or posts", async (t) => {
+  const { pageWindow, respond } = pageTraffic();
+  const view = openPage(t, { destinations: [general], unsafeWindow: pageWindow });
+  view.window.GM_info = { scriptHandler: "Violentmonkey", version: "2.31.0", injectInto: "page", script: { version: "9.9.9" } };
+  let copied = "";
+  Object.defineProperty(view.window.navigator, "clipboard", { value: { writeText: async (value) => { copied = value; } } });
+  await respond({
+    rest_id: "1234567890",
+    core: { user_results: { result: { legacy: { name: "Alice", screen_name: "alice" } } } },
+    legacy: { full_text: "Private words" },
+    note_tweet: { note_tweet_results: { result: { text: "Private words and more" } } }
+  });
+
+  view.menuCommands.get("Copy diagnostics")();
+  await waitFor(() => copied, "the clipboard write");
+
+  assert.match(copied, /Script: 9\.9\.9/);
+  assert.match(copied, /Manager: Violentmonkey 2\.31\.0/);
+  assert.match(copied, /Injection: page/);
+  assert.match(copied, /Capture: on/);
+  assert.match(copied, /X responses read: 1/);
+  assert.match(copied, /Posts captured: 1 \(1 with full text\)/);
+  for (const secret of [webhookUrl, "General", "Private words", "alice"]) assert.ok(!copied.includes(secret), `leaves out ${secret}`);
+  await waitFor(() => toast(view, "success"), "the confirmation toast");
+});
+
+test("Copy diagnostics says capture is off in a Firefox sandbox, and offers the text when the clipboard refuses", async (t) => {
+  const { pageWindow } = pageTraffic();
+  const view = openPage(t, { unsafeWindow: pageWindow, xraySandbox: true });
+  Object.defineProperty(view.window.navigator, "clipboard", { value: { writeText: () => Promise.reject(new Error("denied")) } });
+  let offered = "";
+  view.window.prompt = (_message, value) => { offered = value; };
+
+  view.menuCommands.get("Copy diagnostics")();
+  await waitFor(() => offered, "the text offered by hand");
+
+  assert.match(offered, /Capture: off \(Firefox sandbox\)/);
+});
+
 test("sharing with no destinations opens settings and sends nothing", async (t) => {
   const view = openPage(t, { destinations: [] });
 
