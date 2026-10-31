@@ -181,8 +181,11 @@ function fillQuoteUrl(quote, quotedTweet) {
 
 function expandShortLinks(text, entities) {
   let value = String(text || "");
-  for (const { url, expanded_url: expandedUrl } of entities?.urls || []) {
-    if (url && expandedUrl) value = value.split(url).join(expandedUrl);
+  for (const { url, display_url: displayUrl, expanded_url: expandedUrl } of entities?.urls || []) {
+    if (!expandedUrl) continue;
+    if (url) value = value.split(url).join(expandedUrl);
+    // X's quote box shows a shortened link as plain text, with no t.co address behind it.
+    if (displayUrl?.endsWith("…")) value = value.split(`https://${displayUrl}`).join(displayUrl).split(displayUrl).join(expandedUrl);
   }
   return value;
 }
