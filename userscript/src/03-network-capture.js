@@ -152,9 +152,10 @@ function shouldCaptureApiUrl(url) {
 }
 
 function installNetworkCapture() {
-  // Firefox runs the script in an Xray sandbox whose functions the page cannot always call, so a replaced fetch could
-  // break X's own requests. Capture stays off there, and the cut-off notice covers long posts.
-  if (typeof exportFunction === "function") return;
+  // Firefox can run the script in an Xray sandbox whose functions the page cannot always call, so a replaced fetch could
+  // break X's own requests. Capture stays off there, and the cut-off notice covers long posts. exportFunction would not
+  // tell: Violentmonkey provides it on Chromium too.
+  if (document.wrappedJSObject) return;
 
   // Managers run this script in a sandbox, so X's own requests only pass through the page's window.
   const pageWindow = typeof unsafeWindow === "undefined" ? window : unsafeWindow;
