@@ -611,6 +611,26 @@ test("a cut-off post already ending in an ellipsis gets no second one", async ()
   assert.match(tweet.text, /^The start of a long post…\n\n/);
 });
 
+test("a link X shortened on the page is sent whole, from X's public data or else its t.co address", async () => {
+  const article = (html) => {
+    const dom = new JSDOM(`<article data-testid="tweet"><div data-testid="tweetText">${html}</div></article>`, { url: "https://x.com/" });
+    return dom.window.document.querySelector("article");
+  };
+  const shortened = 'Read <a href="https://t.co/abc"><span>https://</span><span>github.com/neovim/pull/28344/</span><span>…</span></a> now';
+  const text = extractText(article(shortened));
+  assert.equal(text, "Read https://t.co/abc now");
+
+  const withEntities = loadMediaContext(() => Promise.resolve({
+    id_str: "1000000000000000001",
+    entities: { urls: [{ url: "https://t.co/abc", expanded_url: "https://github.com/neovim/pull/28344/files" }] }
+  }));
+  const tweet = await withEntities.enrichTweetMedia(longPostParts({ text, textCutOff: false }));
+  assert.equal(tweet.text, "Read https://github.com/neovim/pull/28344/files now");
+
+  const unanswered = loadMediaContext(() => Promise.resolve(null));
+  assert.equal((await unanswered.enrichTweetMedia(longPostParts({ text, textCutOff: false }))).text, text);
+});
+
 test("a complete post is left alone", async () => {
   const syndication = loadMediaContext(() => Promise.resolve(null));
   const tweet = await syndication.enrichTweetMedia(longPostParts({ textCutOff: false }));
