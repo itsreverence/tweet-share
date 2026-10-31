@@ -74,6 +74,7 @@ const VIDEO_VARIANT_CACHE = new Map();
 const TEXT_CUT_OFF_NOTE = "[Post cut off. Open on X for the rest.]";
 const TWEET_CACHE = new Map();
 const USER_CACHE = new Map();
+const captureStatus = { state: "not started", responsesRead: 0 };
 
 function trimCache(cache, maxEntries = CACHE_MAX_ENTRIES) {
   while (cache.size > maxEntries) {
@@ -601,6 +602,11 @@ function scanForVideoVariants(value) {
   visit(value);
 }
 
+function readCapturedResponse(body) {
+  captureStatus.responsesRead += 1;
+  scanForVideoVariants(body);
+}
+
 function shouldCaptureApiUrl(url) {
   return /\/graphql\/|\/i\/api\/graphql\/|TweetDetail|UserTweets|HomeTimeline|SearchTimeline/i.test(url);
 }
@@ -609,7 +615,11 @@ function installNetworkCapture() {
   // Firefox can run the script in an Xray sandbox whose functions the page cannot always call, so a replaced fetch could
   // break X's own requests. Capture stays off there, and the cut-off notice covers long posts. exportFunction would not
   // tell: Violentmonkey provides it on Chromium too.
-  if (document.wrappedJSObject) return;
+  if (document.wrappedJSObject) {
+    captureStatus.state = "off (Firefox sandbox)";
+    return;
+  }
+  captureStatus.state = "on";
 
   // Managers run this script in a sandbox, so X's own requests only pass through the page's window.
   const pageWindow = typeof unsafeWindow === "undefined" ? window : unsafeWindow;
@@ -620,7 +630,7 @@ function installNetworkCapture() {
       try {
         const url = String(args[0]?.url || args[0] || "");
         if (shouldCaptureApiUrl(url)) {
-          response.clone().json().then(scanForVideoVariants).catch(() => {});
+          response.clone().json().then(readCapturedResponse).catch(() => {});
         }
       } catch {}
       return response;
@@ -639,7 +649,7 @@ function installNetworkCapture() {
     this.addEventListener("load", () => {
       if (!shouldCaptureApiUrl(requestUrls.get(this) || "")) return;
       try {
-        scanForVideoVariants(JSON.parse(this.responseText));
+        readCapturedResponse(JSON.parse(this.responseText));
       } catch {}
     });
     return originalSend.apply(this, args);
@@ -2903,6 +2913,32 @@ async function savePreferences(preferences) {
   return sanitized;
 }
 
+  // --- 11-diagnostics.js ---
+// Keep this free of posts, names, and channels: people paste it into public issues.
+function diagnosticsReport() {
+  const info = typeof GM_info === "undefined" ? {} : GM_info;
+  const captured = [...TWEET_CACHE.values()];
+  return [
+    `Script: ${info.script?.version || "unknown"}`,
+    `Manager: ${info.scriptHandler || "unknown"} ${info.version || ""}`.trimEnd(),
+    `Injection: ${info.injectInto || "unknown"}`,
+    `Browser: ${navigator.userAgent}`,
+    `Capture: ${captureStatus.state}`,
+    `X responses read: ${captureStatus.responsesRead}`,
+    `Posts captured: ${captured.length} (${captured.filter((post) => post.fullText).length} with full text)`
+  ].join("\n");
+}
+
+async function copyDiagnostics() {
+  const report = diagnosticsReport();
+  try {
+    await navigator.clipboard.writeText(report);
+    showToast("Diagnostics copied. They hold no posts, names, or webhooks.", "success");
+  } catch {
+    window.prompt("Copy these diagnostics:", report);
+  }
+}
+
   // --- 11-settings-styles.js ---
 // Settings modal styles, injected once per page.
 function injectSettingsStyles() {
@@ -3738,6 +3774,7 @@ function registerSettingsMenuCommand() {
       : () => previousFocus?.focus({ preventScroll: true });
     openSettingsModal(returnFocus);
   });
+  register("Copy diagnostics", copyDiagnostics);
 }
 
 registerSettingsMenuCommand();

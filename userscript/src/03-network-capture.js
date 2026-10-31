@@ -148,6 +148,11 @@ function scanForVideoVariants(value) {
   visit(value);
 }
 
+function readCapturedResponse(body) {
+  captureStatus.responsesRead += 1;
+  scanForVideoVariants(body);
+}
+
 function shouldCaptureApiUrl(url) {
   return /\/graphql\/|\/i\/api\/graphql\/|TweetDetail|UserTweets|HomeTimeline|SearchTimeline/i.test(url);
 }
@@ -156,7 +161,11 @@ function installNetworkCapture() {
   // Firefox can run the script in an Xray sandbox whose functions the page cannot always call, so a replaced fetch could
   // break X's own requests. Capture stays off there, and the cut-off notice covers long posts. exportFunction would not
   // tell: Violentmonkey provides it on Chromium too.
-  if (document.wrappedJSObject) return;
+  if (document.wrappedJSObject) {
+    captureStatus.state = "off (Firefox sandbox)";
+    return;
+  }
+  captureStatus.state = "on";
 
   // Managers run this script in a sandbox, so X's own requests only pass through the page's window.
   const pageWindow = typeof unsafeWindow === "undefined" ? window : unsafeWindow;
@@ -167,7 +176,7 @@ function installNetworkCapture() {
       try {
         const url = String(args[0]?.url || args[0] || "");
         if (shouldCaptureApiUrl(url)) {
-          response.clone().json().then(scanForVideoVariants).catch(() => {});
+          response.clone().json().then(readCapturedResponse).catch(() => {});
         }
       } catch {}
       return response;
@@ -186,7 +195,7 @@ function installNetworkCapture() {
     this.addEventListener("load", () => {
       if (!shouldCaptureApiUrl(requestUrls.get(this) || "")) return;
       try {
-        scanForVideoVariants(JSON.parse(this.responseText));
+        readCapturedResponse(JSON.parse(this.responseText));
       } catch {}
     });
     return originalSend.apply(this, args);
