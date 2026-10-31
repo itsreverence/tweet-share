@@ -170,34 +170,47 @@ function tweetFromSyndication(data, fallback = {}) {
   };
 }
 
-function bestCachedTweetForQuote(quote, mainTweetId = "") {
-  const quoteText = normalizeTextForMatch(quote.text);
-  const quoteUsername = String(quote.author?.username || "").trim();
-  const quoteId = quote.url ? tweetIdFromUrl(quote.url) : "";
-  if (!quoteText && !quoteUsername && !quoteId) return null;
+// X's quote box usually has no link of its own, so the parent's syndication result supplies the address.
+function fillQuoteUrl(quote, quotedTweet) {
+  if (!quote || quote.url || !quotedTweet?.id_str) return;
+  const username = String(quotedTweet.user?.screen_name || "");
+  const shownUsername = String(quote.author?.username || "");
+  if (shownUsername && shownUsername.toLowerCase() !== username.toLowerCase()) return;
+  quote.url = `https://x.com/${username || "i"}/status/${quotedTweet.id_str}`;
+}
 
-  if (quoteId && quoteId !== mainTweetId) {
-    const byId = TWEET_CACHE.get(quoteId);
-    if (byId) return byId;
+function linkStem(url) {
+  return url.replace(/^https?:\/\//i, "").replace(/^www\./i, "");
+}
+
+function expandShortLinks(text, entities) {
+  const urls = (entities?.urls || []).filter(({ expanded_url: expandedUrl }) => expandedUrl);
+  let value = String(text || "");
+  for (const { url, expanded_url: expandedUrl } of urls) {
+    if (url) value = value.split(url).join(expandedUrl);
   }
+  // X's quote box shows a shortened link as plain text, cut further along than the data's display_url.
+  return value.replace(/[^\s()]+…/g, (shown) => {
+    const stem = linkStem(shown.slice(0, -1));
+    const match = /[./]/.test(stem) && urls.find(({ expanded_url: expandedUrl }) => linkStem(expandedUrl).startsWith(stem));
+    return match ? match.expanded_url : shown;
+  });
+}
 
-  if (!quoteUsername) return null;
-
-  for (const [id, cachedTweet] of TWEET_CACHE) {
-    if (id === mainTweetId || !/^\d+$/.test(String(id))) continue;
-    if (cachedTweet.author?.username !== quoteUsername) continue;
-
-    const cachedText = normalizeTextForMatch(cachedTweet.text);
-    if (!quoteText) return cachedTweet;
-    if (cachedText === quoteText) return cachedTweet;
-    if (quoteText.length >= 24 && cachedText.includes(quoteText)) return cachedTweet;
-    if (cachedText.length >= 24 && quoteText.includes(cachedText)) return cachedTweet;
-  }
-
-  return null;
+function noteTextCutOff(post) {
+  if (!post?.textCutOff) return;
+  const text = String(post.text || "").trimEnd();
+  post.text = `${text.endsWith("…") ? text : `${text}…`}\n\n${TEXT_CUT_OFF_NOTE}`;
 }
 
 async function enrichTweetMedia(tweet) {
+  tweet = await enrichPost(tweet);
+  noteTextCutOff(tweet);
+  noteTextCutOff(tweet.quote);
+  return tweet;
+}
+
+async function enrichPost(tweet) {
   const tweetId = tweetIdFromUrl(tweet.url);
   const data = await fetchSyndicationTweet(tweetId);
   const cachedTweet = tweetId ? TWEET_CACHE.get(tweetId) : null;
@@ -209,6 +222,11 @@ async function enrichTweetMedia(tweet) {
     tweet.createdAt = tweet.createdAt || cachedTweet.createdAt || "";
     tweet.media = mergeTweetMedia(tweet.media || [], cachedTweet.media || []);
   }
+  if (cachedTweet?.fullText) {
+    tweet.text = cachedTweet.fullText;
+    tweet.textCutOff = false;
+  }
+  tweet.text = expandShortLinks(expandShortLinks(tweet.text, data?.entities), cachedTweet?.entities);
   const videoUrl = normalizeTweetVideoUrl(bestSyndicationVideoUrl(data));
   const posterUrl = syndicationPosterUrl(data);
   const cachedVideoUrl = bestCachedVideoUrlForTweet(tweet);
@@ -218,8 +236,10 @@ async function enrichTweetMedia(tweet) {
     posterUrl
   });
 
+  fillQuoteUrl(tweet.quote, data?.quoted_tweet);
+
   if (hasQuoteCandidate(tweet)) {
-    tweet.quote = await enrichTweetMedia(tweet.quote);
+    tweet.quote = await enrichPost(tweet.quote);
   }
 
   if (!hasQuoteTweet(tweet)) {

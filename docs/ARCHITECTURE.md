@@ -31,4 +31,4 @@ The script may process private/protected posts only when the current browser ses
 
 ## External dependencies
 
-At runtime the userscript may connect only to the hosts declared in its metadata, currently Discord webhooks and X/Twitter syndication media endpoints. Changes to `@grant`, `@connect`, storage, network requests, or release publishing deserve explicit security review.
+At runtime the userscript may connect only to the hosts declared in its metadata, currently Discord webhooks and X/Twitter syndication media endpoints. The `unsafeWindow` grant exists only so network capture can wrap the page's `fetch` and `XMLHttpRequest` and read X's responses; nothing else should touch it. Changes to `@grant`, `@connect`, storage, network requests, or release publishing deserve explicit security review.

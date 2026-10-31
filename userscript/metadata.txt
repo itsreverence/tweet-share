@@ -18,6 +18,7 @@
 // @grant        GM.setValue
 // @grant        GM.registerMenuCommand
 // @grant        GM_xmlhttpRequest
+// @grant        unsafeWindow
 // @connect      discord.com
 // @connect      cdn.syndication.twimg.com
 // @connect      pbs.twimg.com

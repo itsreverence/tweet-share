@@ -37,6 +37,7 @@ const WEBHOOK_SEND_DELAY_MS = 750;
 const CACHE_MAX_ENTRIES = 300;
 
 const VIDEO_VARIANT_CACHE = new Map();
+const TEXT_CUT_OFF_NOTE = "[Post cut off. Open on X for the rest.]";
 const TWEET_CACHE = new Map();
 const USER_CACHE = new Map();
 

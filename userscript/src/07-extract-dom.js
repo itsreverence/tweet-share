@@ -16,6 +16,18 @@ function statusLinksFromArticle(article) {
     .filter((url, index, all) => /\/status\/\d+/.test(url) && all.indexOf(url) === index);
 }
 
+// X draws emoji as <img alt="📸">, which text reads would drop.
+function restoreEmojiImages(clone) {
+  for (const img of clone.querySelectorAll('img[alt]')) {
+    img.replaceWith(img.getAttribute("alt"));
+  }
+  return clone;
+}
+
+function textWithEmoji(node) {
+  return node ? restoreEmojiImages(node.cloneNode(true)).textContent.trim() : "";
+}
+
 function extractAuthor(article) {
   const userNameBlock = article.querySelector('[data-testid="User-Name"]');
   const avatar = article.querySelector('[data-testid^="UserAvatar-Container"] img, img[src*="profile_images"]');
@@ -26,9 +38,9 @@ function extractAuthor(article) {
     .map((link) => link.getAttribute("href") || "")
     .find((href) => /^\/[^/]+$/.test(href));
   const username = usernameText.slice(1) || profileLink?.slice(1) || "";
-  const displayName = text(userNameBlock || article, 'a[href^="/"] div[dir="ltr"] span')
+  const displayName = textWithEmoji((userNameBlock || article).querySelector('a[href^="/"] div[dir="ltr"] span'))
     || [...(userNameBlock || article).querySelectorAll("span")]
-      .map((span) => span.textContent?.trim() || "")
+      .map(textWithEmoji)
       .find((value) => value && value !== usernameText && !/^@/.test(value)) || "";
 
   return {
@@ -48,10 +60,13 @@ function normalizeTweetBodyText(value) {
 
 function readTweetTextNode(node) {
   if (typeof node.cloneNode === "function") {
-    const clone = node.cloneNode(true);
+    const clone = restoreEmojiImages(node.cloneNode(true));
     for (const anchor of clone.querySelectorAll("a")) {
       const compact = String(anchor.textContent || "").replace(/\s+/g, "");
-      if (/^https?:\/\//i.test(compact) || /^[\w.-]+\.[a-z]{2,}\//i.test(compact)) {
+      // X shortens a long link on the page, and only its t.co address still works whole.
+      if (compact.endsWith("…") && /^https:\/\/t\.co\//.test(anchor.href || "")) {
+        anchor.replaceWith(anchor.href);
+      } else if (/^https?:\/\//i.test(compact) || /^[\w.-]+\.[a-z]{2,}\//i.test(compact)) {
         anchor.replaceWith(compact);
       }
     }
@@ -67,6 +82,11 @@ function extractText(article, excludedNodes = []) {
     .map(readTweetTextNode)
     .filter(Boolean)
     .join("\n\n");
+}
+
+function textIsCutOff(article, excludedNodes = []) {
+  return [...article.querySelectorAll('[data-testid="tweet-text-show-more-link"]')]
+    .some((node) => !isInsideExcludedNode(node, excludedNodes));
 }
 
 function imageNodePixelSize(img) {
@@ -150,9 +170,11 @@ function extractQuote(article) {
   );
   const scopedQuoteCandidates = quoteOnlyCandidates.length ? quoteOnlyCandidates : linkedQuoteCandidates;
   const contentQuoteCandidates = scopedQuoteCandidates.filter(quoteCandidateHasContent);
+  // A quote box with no link of its own still carries the quoted author's name, and a media-only one carries no text.
   const quotedContainer = outermostQuoteCandidate(contentQuoteCandidates)
     || outermostQuoteCandidate(scopedQuoteCandidates)
-    || quoteCandidates.find((node) => node !== article && node.querySelector('[data-testid="tweetText"]'));
+    || quoteCandidates.find((node) => node !== article && node.querySelector('[data-testid="tweetText"]'))
+    || quoteCandidates.find((node) => node !== article && node.querySelector('[data-testid="User-Name"]'));
 
   if (!quotedContainer && !quotedLink) return null;
 
@@ -160,12 +182,13 @@ function extractQuote(article) {
     url: quotedLink ? normalizeTweetUrl(quotedLink) : "",
     author: quotedContainer ? extractAuthor(quotedContainer) : { displayName: "", username: "", avatarUrl: "" },
     text: quotedContainer ? extractText(quotedContainer) : "",
+    textCutOff: quotedContainer ? textIsCutOff(quotedContainer) : false,
     media: quotedContainer ? extractMedia(quotedContainer) : [],
     createdAt: quotedContainer ? extractTimestamp(quotedContainer) : "",
     container: quotedContainer || null
   };
 
-  const cachedQuote = quote.url ? TWEET_CACHE.get(tweetIdFromUrl(quote.url)) : bestCachedTweetForQuote(quote, tweetIdFromUrl(mainUrl));
+  const cachedQuote = quote.url ? TWEET_CACHE.get(tweetIdFromUrl(quote.url)) : null;
   if (cachedQuote) {
     quote.url = cachedQuote.url || quote.url;
     quote.author = mergeAuthor(cachedQuote.author, quote.author);
@@ -204,6 +227,7 @@ function extractTweet(article) {
     url: tweetUrlFromArticle(article),
     author: extractAuthor(article),
     text: extractText(article, excludedMediaNodes),
+    textCutOff: textIsCutOff(article, excludedMediaNodes),
     media: extractMedia(article, excludedMediaNodes),
     createdAt: extractTimestamp(article),
     quote

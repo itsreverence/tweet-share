@@ -4,6 +4,7 @@ import { createContext, runInNewContext } from "node:vm";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { JSDOM } from "jsdom";
 
 /*
 Fixture refresh notes:
@@ -68,7 +69,6 @@ function loadMediaContext(request = () => Promise.resolve(null)) {
     imageMedia,
     VIDEO_VARIANT_CACHE,
     TWEET_CACHE,
-    bestCachedTweetForQuote,
     cacheTweetResult
   };`, context);
   return context.exports;
@@ -97,7 +97,6 @@ const {
   imageMedia,
   VIDEO_VARIANT_CACHE,
   TWEET_CACHE,
-  bestCachedTweetForQuote,
   cacheTweetResult
 } = loadMediaContext();
 
@@ -526,6 +525,238 @@ test("enrichTweetMedia merges cached image-only media when syndication is empty"
   assert.equal(tweet.media[0].url, "https://pbs.twimg.com/media/cached-image-only.jpg?format=jpg&name=orig");
 });
 
+const fixtureAuthor = { user_results: { result: { legacy: { name: "Fixture Author", screen_name: "fixture_author" } } } };
+const longPostParts = (overrides = {}) => ({
+  url: "https://x.com/fixture_author/status/1000000000000000001",
+  author: { displayName: "Fixture Author", username: "fixture_author", avatarUrl: "" },
+  text: "The start of a long post",
+  textCutOff: true,
+  media: [],
+  createdAt: "",
+  quote: null,
+  ...overrides
+});
+
+test("a post cut off on the timeline gets its full text, links expanded, from captured X traffic", async () => {
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  syndication.scanForVideoVariants({
+    rest_id: "1000000000000000001",
+    core: { user_results: { result: { legacy: { name: "Fixture Author", screen_name: "fixture_author" } } } },
+    legacy: { full_text: "The start of a long post https://t.co/short" },
+    note_tweet: { note_tweet_results: { result: {
+      text: "The start of a long post and its ending https://t.co/abc",
+      entity_set: { urls: [{ url: "https://t.co/abc", expanded_url: "https://github.com/example/project" }] }
+    } } }
+  });
+
+  const tweet = await syndication.enrichTweetMedia(longPostParts());
+
+  assert.equal(tweet.text, "The start of a long post and its ending https://github.com/example/project");
+  assert.equal(tweet.textCutOff, false);
+});
+
+test("a post's full text survives a later capture of it that carries only the short text", async () => {
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  syndication.scanForVideoVariants({
+    rest_id: "1000000000000000001",
+    core: fixtureAuthor,
+    legacy: { full_text: "The start of a long post" },
+    note_tweet: { note_tweet_results: { result: { text: "The start of a long post and its ending" } } }
+  });
+  syndication.scanForVideoVariants({ id_str: "1000000000000000001", user_id_str: "42", full_text: "The start of a long post" });
+
+  const tweet = await syndication.enrichTweetMedia(longPostParts());
+
+  assert.equal(tweet.text, "The start of a long post and its ending");
+  assert.equal(tweet.textCutOff, false);
+});
+
+test("a post cut off with no captured full text says so in its text", async () => {
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  const tweet = await syndication.enrichTweetMedia(longPostParts());
+
+  assert.match(tweet.text, /^The start of a long post…\n\n.*cut off.*Open on X/i);
+  assert.equal(tweet.textCutOff, true);
+});
+
+const cutOffNotes = (text) => String(text).split("[Post cut off.").length - 1;
+
+test("a cut-off quote that never got a link is marked cut off once, and leaves the main post alone", async () => {
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  const tweet = await syndication.enrichTweetMedia({
+    ...longPostParts({ textCutOff: false }),
+    quote: { url: "", author: { displayName: "Bob", username: "bob", avatarUrl: "" }, text: "Start of Bob's long quote", textCutOff: true, media: [], createdAt: "" }
+  });
+
+  assert.match(tweet.quote.text, /^Start of Bob's long quote…\n\n.*cut off.*Open on X/i);
+  assert.equal(cutOffNotes(tweet.quote.text), 1);
+  assert.equal(tweet.text, "The start of a long post");
+});
+
+test("a cut-off quote with a link, and a cut-off post above it, are each marked once", async () => {
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  const tweet = await syndication.enrichTweetMedia({
+    ...longPostParts(),
+    quote: { url: "https://x.com/bob/status/555", author: { displayName: "Bob", username: "bob", avatarUrl: "" }, text: "Start of Bob's long quote", textCutOff: true, media: [], createdAt: "" }
+  });
+
+  assert.equal(cutOffNotes(tweet.text), 1);
+  assert.equal(cutOffNotes(tweet.quote.text), 1);
+});
+
+test("a cut-off post already ending in an ellipsis gets no second one", async () => {
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  const tweet = await syndication.enrichTweetMedia(longPostParts({ text: "The start of a long post…" }));
+
+  assert.match(tweet.text, /^The start of a long post…\n\n/);
+});
+
+test("a link X shortened on the page is sent whole, from X's public data or else its t.co address", async () => {
+  const article = (html) => {
+    const dom = new JSDOM(`<article data-testid="tweet"><div data-testid="tweetText">${html}</div></article>`, { url: "https://x.com/" });
+    return dom.window.document.querySelector("article");
+  };
+  const shortened = 'Read <a href="https://t.co/abc"><span>https://</span><span>github.com/neovim/pull/28344/</span><span>…</span></a> now';
+  const text = extractText(article(shortened));
+  assert.equal(text, "Read https://t.co/abc now");
+
+  const withEntities = loadMediaContext(() => Promise.resolve({
+    id_str: "1000000000000000001",
+    entities: { urls: [{ url: "https://t.co/abc", expanded_url: "https://github.com/neovim/pull/28344/files" }] }
+  }));
+  const tweet = await withEntities.enrichTweetMedia(longPostParts({ text, textCutOff: false }));
+  assert.equal(tweet.text, "Read https://github.com/neovim/pull/28344/files now");
+
+  const unanswered = loadMediaContext(() => Promise.resolve(null));
+  assert.equal((await unanswered.enrichTweetMedia(longPostParts({ text, textCutOff: false }))).text, text);
+});
+
+test("a shortened link that is only plain text, as in X's quote box, is sent whole however far X cut it", async () => {
+  // X's data for a real post: the page shows more of this link than display_url does.
+  const urls = [{ url: "https://t.co/ZLm6hkH7bw", display_url: "mitchellh.com/writing/zig-do…", expanded_url: "https://mitchellh.com/writing/zig-donation" }];
+  const syndication = loadMediaContext(() => Promise.resolve({ id_str: "1000000000000000001", entities: { urls } }));
+  const textFor = async (text) => (await syndication.enrichTweetMedia(longPostParts({ text, textCutOff: false }))).text;
+  const whole = "https://mitchellh.com/writing/zig-donation";
+
+  assert.equal(await textFor("See https://mitchellh.com/writing/zig-donation… now"), `See ${whole} now`);
+  assert.equal(await textFor("See mitchellh.com/writing/zig-do… now"), `See ${whole} now`);
+  assert.equal(await textFor("(https://www.mitchellh.com/writing/zig…)"), `(${whole})`);
+  assert.equal(await textFor("Ask mitchellh… about example.com/other…"), "Ask mitchellh… about example.com/other…", "other text ending in … stays");
+});
+
+test("a complete post is left alone", async () => {
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  const tweet = await syndication.enrichTweetMedia(longPostParts({ textCutOff: false }));
+
+  assert.equal(tweet.text, "The start of a long post");
+});
+
+test("captured text drops the t.co links that stand for a post's media and reads X's escaped characters", async () => {
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  syndication.scanForVideoVariants({
+    rest_id: "1000000000000000001",
+    core: fixtureAuthor,
+    legacy: {
+      full_text: "Tom &amp; Jerry &lt;3 https://t.co/photo",
+      entities: { media: [{ url: "https://t.co/photo", type: "photo", media_url_https: "https://pbs.twimg.com/media/Photo.jpg" }] }
+    }
+  });
+
+  const tweet = await syndication.enrichTweetMedia(longPostParts({ text: "", textCutOff: false }));
+
+  assert.equal(tweet.text, "Tom & Jerry <3");
+  assert.equal(tweet.media[0]?.url, "https://pbs.twimg.com/media/Photo.jpg?format=jpg&name=orig");
+});
+
+test("a captured long post's full text reads X's escaped characters", async () => {
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  syndication.scanForVideoVariants({
+    rest_id: "1000000000000000001",
+    core: fixtureAuthor,
+    legacy: { full_text: "Tom &amp; Jerry" },
+    note_tweet: { note_tweet_results: { result: { text: "Tom &amp; Jerry &lt;3 &gt;:)" } } }
+  });
+
+  const tweet = await syndication.enrichTweetMedia(longPostParts());
+
+  assert.equal(tweet.text, "Tom & Jerry <3 >:)");
+});
+
+test("enrichTweetMedia takes a quote's missing link from the parent's quoted_tweet, unless it names someone else", async () => {
+  const quoteLink = async (quotedName) => {
+    const syndication = loadMediaContext((method, url) => Promise.resolve(
+      new URL(url).searchParams.get("id") === "1000000000000000001"
+        ? { id_str: "1000000000000000001", quoted_tweet: { id_str: "2000000000000000002", user: { screen_name: quotedName } } }
+        : null
+    ));
+    const tweet = await syndication.enrichTweetMedia({
+      url: "https://x.com/fixture_author/status/1000000000000000001",
+      author: { displayName: "Fixture Author", username: "fixture_author", avatarUrl: "" },
+      text: "Main post",
+      media: [],
+      createdAt: "",
+      quote: { url: "", author: { displayName: "Quoted", username: "quoted_user", avatarUrl: "" }, text: "Quoted words", media: [], createdAt: "" }
+    });
+    return tweet.quote.url;
+  };
+
+  assert.equal(await quoteLink("Quoted_User"), "https://x.com/Quoted_User/status/2000000000000000002");
+  assert.equal(await quoteLink("someone_else"), "");
+});
+
+const bobsPost = (id, legacy, fullText) => ({
+  rest_id: id,
+  core: { user_results: { result: { legacy: { name: "Bob", screen_name: "bob" } } } },
+  legacy: { full_text: legacy.text || "", created_at: "Tue May 26 12:00:00 +0000 2026", extended_entities: legacy.media ? { media: legacy.media } : undefined },
+  ...(fullText ? { note_tweet: { note_tweet_results: { result: { text: fullText } } } } : {})
+});
+
+// A timeline post by Alice whose quote box, as X often draws it, carries no link to the quoted post.
+function articleQuoting(quoteBoxHtml) {
+  const dom = new JSDOM(`<article>
+    <div data-testid="User-Name"><span>Alice</span><span>@alice</span></div>
+    <a href="/alice/status/111"><time datetime="2026-06-10T12:00:00.000Z"></time></a>
+    <div data-testid="tweetText">Main body</div>
+    <div role="link" tabindex="0"><div data-testid="User-Name"><span>Bob</span><span>@bob</span></div>${quoteBoxHtml}</div>
+  </article>`, { url: "https://x.com/home" });
+  return dom.window.document.querySelector("article");
+}
+
+const syndicationById = (results) => (method, url) => Promise.resolve(results[new URL(url).searchParams.get("id")] || null);
+
+test("the parent's syndication result names the quoted post before any captured post by the same author", async () => {
+  const quoted = "The launch happens tomorrow morning, and here is why it matters.";
+  const syndication = loadMediaContext(syndicationById({
+    111: { id_str: "111", quoted_tweet: { id_str: "999", user: { screen_name: "bob" } } },
+    999: { id_str: "999", text: "The launch happens tomorrow morning, and here is why it matters.", user: { name: "Bob", screen_name: "bob" } }
+  }));
+  syndication.scanForVideoVariants(bobsPost("555", {
+    text: "The launch happens tomorrow morning",
+    media: [{ type: "photo", media_url_https: "https://pbs.twimg.com/media/OtherPost.jpg" }]
+  }));
+
+  const tweet = await syndication.enrichTweetMedia(syndication.extractTweet(articleQuoting(`<div data-testid="tweetText">${quoted}</div>`)));
+
+  assert.equal(tweet.quote.url, "https://x.com/bob/status/999");
+  assert.equal(tweet.quote.text, quoted);
+  assert.equal(tweet.quote.media.length, 0, "nothing of the other post comes along");
+});
+
+test("a quote with no link stays unresolved when two captured posts by its author match its visible text", async () => {
+  const opening = "This is a recurring opening longer than twenty four characters";
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  syndication.scanForVideoVariants(bobsPost("888", { text: `${opening} OLD post ending` }));
+  syndication.scanForVideoVariants(bobsPost("999", { text: `${opening} CORRECT post ending` }));
+
+  const tweet = await syndication.enrichTweetMedia(syndication.extractTweet(articleQuoting(
+    `<div data-testid="tweetText">${opening}</div><span data-testid="tweet-text-show-more-link">Show more</span>`
+  )));
+
+  assert.equal(tweet.quote.url, "");
+  assert.match(tweet.quote.text, new RegExp(`^${opening}`));
+  assert.doesNotMatch(tweet.quote.text, /post ending/, "neither post's ending is borrowed");
+});
+
 test("enrichTweetMedia fills a link-only quote's text and photo from its syndication result", async () => {
   const quoteParent = { ...readFixture("quote-parent.json"), photos: [{ url: "https://pbs.twimg.com/media/QuoteParentPhoto.jpg" }] };
   const syndication = loadMediaContext((method, url) =>
@@ -938,61 +1169,23 @@ test("extractQuote with link only does not borrow main tweet author metadata", (
   assert.equal(quote.createdAt, "");
 });
 
-test("bestCachedTweetForQuote prefers status id and requires author match for fuzzy text", () => {
-  TWEET_CACHE.clear();
-  cacheTweetResult({
-    rest_id: "200",
-    legacy: {
-      full_text: "Exact quoted tweet body for testing",
-      created_at: "Tue May 26 12:00:00 +0000 2026"
-    },
-    core: {
-      user_results: {
-        result: {
-          legacy: { name: "Bob", screen_name: "bob", profile_image_url_https: "https://pbs.twimg.com/profile_images/b.jpg" }
-        }
-      }
-    }
-  });
-  cacheTweetResult({
-    rest_id: "999",
-    legacy: { full_text: "Exact quoted tweet body for testing but from wrong user" },
-    core: {
-      user_results: {
-        result: {
-          legacy: { name: "Eve", screen_name: "eve", profile_image_url_https: "https://pbs.twimg.com/profile_images/e.jpg" }
-        }
-      }
-    }
+test("with no syndication answer, a linkless quote keeps its own text and notice even when a cached post by its author opens alike", async () => {
+  const syndication = loadMediaContext(() => Promise.resolve(null));
+  syndication.scanForVideoVariants({
+    rest_id: "555",
+    core: { user_results: { result: { legacy: { name: "Bob", screen_name: "bob" } } } },
+    legacy: { full_text: "A shared opening of bob's post, then a different ending", extended_entities: { media: [{ type: "photo", media_url_https: "https://pbs.twimg.com/media/Wrong.jpg" }] } },
+    note_tweet: { note_tweet_results: { result: { text: "A shared opening of bob's post, then a different ending" } } }
   });
 
-  const byId = bestCachedTweetForQuote({
-    url: "https://x.com/bob/status/200",
-    author: { username: "bob" },
-    text: ""
-  }, "100");
-  assert.equal(byId?.author?.username, "bob");
+  const tweet = await syndication.enrichTweetMedia(longPostParts({
+    textCutOff: false,
+    quote: { url: "", author: { displayName: "Bob", username: "bob", avatarUrl: "" }, text: "A shared opening of bob's post", textCutOff: true, media: [], createdAt: "" }
+  }));
 
-  const fuzzy = bestCachedTweetForQuote({
-    url: "",
-    author: { username: "bob" },
-    text: "Exact quoted tweet body for testing"
-  }, "100");
-  assert.equal(fuzzy?.author?.username, "bob");
-
-  const wrongUser = bestCachedTweetForQuote({
-    url: "",
-    author: { username: "alice" },
-    text: "Exact quoted tweet body for testing"
-  }, "100");
-  assert.equal(wrongUser, null);
-
-  const shortText = bestCachedTweetForQuote({
-    url: "",
-    author: { username: "bob" },
-    text: "quoted"
-  }, "100");
-  assert.equal(shortText, null);
+  assert.equal(tweet.quote.url, "");
+  assert.match(tweet.quote.text, /^A shared opening of bob's post…\n\n.*cut off/i);
+  assert.equal(tweet.quote.media.length, 0);
 });
 
 test("tweetUrlFromArticle falls back to the page URL when no status link exists", () => {

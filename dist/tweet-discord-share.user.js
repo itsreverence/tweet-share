@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweet Discord Share
 // @namespace    https://github.com/itsreverence/tweet-share
-// @version      0.6.35
+// @version      0.6.36
 // @description  Share X/Twitter posts to Discord channels via webhooks (no server required).
 // @homepageURL  https://github.com/itsreverence/tweet-share
 // @supportURL   https://github.com/itsreverence/tweet-share/issues
@@ -18,6 +18,7 @@
 // @grant        GM.setValue
 // @grant        GM.registerMenuCommand
 // @grant        GM_xmlhttpRequest
+// @grant        unsafeWindow
 // @connect      discord.com
 // @connect      cdn.syndication.twimg.com
 // @connect      pbs.twimg.com
@@ -70,6 +71,7 @@ const WEBHOOK_SEND_DELAY_MS = 750;
 const CACHE_MAX_ENTRIES = 300;
 
 const VIDEO_VARIANT_CACHE = new Map();
+const TEXT_CUT_OFF_NOTE = "[Post cut off. Open on X for the rest.]";
 const TWEET_CACHE = new Map();
 const USER_CACHE = new Map();
 
@@ -321,10 +323,6 @@ function unique(values) {
   return [...new Set(values.filter(Boolean))];
 }
 
-function text(node, selector) {
-  return node.querySelector(selector)?.textContent?.trim() || "";
-}
-
 function absoluteUrl(url) {
   try {
     return new URL(url, location.href).toString();
@@ -369,8 +367,9 @@ function discordEmbedTimestamp(createdAt) {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
-function normalizeTextForMatch(value) {
-  return String(value || "").replace(/\s+/g, " ").trim();
+// X's API escapes these three in post text.
+function decodeHtmlEntities(value) {
+  return String(value || "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 }
 
 function isPlayableTweetVideoUrl(url) {
@@ -520,6 +519,25 @@ function mediaFromLegacyTweet(legacy) {
   }));
 }
 
+function noteTweetText(node) {
+  const note = node.note_tweet?.note_tweet_results?.result;
+  let value = String(note?.text || "");
+  for (const { url, expanded_url: expandedUrl } of note?.entity_set?.urls || []) {
+    if (url && expandedUrl) value = value.split(url).join(expandedUrl);
+  }
+  return decodeHtmlEntities(value);
+}
+
+// The text X sends names a post's media by t.co links the page never shows.
+function legacyTweetText(node) {
+  const legacy = node.legacy || node;
+  let value = String(legacy.full_text || legacy.text || node.text || "");
+  for (const { url } of legacy.extended_entities?.media || legacy.entities?.media || []) {
+    if (url) value = value.split(url).join("");
+  }
+  return decodeHtmlEntities(value).replace(/[ \t]+$/gm, "").trim();
+}
+
 function cacheTweetResult(node) {
   const legacy = node.legacy || node;
   const userResult = node.core?.user_results?.result;
@@ -530,6 +548,7 @@ function cacheTweetResult(node) {
   const id = String(node.rest_id || node.id_str || legacy.id_str || "");
   if (!id) return;
 
+  const fullText = noteTweetText(node) || TWEET_CACHE.get(id)?.fullText || "";
   TWEET_CACHE.set(id, {
     url: username ? `https://x.com/${username}/status/${id}` : `https://x.com/i/status/${id}`,
     author: {
@@ -537,7 +556,9 @@ function cacheTweetResult(node) {
       username,
       avatarUrl: highResolutionProfileImageUrl(userLegacy.profile_image_url_https || userLegacy.profile_image_url || "")
     },
-    text: legacy.full_text || legacy.text || node.text || "",
+    text: fullText || legacyTweetText(node),
+    fullText,
+    entities: legacy.entities,
     media: mediaFromLegacyTweet(legacy),
     createdAt: legacy.created_at || ""
   });
@@ -585,27 +606,38 @@ function shouldCaptureApiUrl(url) {
 }
 
 function installNetworkCapture() {
-  const originalFetch = window.fetch;
+  // Firefox can run the script in an Xray sandbox whose functions the page cannot always call, so a replaced fetch could
+  // break X's own requests. Capture stays off there, and the cut-off notice covers long posts. exportFunction would not
+  // tell: Violentmonkey provides it on Chromium too.
+  if (document.wrappedJSObject) return;
+
+  // Managers run this script in a sandbox, so X's own requests only pass through the page's window.
+  const pageWindow = typeof unsafeWindow === "undefined" ? window : unsafeWindow;
+  const originalFetch = pageWindow.fetch;
   if (typeof originalFetch === "function") {
-    window.fetch = async function (...args) {
-      const response = await originalFetch.apply(this, args);
-      const url = String(args[0]?.url || args[0] || "");
-      if (shouldCaptureApiUrl(url)) {
-        response.clone().json().then(scanForVideoVariants).catch(() => {});
-      }
+    pageWindow.fetch = async function (...args) {
+      const response = await originalFetch.apply(pageWindow, args);
+      try {
+        const url = String(args[0]?.url || args[0] || "");
+        if (shouldCaptureApiUrl(url)) {
+          response.clone().json().then(scanForVideoVariants).catch(() => {});
+        }
+      } catch {}
       return response;
     };
   }
 
-  const originalOpen = XMLHttpRequest.prototype.open;
-  const originalSend = XMLHttpRequest.prototype.send;
-  XMLHttpRequest.prototype.open = function (method, url, ...rest) {
-    this.__tdsUrl = String(url || "");
+  const xhrPrototype = pageWindow.XMLHttpRequest.prototype;
+  const originalOpen = xhrPrototype.open;
+  const originalSend = xhrPrototype.send;
+  const requestUrls = new WeakMap();
+  xhrPrototype.open = function (method, url, ...rest) {
+    requestUrls.set(this, String(url || ""));
     return originalOpen.call(this, method, url, ...rest);
   };
-  XMLHttpRequest.prototype.send = function (...args) {
+  xhrPrototype.send = function (...args) {
     this.addEventListener("load", () => {
-      if (!shouldCaptureApiUrl(this.__tdsUrl || "")) return;
+      if (!shouldCaptureApiUrl(requestUrls.get(this) || "")) return;
       try {
         scanForVideoVariants(JSON.parse(this.responseText));
       } catch {}
@@ -830,17 +862,17 @@ function pruneEmbed(embed) {
   return next;
 }
 
-function formatQuoteFieldValue(text, limit) {
+function formatQuoteFieldValue(text) {
   const trimmed = String(text || "").trim();
-  if (!trimmed) return "";
-  return truncate(trimmed.split("\n").map((line) => `> ${line}`).join("\n"), limit);
+  return trimmed ? trimmed.split("\n").map((line) => `> ${line}`).join("\n") : "";
 }
 
+// Null when the quote does not fit one field whole, or has only media to show; the caller gives it a card instead, so
+// none of it is lost and its media stays labelled as the quote's.
 function buildInlineQuoteFields(quote) {
   const link = quote.url ? `[View quoted post](${quote.url})` : "";
-  const room = DISCORD_EMBED_LIMITS.fieldValue - (link ? link.length + 1 : 0);
-  const value = [formatQuoteFieldValue(quote.text, room), link].filter(Boolean).join("\n");
-  if (!value) return [];
+  const value = [formatQuoteFieldValue(quote.text), link].filter(Boolean).join("\n");
+  if (!value || value.length > DISCORD_EMBED_LIMITS.fieldValue) return null;
 
   return [{
     name: truncate(`Quoting ${authorLabel(quote, escapeMarkdown)}`, DISCORD_EMBED_LIMITS.fieldName),
@@ -897,14 +929,13 @@ function shareCards(tweet, shareOptions = {}) {
 
   // Extraction can give the main post a photo that belongs to its quote, so the quote keeps every photo of its own and
   // the main card shows the rest. In one card a quote's photos would read as the main post's, so a quote with photos
-  // gets its own.
+  // gets its own, as does a quote whose text would not fit a field whole.
   const quoteImages = cardPhotoUrls(tweet.quote);
   const images = cardPhotoUrls(tweet, quoteImages);
-  if (quoteImages.length) {
-    const quoteUrl = tweet.quote.url && tweet.quote.url !== url ? tweet.quote.url : gridUrl(url, "quote");
-    return [postCard(tweet, "main", { images, url }), postCard(tweet.quote, "quote", { images: quoteImages, url: quoteUrl })];
-  }
-  return [postCard(tweet, "main", { images, fields: buildInlineQuoteFields(tweet.quote), url })];
+  const fields = quoteImages.length ? null : buildInlineQuoteFields(tweet.quote);
+  if (fields) return [postCard(tweet, "main", { images, fields, url })];
+  const quoteUrl = tweet.quote.url && tweet.quote.url !== url ? tweet.quote.url : gridUrl(url, "quote");
+  return [postCard(tweet, "main", { images, url }), postCard(tweet.quote, "quote", { images: quoteImages, url: quoteUrl })];
 }
 
 function cardEmbeds(card) {
@@ -1319,34 +1350,47 @@ function tweetFromSyndication(data, fallback = {}) {
   };
 }
 
-function bestCachedTweetForQuote(quote, mainTweetId = "") {
-  const quoteText = normalizeTextForMatch(quote.text);
-  const quoteUsername = String(quote.author?.username || "").trim();
-  const quoteId = quote.url ? tweetIdFromUrl(quote.url) : "";
-  if (!quoteText && !quoteUsername && !quoteId) return null;
+// X's quote box usually has no link of its own, so the parent's syndication result supplies the address.
+function fillQuoteUrl(quote, quotedTweet) {
+  if (!quote || quote.url || !quotedTweet?.id_str) return;
+  const username = String(quotedTweet.user?.screen_name || "");
+  const shownUsername = String(quote.author?.username || "");
+  if (shownUsername && shownUsername.toLowerCase() !== username.toLowerCase()) return;
+  quote.url = `https://x.com/${username || "i"}/status/${quotedTweet.id_str}`;
+}
 
-  if (quoteId && quoteId !== mainTweetId) {
-    const byId = TWEET_CACHE.get(quoteId);
-    if (byId) return byId;
+function linkStem(url) {
+  return url.replace(/^https?:\/\//i, "").replace(/^www\./i, "");
+}
+
+function expandShortLinks(text, entities) {
+  const urls = (entities?.urls || []).filter(({ expanded_url: expandedUrl }) => expandedUrl);
+  let value = String(text || "");
+  for (const { url, expanded_url: expandedUrl } of urls) {
+    if (url) value = value.split(url).join(expandedUrl);
   }
+  // X's quote box shows a shortened link as plain text, cut further along than the data's display_url.
+  return value.replace(/[^\s()]+…/g, (shown) => {
+    const stem = linkStem(shown.slice(0, -1));
+    const match = /[./]/.test(stem) && urls.find(({ expanded_url: expandedUrl }) => linkStem(expandedUrl).startsWith(stem));
+    return match ? match.expanded_url : shown;
+  });
+}
 
-  if (!quoteUsername) return null;
-
-  for (const [id, cachedTweet] of TWEET_CACHE) {
-    if (id === mainTweetId || !/^\d+$/.test(String(id))) continue;
-    if (cachedTweet.author?.username !== quoteUsername) continue;
-
-    const cachedText = normalizeTextForMatch(cachedTweet.text);
-    if (!quoteText) return cachedTweet;
-    if (cachedText === quoteText) return cachedTweet;
-    if (quoteText.length >= 24 && cachedText.includes(quoteText)) return cachedTweet;
-    if (cachedText.length >= 24 && quoteText.includes(cachedText)) return cachedTweet;
-  }
-
-  return null;
+function noteTextCutOff(post) {
+  if (!post?.textCutOff) return;
+  const text = String(post.text || "").trimEnd();
+  post.text = `${text.endsWith("…") ? text : `${text}…`}\n\n${TEXT_CUT_OFF_NOTE}`;
 }
 
 async function enrichTweetMedia(tweet) {
+  tweet = await enrichPost(tweet);
+  noteTextCutOff(tweet);
+  noteTextCutOff(tweet.quote);
+  return tweet;
+}
+
+async function enrichPost(tweet) {
   const tweetId = tweetIdFromUrl(tweet.url);
   const data = await fetchSyndicationTweet(tweetId);
   const cachedTweet = tweetId ? TWEET_CACHE.get(tweetId) : null;
@@ -1358,6 +1402,11 @@ async function enrichTweetMedia(tweet) {
     tweet.createdAt = tweet.createdAt || cachedTweet.createdAt || "";
     tweet.media = mergeTweetMedia(tweet.media || [], cachedTweet.media || []);
   }
+  if (cachedTweet?.fullText) {
+    tweet.text = cachedTweet.fullText;
+    tweet.textCutOff = false;
+  }
+  tweet.text = expandShortLinks(expandShortLinks(tweet.text, data?.entities), cachedTweet?.entities);
   const videoUrl = normalizeTweetVideoUrl(bestSyndicationVideoUrl(data));
   const posterUrl = syndicationPosterUrl(data);
   const cachedVideoUrl = bestCachedVideoUrlForTweet(tweet);
@@ -1367,8 +1416,10 @@ async function enrichTweetMedia(tweet) {
     posterUrl
   });
 
+  fillQuoteUrl(tweet.quote, data?.quoted_tweet);
+
   if (hasQuoteCandidate(tweet)) {
-    tweet.quote = await enrichTweetMedia(tweet.quote);
+    tweet.quote = await enrichPost(tweet.quote);
   }
 
   if (!hasQuoteTweet(tweet)) {
@@ -1397,6 +1448,18 @@ function statusLinksFromArticle(article) {
     .filter((url, index, all) => /\/status\/\d+/.test(url) && all.indexOf(url) === index);
 }
 
+// X draws emoji as <img alt="📸">, which text reads would drop.
+function restoreEmojiImages(clone) {
+  for (const img of clone.querySelectorAll('img[alt]')) {
+    img.replaceWith(img.getAttribute("alt"));
+  }
+  return clone;
+}
+
+function textWithEmoji(node) {
+  return node ? restoreEmojiImages(node.cloneNode(true)).textContent.trim() : "";
+}
+
 function extractAuthor(article) {
   const userNameBlock = article.querySelector('[data-testid="User-Name"]');
   const avatar = article.querySelector('[data-testid^="UserAvatar-Container"] img, img[src*="profile_images"]');
@@ -1407,9 +1470,9 @@ function extractAuthor(article) {
     .map((link) => link.getAttribute("href") || "")
     .find((href) => /^\/[^/]+$/.test(href));
   const username = usernameText.slice(1) || profileLink?.slice(1) || "";
-  const displayName = text(userNameBlock || article, 'a[href^="/"] div[dir="ltr"] span')
+  const displayName = textWithEmoji((userNameBlock || article).querySelector('a[href^="/"] div[dir="ltr"] span'))
     || [...(userNameBlock || article).querySelectorAll("span")]
-      .map((span) => span.textContent?.trim() || "")
+      .map(textWithEmoji)
       .find((value) => value && value !== usernameText && !/^@/.test(value)) || "";
 
   return {
@@ -1429,10 +1492,13 @@ function normalizeTweetBodyText(value) {
 
 function readTweetTextNode(node) {
   if (typeof node.cloneNode === "function") {
-    const clone = node.cloneNode(true);
+    const clone = restoreEmojiImages(node.cloneNode(true));
     for (const anchor of clone.querySelectorAll("a")) {
       const compact = String(anchor.textContent || "").replace(/\s+/g, "");
-      if (/^https?:\/\//i.test(compact) || /^[\w.-]+\.[a-z]{2,}\//i.test(compact)) {
+      // X shortens a long link on the page, and only its t.co address still works whole.
+      if (compact.endsWith("…") && /^https:\/\/t\.co\//.test(anchor.href || "")) {
+        anchor.replaceWith(anchor.href);
+      } else if (/^https?:\/\//i.test(compact) || /^[\w.-]+\.[a-z]{2,}\//i.test(compact)) {
         anchor.replaceWith(compact);
       }
     }
@@ -1448,6 +1514,11 @@ function extractText(article, excludedNodes = []) {
     .map(readTweetTextNode)
     .filter(Boolean)
     .join("\n\n");
+}
+
+function textIsCutOff(article, excludedNodes = []) {
+  return [...article.querySelectorAll('[data-testid="tweet-text-show-more-link"]')]
+    .some((node) => !isInsideExcludedNode(node, excludedNodes));
 }
 
 function imageNodePixelSize(img) {
@@ -1531,9 +1602,11 @@ function extractQuote(article) {
   );
   const scopedQuoteCandidates = quoteOnlyCandidates.length ? quoteOnlyCandidates : linkedQuoteCandidates;
   const contentQuoteCandidates = scopedQuoteCandidates.filter(quoteCandidateHasContent);
+  // A quote box with no link of its own still carries the quoted author's name, and a media-only one carries no text.
   const quotedContainer = outermostQuoteCandidate(contentQuoteCandidates)
     || outermostQuoteCandidate(scopedQuoteCandidates)
-    || quoteCandidates.find((node) => node !== article && node.querySelector('[data-testid="tweetText"]'));
+    || quoteCandidates.find((node) => node !== article && node.querySelector('[data-testid="tweetText"]'))
+    || quoteCandidates.find((node) => node !== article && node.querySelector('[data-testid="User-Name"]'));
 
   if (!quotedContainer && !quotedLink) return null;
 
@@ -1541,12 +1614,13 @@ function extractQuote(article) {
     url: quotedLink ? normalizeTweetUrl(quotedLink) : "",
     author: quotedContainer ? extractAuthor(quotedContainer) : { displayName: "", username: "", avatarUrl: "" },
     text: quotedContainer ? extractText(quotedContainer) : "",
+    textCutOff: quotedContainer ? textIsCutOff(quotedContainer) : false,
     media: quotedContainer ? extractMedia(quotedContainer) : [],
     createdAt: quotedContainer ? extractTimestamp(quotedContainer) : "",
     container: quotedContainer || null
   };
 
-  const cachedQuote = quote.url ? TWEET_CACHE.get(tweetIdFromUrl(quote.url)) : bestCachedTweetForQuote(quote, tweetIdFromUrl(mainUrl));
+  const cachedQuote = quote.url ? TWEET_CACHE.get(tweetIdFromUrl(quote.url)) : null;
   if (cachedQuote) {
     quote.url = cachedQuote.url || quote.url;
     quote.author = mergeAuthor(cachedQuote.author, quote.author);
@@ -1585,6 +1659,7 @@ function extractTweet(article) {
     url: tweetUrlFromArticle(article),
     author: extractAuthor(article),
     text: extractText(article, excludedMediaNodes),
+    textCutOff: textIsCutOff(article, excludedMediaNodes),
     media: extractMedia(article, excludedMediaNodes),
     createdAt: extractTimestamp(article),
     quote
@@ -2381,7 +2456,8 @@ async function runShare(article, destinationId, options = {}, preparedTweet = nu
   try {
     const tweet = preparedTweet ?? await prepareShareTweet(article);
     await shareToDestination(destinationId, tweet, options);
-    showToast(`Sent to ${await destinationLabel(destinationId)}`, "success");
+    const cutOff = tweet.textCutOff || (options.includeQuote !== false && tweet.quote?.textCutOff);
+    showToast(`Sent to ${await destinationLabel(destinationId)}${cutOff ? ". Post text was cut off; open it on X for the rest." : ""}`, "success");
   } catch (error) {
     console.error(error);
     showToast(error.message, "error");

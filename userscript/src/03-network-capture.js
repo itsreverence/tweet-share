@@ -66,6 +66,25 @@ function mediaFromLegacyTweet(legacy) {
   }));
 }
 
+function noteTweetText(node) {
+  const note = node.note_tweet?.note_tweet_results?.result;
+  let value = String(note?.text || "");
+  for (const { url, expanded_url: expandedUrl } of note?.entity_set?.urls || []) {
+    if (url && expandedUrl) value = value.split(url).join(expandedUrl);
+  }
+  return decodeHtmlEntities(value);
+}
+
+// The text X sends names a post's media by t.co links the page never shows.
+function legacyTweetText(node) {
+  const legacy = node.legacy || node;
+  let value = String(legacy.full_text || legacy.text || node.text || "");
+  for (const { url } of legacy.extended_entities?.media || legacy.entities?.media || []) {
+    if (url) value = value.split(url).join("");
+  }
+  return decodeHtmlEntities(value).replace(/[ \t]+$/gm, "").trim();
+}
+
 function cacheTweetResult(node) {
   const legacy = node.legacy || node;
   const userResult = node.core?.user_results?.result;
@@ -76,6 +95,7 @@ function cacheTweetResult(node) {
   const id = String(node.rest_id || node.id_str || legacy.id_str || "");
   if (!id) return;
 
+  const fullText = noteTweetText(node) || TWEET_CACHE.get(id)?.fullText || "";
   TWEET_CACHE.set(id, {
     url: username ? `https://x.com/${username}/status/${id}` : `https://x.com/i/status/${id}`,
     author: {
@@ -83,7 +103,9 @@ function cacheTweetResult(node) {
       username,
       avatarUrl: highResolutionProfileImageUrl(userLegacy.profile_image_url_https || userLegacy.profile_image_url || "")
     },
-    text: legacy.full_text || legacy.text || node.text || "",
+    text: fullText || legacyTweetText(node),
+    fullText,
+    entities: legacy.entities,
     media: mediaFromLegacyTweet(legacy),
     createdAt: legacy.created_at || ""
   });
@@ -131,27 +153,38 @@ function shouldCaptureApiUrl(url) {
 }
 
 function installNetworkCapture() {
-  const originalFetch = window.fetch;
+  // Firefox can run the script in an Xray sandbox whose functions the page cannot always call, so a replaced fetch could
+  // break X's own requests. Capture stays off there, and the cut-off notice covers long posts. exportFunction would not
+  // tell: Violentmonkey provides it on Chromium too.
+  if (document.wrappedJSObject) return;
+
+  // Managers run this script in a sandbox, so X's own requests only pass through the page's window.
+  const pageWindow = typeof unsafeWindow === "undefined" ? window : unsafeWindow;
+  const originalFetch = pageWindow.fetch;
   if (typeof originalFetch === "function") {
-    window.fetch = async function (...args) {
-      const response = await originalFetch.apply(this, args);
-      const url = String(args[0]?.url || args[0] || "");
-      if (shouldCaptureApiUrl(url)) {
-        response.clone().json().then(scanForVideoVariants).catch(() => {});
-      }
+    pageWindow.fetch = async function (...args) {
+      const response = await originalFetch.apply(pageWindow, args);
+      try {
+        const url = String(args[0]?.url || args[0] || "");
+        if (shouldCaptureApiUrl(url)) {
+          response.clone().json().then(scanForVideoVariants).catch(() => {});
+        }
+      } catch {}
       return response;
     };
   }
 
-  const originalOpen = XMLHttpRequest.prototype.open;
-  const originalSend = XMLHttpRequest.prototype.send;
-  XMLHttpRequest.prototype.open = function (method, url, ...rest) {
-    this.__tdsUrl = String(url || "");
+  const xhrPrototype = pageWindow.XMLHttpRequest.prototype;
+  const originalOpen = xhrPrototype.open;
+  const originalSend = xhrPrototype.send;
+  const requestUrls = new WeakMap();
+  xhrPrototype.open = function (method, url, ...rest) {
+    requestUrls.set(this, String(url || ""));
     return originalOpen.call(this, method, url, ...rest);
   };
-  XMLHttpRequest.prototype.send = function (...args) {
+  xhrPrototype.send = function (...args) {
     this.addEventListener("load", () => {
-      if (!shouldCaptureApiUrl(this.__tdsUrl || "")) return;
+      if (!shouldCaptureApiUrl(requestUrls.get(this) || "")) return;
       try {
         scanForVideoVariants(JSON.parse(this.responseText));
       } catch {}

@@ -550,6 +550,22 @@ test("plain-text fallback carries the main post's text and permalink", async () 
 const stringsIn = (value) =>
   typeof value === "string" ? [value] : value && typeof value === "object" ? Object.values(value).flatMap(stringsIn) : [];
 const visibleText = (request) => [contentOf(request), ...(rendersEmbeds(request) ? stringsIn(request.payload.embeds ?? []) : [])];
+// The text a reader sees in order: message content, then each embed's description and its fields, unquoted.
+const readableChunks = (request) =>
+  [
+    contentOf(request),
+    ...(rendersEmbeds(request)
+      ? (request.payload.embeds ?? []).flatMap((embed) => [embed.description, ...(embed.fields ?? []).map((field) => String(field.value ?? "").replace(/^> ?/gm, ""))])
+      : [])
+  ]
+    .map(collapseWhitespace)
+    .filter(Boolean);
+
+function carriesWholeQuoteText(t, requests) {
+  const chunks = requests.flatMap(readableChunks);
+  const at = chunks.findIndex((chunk) => chunk.includes(QUOTE_MARK));
+  return at >= 0 && spansChunksAcrossTrimmedCuts(collapseWhitespace(t.quote.text), chunks.slice(at), chunks[at].indexOf(QUOTE_MARK));
+}
 
 test("a share carries the quoted post's text and permalink when included, and sends what it would without the quote when excluded", async () => {
   await runShare(
@@ -569,6 +585,7 @@ test("a share carries the quoted post's text and permalink when included, and se
       } else {
         const visible = requests.flatMap(visibleText);
         if (t.quote.text && !visible.some((text) => text.includes(QUOTE_MARK))) problems.push("is missing the included quote's text");
+        else if (t.quote.text && !carriesWholeQuoteText(t, requests)) problems.push("cuts the included quote's text short");
         if (!urlsIn(visible).has(t.quote.url)) problems.push(`is missing the included quote's permalink ${t.quote.url}`);
       }
       return report(problems.map((what) => `share ${what}`));

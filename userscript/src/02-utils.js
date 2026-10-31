@@ -10,10 +10,6 @@ function unique(values) {
   return [...new Set(values.filter(Boolean))];
 }
 
-function text(node, selector) {
-  return node.querySelector(selector)?.textContent?.trim() || "";
-}
-
 function absoluteUrl(url) {
   try {
     return new URL(url, location.href).toString();
@@ -58,8 +54,9 @@ function discordEmbedTimestamp(createdAt) {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
-function normalizeTextForMatch(value) {
-  return String(value || "").replace(/\s+/g, " ").trim();
+// X's API escapes these three in post text.
+function decodeHtmlEntities(value) {
+  return String(value || "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 }
 
 function isPlayableTweetVideoUrl(url) {

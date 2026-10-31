@@ -37,7 +37,10 @@ function openPage(t, {
     ["tds-destinations", destinations],
     ["tds-preferences", { alwaysShowPreview: false }]
   ]),
-  discordResponse = { status: 204, responseText: "" }
+  discordResponse = { status: 204, responseText: "" },
+  unsafeWindow,
+  exportFunction,
+  xraySandbox
 }) {
   const dom = new JSDOM(page({ quote, text }), {
     url: postUrl,
@@ -68,6 +71,9 @@ function openPage(t, {
       setTimeout(() => details.onload(respond(details)), 0);
     }
   };
+  if (unsafeWindow) window.unsafeWindow = unsafeWindow;
+  if (exportFunction) window.exportFunction = exportFunction;
+  if (xraySandbox) window.document.wrappedJSObject = {};
   window.eval(userscript);
   const posts = () => requests.filter((request) => request.method === "POST");
   return {
@@ -174,6 +180,27 @@ const sentStatusIds = (requests) =>
       .flatMap((text) => text.match(/https?:\/\/[^\s<>)]+/g) || [])
       .flatMap((url) => /\/status\/(\d+)/.exec(url)?.[1] ?? [])
   );
+
+// X's own requests, as the script sees them through unsafeWindow. `respond` plays one GraphQL response to the page.
+function pageTraffic() {
+  const bodies = [];
+  const pageWindow = {
+    fetch() {
+      return Promise.resolve({ clone: () => ({ json: async () => bodies.shift() }) });
+    },
+    XMLHttpRequest: class { open() {} send() {} addEventListener() {} }
+  };
+  const respond = async (body) => {
+    bodies.push(body);
+    await pageWindow.fetch("https://x.com/i/api/graphql/abc/HomeTimeline");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  };
+  return { pageWindow, respond };
+}
+
+function addToPost(view, html) {
+  view.document.querySelector('article [role="group"]').insertAdjacentHTML("beforebegin", html);
+}
 
 async function openPreview(view, share) {
   const [item] = await openShareMenu(view, share);
@@ -291,6 +318,208 @@ test("sharing to the only destination posts the post to its webhook", async (t) 
   for (const [index, payload] of payloads.entries()) {
     assert.deepEqual(payload.allowed_mentions?.parse, [], `message ${index + 1} disables mentions`);
   }
+});
+
+test("emoji X draws as images stay in the post text and the author's name, and do not count as media", async (t) => {
+  const emoji = (alt) => `<img alt="${alt}" src="https://abs-0.twimg.com/emoji/v2/svg/1f4f8.svg">`;
+  const view = openPage(t, { destinations: [general], text: `Great shot\n\n<span>${emoji("📸")}</span>: Getty / Caddix` });
+  view.document.querySelector('[data-testid="User-Name"] a span').innerHTML = `<div dir="ltr"><span>Alice ${emoji("🔥")}</span></div>`;
+
+  const items = await openShareMenu(view);
+  click(view, items[0]);
+  await waitFor(() => toast(view, "success"), "the success toast");
+
+  const [message] = view.webhookPosts().map(postedMessage);
+  const card = message.payload.embeds[0];
+  assert.match(card.description, /📸: Getty \/ Caddix/);
+  assert.match(card.author.name, /^Alice 🔥/);
+  assert.equal(message.files.length, 1, "only the post's photo uploads");
+});
+
+test("a post X shows with Show more is marked cut off in the message and the toast", async (t) => {
+  const showMore = '<a data-testid="tweet-text-show-more-link" href="/alice/status/1234567890">Show more</a>';
+  const view = openPage(t, { destinations: [general], text: `Start of a long post</span></div>${showMore}<div><span>` });
+  click(view, (await openShareMenu(view))[0]);
+  const success = await waitFor(() => toast(view, "success"), "the success toast");
+  assert.match(success.textContent, /cut off/i);
+  assert.match(view.webhookPosts().map(postedMessage)[0].payload.embeds[0].description, /Start of a long post…\n\n.*cut off/i);
+});
+
+test("full text from traffic on the page itself completes a cut-off post, even when the script's own window is a sandbox", async (t) => {
+  const graphqlBody = {
+    rest_id: "1234567890",
+    core: { user_results: { result: { legacy: { name: "Alice", screen_name: "alice" } } } },
+    legacy: { full_text: "Start of a long post" },
+    note_tweet: { note_tweet_results: { result: { text: "Start of a long post and its ending" } } }
+  };
+  const graphqlResponse = { clone: () => ({ json: async () => graphqlBody }) };
+  const pageFetchCalls = [];
+  const pageWindow = {
+    fetch(...args) {
+      pageFetchCalls.push({ self: this, args });
+      return Promise.resolve(graphqlResponse);
+    },
+    XMLHttpRequest: class { open() {} send() {} }
+  };
+  const showMore = '<a data-testid="tweet-text-show-more-link" href="/alice/status/1234567890">Show more</a>';
+  const view = openPage(t, { destinations: [general], text: `Start of a long post</span></div>${showMore}<div><span>`, unsafeWindow: pageWindow });
+
+  const { fetch } = pageWindow;
+  const seen = await fetch("https://x.com/i/api/graphql/abc/HomeTimeline");
+  assert.equal(seen, graphqlResponse, "the page gets X's own response back");
+  assert.equal(pageFetchCalls[0].self, pageWindow, "X's fetch runs with the page as its receiver, however X called it");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  click(view, (await openShareMenu(view))[0]);
+  const success = await waitFor(() => toast(view, "success"), "the success toast");
+  assert.doesNotMatch(success.textContent, /cut off/i);
+  assert.equal(view.webhookPosts().map(postedMessage)[0].payload.embeds[0].description, "Start of a long post and its ending");
+});
+
+test("a quoted video post whose box shows only its author is the quote, so unchecking the quote keeps its video out", async (t) => {
+  const { pageWindow, respond } = pageTraffic();
+  const view = openPage(t, { destinations: [general], unsafeWindow: pageWindow });
+  addToPost(view, `<div role="link" tabindex="0">
+    <div data-testid="User-Name"><span>Bob</span><span>@bob</span></div>
+    <video poster="https://pbs.twimg.com/ext_tw_video_thumb/777/pu/img/abc.jpg"></video>
+  </div>`);
+  await respond({
+    id_str: "777",
+    media_url_https: "https://pbs.twimg.com/ext_tw_video_thumb/777/pu/img/abc.jpg",
+    video_info: { variants: [{ content_type: "video/mp4", bitrate: 800000, url: "https://video.twimg.com/ext_tw_video/777/pu/vid/avc1/720x720/quote.mp4" }] }
+  });
+
+  const menu = await openPreview(view);
+  assert.match(leafWithText(menu, "Post by @alice")?.textContent ?? "", /quoting @bob$/, "the summary names the quoted post's author");
+  click(view, byText(menu, "label", "Include quoted post")[0]);
+  click(view, channelButtons(menu, "General")[0]);
+
+  await waitFor(() => toast(view, "success"), "the success toast");
+  assert.doesNotMatch(sentText(view.webhookPosts()), /quote\.mp4/, "the quoted post's video is not sent as the main post's");
+});
+
+test("full text from X's XMLHttpRequest traffic on the page completes a cut-off post", async (t) => {
+  const loadListeners = [];
+  const pageWindow = {
+    XMLHttpRequest: class {
+      open() {}
+      send() {}
+      addEventListener(type, listener) {
+        if (type === "load") loadListeners.push(listener);
+      }
+    }
+  };
+  const showMore = '<a data-testid="tweet-text-show-more-link" href="/alice/status/1234567890">Show more</a>';
+  const view = openPage(t, { destinations: [general], text: `Start of a long post</span></div>${showMore}<div><span>`, unsafeWindow: pageWindow });
+
+  const request = new pageWindow.XMLHttpRequest();
+  request.open("GET", "https://x.com/i/api/graphql/abc/HomeTimeline");
+  request.send();
+  request.responseText = JSON.stringify({
+    rest_id: "1234567890",
+    core: { user_results: { result: { legacy: { name: "Alice", screen_name: "alice" } } } },
+    legacy: { full_text: "Start of a long post" },
+    note_tweet: { note_tweet_results: { result: { text: "Start of a long post and its ending" } } }
+  });
+  for (const listener of loadListeners) listener.call(request);
+
+  click(view, (await openShareMenu(view))[0]);
+  const success = await waitFor(() => toast(view, "success"), "the success toast");
+  assert.doesNotMatch(success.textContent, /cut off/i);
+  assert.equal(view.webhookPosts().map(postedMessage)[0].payload.embeds[0].description, "Start of a long post and its ending");
+});
+
+const cutOffQuoteBox = `<div role="link" tabindex="0">
+    <div data-testid="User-Name"><span>Bob</span><span>@bob</span></div>
+    <div data-testid="tweetText"><span>Start of Bob's long quote</span></div>
+    <span data-testid="tweet-text-show-more-link">Show more</span>
+  </div>`;
+
+test("a quote X shows with Show more is marked cut off in its field and the toast, and the main post is not", async (t) => {
+  const view = openPage(t, { destinations: [general] });
+  addToPost(view, cutOffQuoteBox);
+
+  const menu = await openPreview(view);
+  click(view, channelButtons(menu, "General")[0]);
+  const success = await waitFor(() => toast(view, "success"), "the success toast");
+
+  assert.match(success.textContent, /cut off/i);
+  const [card] = view.webhookPosts().map(postedMessage)[0].payload.embeds;
+  assert.equal(card.description, postText, "the main post is not marked");
+  assert.match(card.fields[0].value, /^> Start of Bob's long quote…\n> \n> .*cut off/i);
+});
+
+test("with the quote unchecked, its cut-off text marks neither the toast nor the message", async (t) => {
+  const view = openPage(t, { destinations: [general] });
+  addToPost(view, cutOffQuoteBox);
+
+  const menu = await openPreview(view);
+  click(view, byText(menu, "label", "Include quoted post")[0]);
+  click(view, channelButtons(menu, "General")[0]);
+  const success = await waitFor(() => toast(view, "success"), "the success toast");
+
+  assert.doesNotMatch(success.textContent, /cut off/i);
+  assert.doesNotMatch(sentText(view.webhookPosts()), /cut off/i);
+});
+
+test("Violentmonkey's exportFunction on a Chromium page does not turn capture off", async (t) => {
+  const { pageWindow, respond } = pageTraffic();
+  const showMore = '<a data-testid="tweet-text-show-more-link" href="/alice/status/1234567890">Show more</a>';
+  const view = openPage(t, {
+    destinations: [general],
+    text: `Start of a long post</span></div>${showMore}<div><span>`,
+    unsafeWindow: pageWindow,
+    exportFunction: () => {}
+  });
+  await respond({
+    rest_id: "1234567890",
+    core: { user_results: { result: { legacy: { name: "Alice", screen_name: "alice" } } } },
+    legacy: { full_text: "Start of a long post" },
+    note_tweet: { note_tweet_results: { result: { text: "Start of a long post and its ending" } } }
+  });
+
+  click(view, (await openShareMenu(view))[0]);
+  const success = await waitFor(() => toast(view, "success"), "the success toast");
+  assert.doesNotMatch(success.textContent, /cut off/i);
+  assert.equal(view.webhookPosts().map(postedMessage)[0].payload.embeds[0].description, "Start of a long post and its ending");
+});
+
+test("in a Firefox Xray sandbox the page's fetch and XMLHttpRequest stay untouched, and a cut-off post says so", async (t) => {
+  const { pageWindow, respond } = pageTraffic();
+  const { fetch, XMLHttpRequest } = pageWindow;
+  const { open, send } = XMLHttpRequest.prototype;
+  const showMore = '<a data-testid="tweet-text-show-more-link" href="/alice/status/1234567890">Show more</a>';
+  const view = openPage(t, {
+    destinations: [general],
+    text: `Start of a long post</span></div>${showMore}<div><span>`,
+    unsafeWindow: pageWindow,
+    xraySandbox: true
+  });
+
+  assert.equal(pageWindow.fetch, fetch, "the page's fetch is its own");
+  assert.equal(XMLHttpRequest.prototype.open, open, "the page's XMLHttpRequest.open is its own");
+  assert.equal(XMLHttpRequest.prototype.send, send, "the page's XMLHttpRequest.send is its own");
+  await respond({
+    rest_id: "1234567890",
+    core: { user_results: { result: { legacy: { name: "Alice", screen_name: "alice" } } } },
+    legacy: { full_text: "Start of a long post" },
+    note_tweet: { note_tweet_results: { result: { text: "Start of a long post and its ending" } } }
+  });
+
+  click(view, (await openShareMenu(view))[0]);
+  const success = await waitFor(() => toast(view, "success"), "the success toast");
+  assert.match(success.textContent, /cut off/i);
+  assert.match(view.webhookPosts().map(postedMessage)[0].payload.embeds[0].description, /^Start of a long post…\n\n.*cut off/i);
+});
+
+test("a name-only link ahead of the quote box does not hide the quote's own text from the panel", async (t) => {
+  const view = openPage(t, { destinations: [general], quote: "Bobs quoted words" });
+  const box = view.document.querySelector('[data-testid="tweetText"] ~ [role="link"], article [role="link"]');
+  box.querySelector('a[href="/bob/status/999"]').remove();
+  box.insertAdjacentHTML("beforebegin", '<div role="link"><div data-testid="User-Name"><span>Carol</span><span>@carol</span></div></div>');
+
+  click(view, (await openShareMenu(view))[0]);
+  await waitFor(() => /quoting @bob/i.test(view.document.body.textContent), "the panel naming Bob's quote");
 });
 
 test("sharing with no destinations opens settings and sends nothing", async (t) => {
