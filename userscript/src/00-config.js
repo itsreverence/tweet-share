@@ -40,6 +40,7 @@ const VIDEO_VARIANT_CACHE = new Map();
 const TEXT_CUT_OFF_NOTE = "[Post cut off. Open on X for the rest.]";
 const TWEET_CACHE = new Map();
 const USER_CACHE = new Map();
+const captureStatus = { state: "not started", responsesRead: 0 };
 
 function trimCache(cache, maxEntries = CACHE_MAX_ENTRIES) {
   while (cache.size > maxEntries) {
