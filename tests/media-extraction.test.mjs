@@ -631,6 +631,15 @@ test("a link X shortened on the page is sent whole, from X's public data or else
   assert.equal((await unanswered.enrichTweetMedia(longPostParts({ text, textCutOff: false }))).text, text);
 });
 
+test("a shortened link that is only plain text, as in X's quote box, is sent whole", async () => {
+  const urls = [{ url: "https://t.co/abc", display_url: "mitchellh.com/writing/zig-donat…", expanded_url: "https://mitchellh.com/writing/zig-donation" }];
+  const syndication = loadMediaContext(() => Promise.resolve({ id_str: "1000000000000000001", entities: { urls } }));
+  const textFor = async (text) => (await syndication.enrichTweetMedia(longPostParts({ text, textCutOff: false }))).text;
+
+  assert.equal(await textFor("See https://mitchellh.com/writing/zig-donat… now"), "See https://mitchellh.com/writing/zig-donation now");
+  assert.equal(await textFor("See mitchellh.com/writing/zig-donat… now"), "See https://mitchellh.com/writing/zig-donation now");
+});
+
 test("a complete post is left alone", async () => {
   const syndication = loadMediaContext(() => Promise.resolve(null));
   const tweet = await syndication.enrichTweetMedia(longPostParts({ textCutOff: false }));
