@@ -39,7 +39,8 @@ function openPage(t, {
   ]),
   discordResponse = { status: 204, responseText: "" },
   unsafeWindow,
-  exportFunction
+  exportFunction,
+  xraySandbox
 }) {
   const dom = new JSDOM(page({ quote, text }), {
     url: postUrl,
@@ -72,6 +73,7 @@ function openPage(t, {
   };
   if (unsafeWindow) window.unsafeWindow = unsafeWindow;
   if (exportFunction) window.exportFunction = exportFunction;
+  if (xraySandbox) window.document.wrappedJSObject = {};
   window.eval(userscript);
   const posts = () => requests.filter((request) => request.method === "POST");
   return {
@@ -460,6 +462,28 @@ test("with the quote unchecked, its cut-off text marks neither the toast nor the
   assert.doesNotMatch(sentText(view.webhookPosts()), /cut off/i);
 });
 
+test("Violentmonkey's exportFunction on a Chromium page does not turn capture off", async (t) => {
+  const { pageWindow, respond } = pageTraffic();
+  const showMore = '<a data-testid="tweet-text-show-more-link" href="/alice/status/1234567890">Show more</a>';
+  const view = openPage(t, {
+    destinations: [general],
+    text: `Start of a long post</span></div>${showMore}<div><span>`,
+    unsafeWindow: pageWindow,
+    exportFunction: () => {}
+  });
+  await respond({
+    rest_id: "1234567890",
+    core: { user_results: { result: { legacy: { name: "Alice", screen_name: "alice" } } } },
+    legacy: { full_text: "Start of a long post" },
+    note_tweet: { note_tweet_results: { result: { text: "Start of a long post and its ending" } } }
+  });
+
+  click(view, (await openShareMenu(view))[0]);
+  const success = await waitFor(() => toast(view, "success"), "the success toast");
+  assert.doesNotMatch(success.textContent, /cut off/i);
+  assert.equal(view.webhookPosts().map(postedMessage)[0].payload.embeds[0].description, "Start of a long post and its ending");
+});
+
 test("in a Firefox Xray sandbox the page's fetch and XMLHttpRequest stay untouched, and a cut-off post says so", async (t) => {
   const { pageWindow, respond } = pageTraffic();
   const { fetch, XMLHttpRequest } = pageWindow;
@@ -469,7 +493,7 @@ test("in a Firefox Xray sandbox the page's fetch and XMLHttpRequest stay untouch
     destinations: [general],
     text: `Start of a long post</span></div>${showMore}<div><span>`,
     unsafeWindow: pageWindow,
-    exportFunction: () => {}
+    xraySandbox: true
   });
 
   assert.equal(pageWindow.fetch, fetch, "the page's fetch is its own");
