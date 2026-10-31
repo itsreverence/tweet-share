@@ -105,6 +105,7 @@ function cacheTweetResult(node) {
     },
     text: fullText || legacyTweetText(node),
     fullText,
+    entities: legacy.entities,
     media: mediaFromLegacyTweet(legacy),
     createdAt: legacy.created_at || ""
   });

@@ -558,6 +558,7 @@ function cacheTweetResult(node) {
     },
     text: fullText || legacyTweetText(node),
     fullText,
+    entities: legacy.entities,
     media: mediaFromLegacyTweet(legacy),
     createdAt: legacy.created_at || ""
   });
@@ -1358,6 +1359,14 @@ function fillQuoteUrl(quote, quotedTweet) {
   quote.url = `https://x.com/${username || "i"}/status/${quotedTweet.id_str}`;
 }
 
+function expandShortLinks(text, entities) {
+  let value = String(text || "");
+  for (const { url, expanded_url: expandedUrl } of entities?.urls || []) {
+    if (url && expandedUrl) value = value.split(url).join(expandedUrl);
+  }
+  return value;
+}
+
 function noteTextCutOff(post) {
   if (!post?.textCutOff) return;
   const text = String(post.text || "").trimEnd();
@@ -1387,6 +1396,7 @@ async function enrichPost(tweet) {
     tweet.text = cachedTweet.fullText;
     tweet.textCutOff = false;
   }
+  tweet.text = expandShortLinks(expandShortLinks(tweet.text, data?.entities), cachedTweet?.entities);
   const videoUrl = normalizeTweetVideoUrl(bestSyndicationVideoUrl(data));
   const posterUrl = syndicationPosterUrl(data);
   const cachedVideoUrl = bestCachedVideoUrlForTweet(tweet);
@@ -1475,7 +1485,10 @@ function readTweetTextNode(node) {
     const clone = restoreEmojiImages(node.cloneNode(true));
     for (const anchor of clone.querySelectorAll("a")) {
       const compact = String(anchor.textContent || "").replace(/\s+/g, "");
-      if (/^https?:\/\//i.test(compact) || /^[\w.-]+\.[a-z]{2,}\//i.test(compact)) {
+      // X shortens a long link on the page, and only its t.co address still works whole.
+      if (compact.endsWith("…") && /^https:\/\/t\.co\//.test(anchor.href || "")) {
+        anchor.replaceWith(anchor.href);
+      } else if (/^https?:\/\//i.test(compact) || /^[\w.-]+\.[a-z]{2,}\//i.test(compact)) {
         anchor.replaceWith(compact);
       }
     }

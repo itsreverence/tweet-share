@@ -179,6 +179,14 @@ function fillQuoteUrl(quote, quotedTweet) {
   quote.url = `https://x.com/${username || "i"}/status/${quotedTweet.id_str}`;
 }
 
+function expandShortLinks(text, entities) {
+  let value = String(text || "");
+  for (const { url, expanded_url: expandedUrl } of entities?.urls || []) {
+    if (url && expandedUrl) value = value.split(url).join(expandedUrl);
+  }
+  return value;
+}
+
 function noteTextCutOff(post) {
   if (!post?.textCutOff) return;
   const text = String(post.text || "").trimEnd();
@@ -208,6 +216,7 @@ async function enrichPost(tweet) {
     tweet.text = cachedTweet.fullText;
     tweet.textCutOff = false;
   }
+  tweet.text = expandShortLinks(expandShortLinks(tweet.text, data?.entities), cachedTweet?.entities);
   const videoUrl = normalizeTweetVideoUrl(bestSyndicationVideoUrl(data));
   const posterUrl = syndicationPosterUrl(data);
   const cachedVideoUrl = bestCachedVideoUrlForTweet(tweet);

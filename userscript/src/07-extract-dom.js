@@ -63,7 +63,10 @@ function readTweetTextNode(node) {
     const clone = restoreEmojiImages(node.cloneNode(true));
     for (const anchor of clone.querySelectorAll("a")) {
       const compact = String(anchor.textContent || "").replace(/\s+/g, "");
-      if (/^https?:\/\//i.test(compact) || /^[\w.-]+\.[a-z]{2,}\//i.test(compact)) {
+      // X shortens a long link on the page, and only its t.co address still works whole.
+      if (compact.endsWith("…") && /^https:\/\/t\.co\//.test(anchor.href || "")) {
+        anchor.replaceWith(anchor.href);
+      } else if (/^https?:\/\//i.test(compact) || /^[\w.-]+\.[a-z]{2,}\//i.test(compact)) {
         anchor.replaceWith(compact);
       }
     }
