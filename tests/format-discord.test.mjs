@@ -820,3 +820,61 @@ test("a card with more photos than one message holds keeps every grid whole and 
   }
   assert.equal(messageOfGrid.get(sampleTweet.url), 0, "the card's own grid sits with the card");
 });
+
+const parentUrl = "https://x.com/parent_user/status/900";
+const replyTweet = (overrides = {}) => ({
+  ...sampleTweet,
+  media: [],
+  replyTo: { username: "parent_user", url: parentUrl },
+  ...overrides
+});
+
+test("a reply's card opens with who it answers, linked to the post it answers", () => {
+  const [payload] = buildDiscordPayloads(replyTweet());
+  assert.equal(payload.embeds[0].description, `↩ Replying to [@parent\\_user](${parentUrl})\n\nHello world`);
+});
+
+test("a reply to the author's own post reads as a thread, matched whatever the case of the handle", () => {
+  const [payload] = buildDiscordPayloads(replyTweet({ replyTo: { username: "ALICE", url: "https://x.com/ALICE/status/900" } }));
+  assert.equal(payload.embeds[0].description, "↩ [Continues a thread](https://x.com/ALICE/status/900)\n\nHello world");
+});
+
+test("a post with no reply data says nothing about replying", () => {
+  const payloads = [...buildDiscordPayloads({ ...sampleTweet, media: [] }), ...buildPlainFallbackPayloads({ ...sampleTweet, media: [] })];
+  assert.equal(payloads[0].embeds[0].description, "Hello world");
+  assert.ok(!JSON.stringify(payloads).includes("Replying to") && !JSON.stringify(payloads).includes("thread"));
+});
+
+test("a photo-only reply shows the reply line and its photo, with no placeholder text", () => {
+  const [payload] = buildDiscordPayloads(replyTweet({ text: "", media: [{ type: "image", url: "https://pbs.twimg.com/media/reply.jpg" }] }));
+  assert.equal(payload.embeds[0].description, `↩ Replying to [@parent\\_user](${parentUrl})`);
+  assert.equal(payload.embeds[0].image.url, "https://pbs.twimg.com/media/reply.jpg");
+});
+
+test("the plain fallback names what a reply answers under the author, with a link Discord does not unfurl", () => {
+  assert.deepEqual(buildPlainFallbackPayloads(replyTweet())[0].content.split("\n"), [
+    "Alice (@alice)",
+    `Replying to @parent\\_user: <${parentUrl}>`,
+    "Hello world",
+    sampleTweet.url
+  ]);
+  const thread = replyTweet({ replyTo: { username: "alice", url: "https://x.com/alice/status/900" } });
+  assert.equal(buildPlainFallbackPayloads(thread)[0].content.split("\n")[1], "Continues a thread: <https://x.com/alice/status/900>");
+});
+
+test("a quoted post's own reply data is not shown, on its card, its field, or in the fallback", () => {
+  const quote = {
+    url: "https://x.com/bob/status/2",
+    author: { displayName: "Bob", username: "bob" },
+    text: "Quoted text",
+    media: [],
+    replyTo: { username: "parent_user", url: parentUrl }
+  };
+  const inline = buildDiscordPayloads({ ...sampleTweet, media: [], quote });
+  const card = buildDiscordPayloads({ ...sampleTweet, media: [], quote: { ...quote, media: [{ type: "image", url: "https://pbs.twimg.com/media/q1.jpg" }] } });
+  const fallback = buildPlainFallbackPayloads({ ...sampleTweet, media: [], quote });
+  assert.equal(card[0].embeds[1].description, "Quoted text", "the quote card is only the quoted text");
+  for (const payloads of [inline, card, fallback]) {
+    assert.ok(!JSON.stringify(payloads).includes(parentUrl), "nothing links the quote's parent");
+  }
+});
