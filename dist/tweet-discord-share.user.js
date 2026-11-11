@@ -344,6 +344,14 @@ function tweetIdFromUrl(url) {
   return String(url || "").match(/\/status\/(\d+)/)?.[1] || "";
 }
 
+// The handle lands inside a markdown link, so anything that is not an X handle is dropped rather than escaped.
+function replyTarget(parentId, parentUsername) {
+  const id = String(parentId || "");
+  if (!/^\d+$/.test(id)) return undefined;
+  const username = /^\w+$/.test(parentUsername || "") ? parentUsername : "";
+  return { username, url: `https://x.com/${username || "i"}/status/${id}` };
+}
+
 function highResolutionProfileImageUrl(url) {
   return (url || "").replace(/_normal(\.(?:jpg|jpeg|png|webp))(?:\?|$)/i, "$1");
 }
@@ -560,7 +568,8 @@ function cacheTweetResult(node) {
     fullText,
     entities: legacy.entities,
     media: mediaFromLegacyTweet(legacy),
-    createdAt: legacy.created_at || ""
+    createdAt: legacy.created_at || "",
+    replyTo: replyTarget(legacy.in_reply_to_status_id_str, legacy.in_reply_to_screen_name)
   });
   trimCache(TWEET_CACHE);
 }
@@ -741,6 +750,14 @@ function authorLabel(post, format = (value) => value) {
   return displayName || handle || "Unknown author";
 }
 
+function replyContext(post) {
+  const { username = "", url } = post.replyTo || {};
+  if (!url) return null;
+  const author = String(post.author?.username || "");
+  if (username && username.toLowerCase() === author.toLowerCase()) return { lead: "", target: "Continues a thread", url };
+  return { lead: "Replying to ", target: escapeMarkdown(username ? `@${username}` : "a post"), url };
+}
+
 function webhookSenderAvatarUrl() {
   return WEBHOOK_SENDER_AVATAR_URL;
 }
@@ -910,11 +927,14 @@ function postCard(post, kind, { images, fields = [], url }) {
   const label = authorLabel(post);
   const profileUrl = post.author?.username ? `https://x.com/${post.author.username}` : undefined;
   const text = String(post.text || "").trim();
+  const reply = isQuote ? null : replyContext(post);
+  const replyLine = reply ? `↩ ${reply.lead}[${reply.target}](${reply.url})` : "";
+  const body = text || (replyLine || images.length || mediaLinks(post).length ? "" : "(No text found)");
   return {
     color: isQuote ? EMBED_COLOR_QUOTE : EMBED_COLOR_MAIN,
     // A quote card has no other visible link to the quoted post, so its author name opens it.
     author: isQuote ? embedAuthorBlock(post, `Quoting ${label}`, post.url) : embedAuthorBlock(post, label, profileUrl),
-    text: text || (images.length || mediaLinks(post).length ? "" : "(No text found)"),
+    text: [replyLine, body].filter(Boolean).join("\n\n"),
     fields,
     images,
     date: discordEmbedTimestamp(post.createdAt),
@@ -1101,6 +1121,8 @@ function formatMediaLinkPlain(item) {
 function buildCompactPlainBody(tweet, options = {}) {
   const { includeQuote = true } = options;
   const lines = [authorLabel(tweet, escapeMarkdown)];
+  const reply = replyContext(tweet);
+  if (reply) lines.push(`${reply.lead}${reply.target}: <${reply.url}>`);
 
   if (tweet.text) lines.push(tweet.text);
   for (const item of mediaLinks(tweet, options)) lines.push(formatMediaLinkPlain(item));
@@ -1346,6 +1368,7 @@ function tweetFromSyndication(data, fallback = {}) {
     text: fallback.text || visibleSyndicationText(data),
     createdAt: data.created_at || fallback.createdAt || "",
     media: mergeTweetMedia(mediaFromSyndication(data), fallback.media || []),
+    replyTo: replyTarget(data.in_reply_to_status_id_str, data.in_reply_to_screen_name) || fallback.replyTo,
     quote: fallback.quote
   };
 }
@@ -1401,6 +1424,7 @@ async function enrichPost(tweet) {
     tweet.text = tweet.text || cachedTweet.text || "";
     tweet.createdAt = tweet.createdAt || cachedTweet.createdAt || "";
     tweet.media = mergeTweetMedia(tweet.media || [], cachedTweet.media || []);
+    tweet.replyTo = tweet.replyTo || cachedTweet.replyTo;
   }
   if (cachedTweet?.fullText) {
     tweet.text = cachedTweet.fullText;

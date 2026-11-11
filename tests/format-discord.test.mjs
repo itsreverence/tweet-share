@@ -832,6 +832,8 @@ const replyTweet = (overrides = {}) => ({
 test("a reply's card opens with who it answers, linked to the post it answers", () => {
   const [payload] = buildDiscordPayloads(replyTweet());
   assert.equal(payload.embeds[0].description, `↩ Replying to [@parent\\_user](${parentUrl})\n\nHello world`);
+  const unnamed = buildDiscordPayloads(replyTweet({ replyTo: { username: "", url: "https://x.com/i/status/900" } }));
+  assert.equal(unnamed[0].embeds[0].description, "↩ Replying to [a post](https://x.com/i/status/900)\n\nHello world", "a parent with no handle is still linked");
 });
 
 test("a reply to the author's own post reads as a thread, matched whatever the case of the handle", () => {

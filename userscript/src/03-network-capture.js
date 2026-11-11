@@ -107,7 +107,8 @@ function cacheTweetResult(node) {
     fullText,
     entities: legacy.entities,
     media: mediaFromLegacyTweet(legacy),
-    createdAt: legacy.created_at || ""
+    createdAt: legacy.created_at || "",
+    replyTo: replyTarget(legacy.in_reply_to_status_id_str, legacy.in_reply_to_screen_name)
   });
   trimCache(TWEET_CACHE);
 }

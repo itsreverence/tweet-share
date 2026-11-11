@@ -31,6 +31,14 @@ function tweetIdFromUrl(url) {
   return String(url || "").match(/\/status\/(\d+)/)?.[1] || "";
 }
 
+// The handle lands inside a markdown link, so anything that is not an X handle is dropped rather than escaped.
+function replyTarget(parentId, parentUsername) {
+  const id = String(parentId || "");
+  if (!/^\d+$/.test(id)) return undefined;
+  const username = /^\w+$/.test(parentUsername || "") ? parentUsername : "";
+  return { username, url: `https://x.com/${username || "i"}/status/${id}` };
+}
+
 function highResolutionProfileImageUrl(url) {
   return (url || "").replace(/_normal(\.(?:jpg|jpeg|png|webp))(?:\?|$)/i, "$1");
 }
