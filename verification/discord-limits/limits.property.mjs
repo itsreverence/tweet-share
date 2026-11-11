@@ -200,13 +200,18 @@ const fullMedia = fc.oneof(
   { weight: 1, arbitrary: fullMediaOf(twimgImageItem, videoItem) }
 );
 
+const replyTo = fc
+  .tuple(fc.oneof(username, fc.constant("")), statusId)
+  .map(([name, id]) => ({ username: name, url: `https://x.com/${name || "i"}/status/${id}` }));
+
 function postArb(media) {
   return fc.record({
     url: fc.tuple(username, statusId).map(([u, id]) => `https://x.com/${u}/status/${id}`),
     author,
     text,
     createdAt: fc.constantFrom("2026-06-10T21:06:19.000Z", "Tue May 26 12:00:00 +0000 2026", "", "garbage"),
-    media
+    media,
+    replyTo: fc.option(replyTo, { nil: undefined })
   });
 }
 const mediaIdOf = (url) => /\/(?:media|ext_tw_video|amplify_video|tweet_video)\/([^/?.]+)/.exec(url)?.[1];
@@ -454,6 +459,8 @@ test("every share carries the main post's text, permalink, and media, and quoted
   await runShare(tweetWithShareableImages, (t, o, requests) => {
     const rendered = renderedMedia(requests);
     const descriptions = requests.filter(rendersEmbeds).flatMap(({ payload }) => (payload.embeds || []).map((e) => e.description)).filter(Boolean);
+    // A reply's card names the post it answers on its own line, ahead of the post's text.
+    if (t.replyTo && descriptions.length) descriptions[0] = descriptions[0].replace(/^↩ [^\n]*(?:\n\n|$)/, "");
     const missing = [];
     if (!spansChunksAcrossTrimmedCuts(collapseWhitespace(t.text), descriptions.map(collapseWhitespace), 0)) {
       missing.push("main text in its embed descriptions");
