@@ -143,6 +143,12 @@ test("the recorded markup leaves out nested posts, the repost line, and the acti
   assert.ok(fixture.markup.includes("post 100"), "the post itself is recorded");
 });
 
+test("a video keeps its poster, which the script reads for the thumbnail", async () => {
+  const video = article("100", `<div data-testid="videoPlayer"><video poster="https://pbs.twimg.com/amplify_video_thumb/9/img/a.jpg" src="blob:x"></video></div>`);
+  const fixture = await recordPage(video, {}).record("https://x.com/someone/status/100");
+  assert.match(fixture.markup, /poster="https:\/\/pbs\.twimg\.com\/amplify_video_thumb\/9\/img\/a\.jpg"/, "the poster is kept");
+});
+
 test("an allow-listed field holding an object is dropped, not copied", async () => {
   const response = {
     tweet: {

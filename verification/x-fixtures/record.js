@@ -42,7 +42,7 @@
     });
     return send.apply(this, args);
   };
-  const KEEP = new Set(["data-testid", "href", "src", "alt", "datetime", "role", "dir", "aria-label", "tabindex"]);
+  const KEEP = new Set(["data-testid", "href", "src", "alt", "poster", "datetime", "role", "dir", "aria-label", "tabindex"]);
   const cleanMarkup = (article) => {
     const clone = article.cloneNode(true);
     // Another post nested in this one, the "You reposted" line, and the action row's likes and bookmarks are not this
