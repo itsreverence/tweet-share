@@ -166,6 +166,7 @@ function tweetFromSyndication(data, fallback = {}) {
     text: fallback.text || visibleSyndicationText(data),
     createdAt: data.created_at || fallback.createdAt || "",
     media: mergeTweetMedia(mediaFromSyndication(data), fallback.media || []),
+    replyTo: replyTarget(data.in_reply_to_status_id_str, data.in_reply_to_screen_name) || fallback.replyTo,
     quote: fallback.quote
   };
 }
@@ -221,6 +222,7 @@ async function enrichPost(tweet) {
     tweet.text = tweet.text || cachedTweet.text || "";
     tweet.createdAt = tweet.createdAt || cachedTweet.createdAt || "";
     tweet.media = mergeTweetMedia(tweet.media || [], cachedTweet.media || []);
+    tweet.replyTo = tweet.replyTo || cachedTweet.replyTo;
   }
   if (cachedTweet?.fullText) {
     tweet.text = cachedTweet.fullText;

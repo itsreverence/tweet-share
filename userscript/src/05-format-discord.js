@@ -22,6 +22,14 @@ function authorLabel(post, format = (value) => value) {
   return displayName || handle || "Unknown author";
 }
 
+function replyContext(post) {
+  const { username = "", url } = post.replyTo || {};
+  if (!url) return null;
+  const author = String(post.author?.username || "");
+  if (username && username.toLowerCase() === author.toLowerCase()) return { lead: "", target: "Continues a thread", url };
+  return { lead: "Replying to ", target: escapeMarkdown(username ? `@${username}` : "a post"), url };
+}
+
 function webhookSenderAvatarUrl() {
   return WEBHOOK_SENDER_AVATAR_URL;
 }
@@ -191,11 +199,14 @@ function postCard(post, kind, { images, fields = [], url }) {
   const label = authorLabel(post);
   const profileUrl = post.author?.username ? `https://x.com/${post.author.username}` : undefined;
   const text = String(post.text || "").trim();
+  const reply = isQuote ? null : replyContext(post);
+  const replyLine = reply ? `↩ ${reply.lead}[${reply.target}](${reply.url})` : "";
+  const body = text || (replyLine || images.length || mediaLinks(post).length ? "" : "(No text found)");
   return {
     color: isQuote ? EMBED_COLOR_QUOTE : EMBED_COLOR_MAIN,
     // A quote card has no other visible link to the quoted post, so its author name opens it.
     author: isQuote ? embedAuthorBlock(post, `Quoting ${label}`, post.url) : embedAuthorBlock(post, label, profileUrl),
-    text: text || (images.length || mediaLinks(post).length ? "" : "(No text found)"),
+    text: [replyLine, body].filter(Boolean).join("\n\n"),
     fields,
     images,
     date: discordEmbedTimestamp(post.createdAt),
@@ -382,6 +393,8 @@ function formatMediaLinkPlain(item) {
 function buildCompactPlainBody(tweet, options = {}) {
   const { includeQuote = true } = options;
   const lines = [authorLabel(tweet, escapeMarkdown)];
+  const reply = replyContext(tweet);
+  if (reply) lines.push(`${reply.lead}${reply.target}: <${reply.url}>`);
 
   if (tweet.text) lines.push(tweet.text);
   for (const item of mediaLinks(tweet, options)) lines.push(formatMediaLinkPlain(item));

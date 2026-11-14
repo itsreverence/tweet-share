@@ -69,7 +69,8 @@ function loadMediaContext(request = () => Promise.resolve(null)) {
     imageMedia,
     VIDEO_VARIANT_CACHE,
     TWEET_CACHE,
-    cacheTweetResult
+    cacheTweetResult,
+    buildDiscordPayloads
   };`, context);
   return context.exports;
 }
@@ -787,6 +788,45 @@ test("enrichTweetMedia fills a link-only quote's text and photo from its syndica
     [{ type: "image", url: "https://pbs.twimg.com/media/QuoteParentPhoto.jpg?format=jpg&name=orig" }],
     "the quote carries the photo only syndication knows about, at original size"
   );
+});
+
+async function sharedReply({ syndicationResult = null, captured = null } = {}) {
+  const context = loadMediaContext(() => Promise.resolve(syndicationResult));
+  if (captured) context.scanForVideoVariants(captured);
+  const tweet = await context.enrichTweetMedia(longPostParts({ text: "yes, exactly this", textCutOff: false }));
+  return context.buildDiscordPayloads(tweet)[0].embeds[0].description;
+}
+const capturedPost = (legacy) => ({ rest_id: "1000000000000000001", core: fixtureAuthor, legacy: { full_text: "yes, exactly this", ...legacy } });
+
+test("a reply shared from X says who it answers, from X's public data", async () => {
+  const description = await sharedReply({ syndicationResult: {
+    id_str: "1000000000000000001",
+    in_reply_to_status_id_str: "900",
+    in_reply_to_screen_name: "parent_user",
+    user: { name: "Fixture Author", screen_name: "fixture_author" }
+  } });
+  assert.equal(description, "↩ Replying to [@parent\\_user](https://x.com/parent_user/status/900)\n\nyes, exactly this");
+});
+
+test("a reply to the author's own post, known only from captured X traffic, reads as a thread", async () => {
+  const description = await sharedReply({ captured: capturedPost({ in_reply_to_status_id_str: "900", in_reply_to_screen_name: "Fixture_Author" }) });
+  assert.equal(description, "↩ [Continues a thread](https://x.com/Fixture_Author/status/900)\n\nyes, exactly this");
+});
+
+test("X's public data names the parent before captured traffic does", async () => {
+  const description = await sharedReply({
+    syndicationResult: { id_str: "1000000000000000001", in_reply_to_status_id_str: "900", in_reply_to_screen_name: "parent_user" },
+    captured: capturedPost({ in_reply_to_status_id_str: "800", in_reply_to_screen_name: "other_user" })
+  });
+  assert.match(description, /^↩ Replying to \[@parent\\_user\]\(https:\/\/x\.com\/parent_user\/status\/900\)\n\n/);
+});
+
+test("a post that neither source marks as a reply gets no reply line", async () => {
+  const description = await sharedReply({
+    syndicationResult: { id_str: "1000000000000000001", in_reply_to_screen_name: "parent_user" },
+    captured: capturedPost({})
+  });
+  assert.equal(description, "yes, exactly this");
 });
 
 test("nearestPlayableVideoUrl returns a playable currentSrc URL", () => {
