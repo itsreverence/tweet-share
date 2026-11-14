@@ -38,7 +38,7 @@ Media upload is automatic and bounded. If a video is unavailable or too large to
 
 - Tested with Violentmonkey on Brave; other Chromium-family browsers (Chrome, Edge) should behave the same
 - Tampermonkey is expected to work but is not regularly tested
-- Firefox works, but long posts can arrive cut off because the script does not read X's network traffic there
+- Firefox should work but is not regularly tested; long posts can arrive cut off because the script does not read X's network traffic there
 - `x.com` and legacy `twitter.com` URLs
 
 X changes its site frequently, so extraction can temporarily break even when the script itself has not changed. Greasemonkey and Safari are not currently tested.
