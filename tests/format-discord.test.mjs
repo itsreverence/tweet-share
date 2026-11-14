@@ -877,6 +877,6 @@ test("a quoted post's own reply data is not shown, on its card, its field, or in
   const fallback = buildPlainFallbackPayloads({ ...sampleTweet, media: [], quote });
   assert.equal(card[0].embeds[1].description, "Quoted text", "the quote card is only the quoted text");
   for (const payloads of [inline, card, fallback]) {
-    assert.ok(!JSON.stringify(payloads).includes(parentUrl), "nothing links the quote's parent");
+    assert.doesNotMatch(JSON.stringify(payloads), /parent_user\/status\/900/, "nothing links the quote's parent");
   }
 });
