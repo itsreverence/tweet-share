@@ -87,3 +87,38 @@ test("recording a post records its own article, not one that quotes it", async (
   assert.ok(!fixture.markup.includes("private outer text"), "the quoting post's markup is not recorded");
   assert.ok(fixture.markup.includes("post 100"), "the post's own article is recorded");
 });
+
+test("a post that also shows the requested post's timestamp outside a quote box is not recorded", async () => {
+  const quoting = `<article data-testid="tweet"><a href="/other/status/1"><time>Jan 1</time></a>` +
+    `<div data-testid="tweetText">private outer text</div>` +
+    `<div><a href="/someone/status/100"><time>Jan 1</time></a><div>quoted</div></div></article>`;
+  assert.equal(await recordPage(quoting, {}).record("https://x.com/someone/status/100"), null, "the quoting post is skipped");
+  const fixture = await recordPage(quoting + article("100"), {}).record("https://x.com/someone/status/100");
+  assert.ok(!fixture.markup.includes("private outer text"), "the post's own article is recorded instead");
+});
+
+test("a post whose timestamp links to one of its photos is recorded", async () => {
+  const photoLinked = `<article data-testid="tweet"><a href="/someone/status/100/photo/1"><time>Jan 1</time></a>` +
+    `<div data-testid="tweetText">post 100</div></article>`;
+  const fixture = await recordPage(photoLinked, {}).record("https://x.com/someone/status/100");
+  assert.ok(fixture?.markup.includes("post 100"), "the post is recorded");
+});
+
+test("the recorder keeps every field the capture code reads", async () => {
+  const response = {
+    tweet: {
+      rest_id: "100",
+      legacy: {
+        created_at: "Thu Jan 01 00:00:00 +0000 2026",
+        full_text: "hi",
+        extended_entities: { media: [{ id: 7, type: "photo", media_url: "http://pbs.twimg.com/media/old.jpg" }] }
+      },
+      core: { user_results: { result: { rest_id: "5", legacy: { name: "N", screen_name: "someone", profile_image_url: "http://pbs.twimg.com/a_normal.jpg" } } } }
+    }
+  };
+  const fixture = await recordPage(article("100"), response).record("https://x.com/someone/status/100");
+  const [post] = fixture.responses;
+  assert.equal(post.legacy.extended_entities.media[0].media_url, "http://pbs.twimg.com/media/old.jpg", "media_url is kept");
+  assert.equal(post.legacy.extended_entities.media[0].id, 7, "a media id is kept");
+  assert.equal(post.core.user_results.result.legacy.profile_image_url, "http://pbs.twimg.com/a_normal.jpg", "profile_image_url is kept");
+});

@@ -5,8 +5,8 @@
   if (window.tdsRecord) return;
   const nodes = new Map();
   const pickUrls = (urls) => urls?.map(({ url, expanded_url, display_url }) => ({ url, expanded_url, display_url }));
-  const pickMedia = (media) => media?.map(({ id_str, media_key, type, url, media_url_https, ext_alt_text, video_info }) => ({
-    id_str, media_key, type, url, media_url_https, ext_alt_text,
+  const pickMedia = (media) => media?.map(({ id, id_str, media_key, type, url, media_url, media_url_https, ext_alt_text, video_info }) => ({
+    id, id_str, media_key, type, url, media_url, media_url_https, ext_alt_text,
     video_info: video_info && { variants: video_info.variants?.map(({ bitrate, content_type, url }) => ({ bitrate, content_type, url })) }
   }));
   const pickEntities = (entities) => entities && { urls: pickUrls(entities.urls), media: pickMedia(entities.media) };
@@ -26,7 +26,12 @@
     entity_set: { urls: pickUrls(result.note_tweet_results?.result?.entity_set?.urls) }
   } } };
   const pickUser = (result) => result?.legacy
-    ? { rest_id: result.rest_id, legacy: { name: result.legacy.name, screen_name: result.legacy.screen_name, profile_image_url_https: result.legacy.profile_image_url_https } }
+    ? { rest_id: result.rest_id, legacy: {
+      name: result.legacy.name,
+      screen_name: result.legacy.screen_name,
+      profile_image_url: result.legacy.profile_image_url,
+      profile_image_url_https: result.legacy.profile_image_url_https
+    } }
     : undefined;
   const pick = (node) => ({
     rest_id: node.rest_id,
@@ -67,12 +72,16 @@
   };
   window.tdsRecord = (url, name) => {
     const id = url.match(/status\/(\d+)/)?.[1];
-    // A post's own timestamp links to it; a quote inside another post does not count, or a public quote could record
-    // the post that quotes it.
-    const ownsPermalink = (item) => [...item.querySelectorAll("a[href] time")].some((time) => {
-      const link = time.closest("a");
-      return link.closest("article") === item && !link.closest('[role="link"]') && new URL(link.href).pathname.endsWith(`/status/${id}`);
-    });
+    // Every timestamp outside a quote box must link to this post. A post that quotes it links elsewhere too, and is
+    // skipped even if that leaves nothing to record: recording the wrong post could save a protected one.
+    const statusIds = (item) => [...item.querySelectorAll("a[href] time")]
+      .map((time) => time.closest("a"))
+      .filter((link) => link.closest("article") === item && !link.closest('[role="link"]'))
+      .map((link) => new URL(link.href).pathname.match(/\/status\/(\d+)(?:\/|$)/)?.[1] || "");
+    const ownsPermalink = (item) => {
+      const ids = statusIds(item);
+      return ids.length > 0 && ids.every((value) => value === id);
+    };
     const article = [...document.querySelectorAll('article[data-testid="tweet"]')].find(ownsPermalink);
     if (!article) return console.log("TDS fixture: scroll until the post is on screen, then run this again.");
     const node = nodes.get(id);
