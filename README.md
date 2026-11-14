@@ -29,14 +29,16 @@ Destinations live in userscript-manager storage on your machine, not in this rep
 - Post text, permalink, author, and timestamp
 - Images and native video attachments when eligible
 - Quoted posts, with a choice to include or omit the quote
+- For a reply, a line naming the post it answers, linked to that post
 - Only content available to the signed-in browser session
 
 Media upload is automatic and bounded. If a video is unavailable or too large to upload, the share includes one direct playable video link instead.
 
 ## Compatibility
 
-- Current Chrome- and Firefox-family browsers
-- Current Tampermonkey and Violentmonkey releases
+- Tested with Violentmonkey on Brave; other Chromium-family browsers (Chrome, Edge) should behave the same
+- Tampermonkey is expected to work but is not regularly tested
+- Firefox works, but long posts can arrive cut off because the script does not read X's network traffic there
 - `x.com` and legacy `twitter.com` URLs
 
 X changes its site frequently, so extraction can temporarily break even when the script itself has not changed. Greasemonkey and Safari are not currently tested.
@@ -49,7 +51,7 @@ X changes its site frequently, so extraction can temporarily break even when the
 - **A share ends with "Post cut off":** the full text was not available when you shared it. Open the post directly and share from there. This is more likely in Firefox, where the script does not read X's network traffic.
 - **Install link downloads instead of opening:** import the downloaded `.user.js` through your userscript manager.
 
-If the problem continues, follow [SUPPORT.md](SUPPORT.md) and submit a sanitized bug report. Never include a live webhook URL, cookies, session details, or private post content.
+If the problem continues, follow [SUPPORT.md](SUPPORT.md) and submit a sanitized bug report. Paste the text from the manager menu's **Copy diagnostics** item; it holds no posts, names, channels, or webhooks. Never include a live webhook URL, cookies, session details, or private post content.
 
 ## Responsible use
 
