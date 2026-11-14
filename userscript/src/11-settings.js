@@ -258,6 +258,7 @@ function registerSettingsMenuCommand() {
       : () => previousFocus?.focus({ preventScroll: true });
     openSettingsModal(returnFocus);
   });
+  register("Copy diagnostics", copyDiagnostics);
 }
 
 registerSettingsMenuCommand();

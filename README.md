@@ -46,6 +46,7 @@ X changes its site frequently, so extraction can temporarily break even when the
 - **No Share to Discord item:** confirm the userscript is enabled for `x.com`, then reload the page.
 - **Webhook test fails:** create a fresh Discord webhook, confirm its URL begins with `https://discord.com/api/webhooks/`, and check whether the channel still exists.
 - **Missing media or quote details:** open the post directly and retry. X may not expose every media variant in every timeline view.
+- **A share ends with "Post cut off":** the full text was not available when you shared it. Open the post directly and share from there. This is more likely in Firefox, where the script does not read X's network traffic.
 - **Install link downloads instead of opening:** import the downloaded `.user.js` through your userscript manager.
 
 If the problem continues, follow [SUPPORT.md](SUPPORT.md) and submit a sanitized bug report. Never include a live webhook URL, cookies, session details, or private post content.
