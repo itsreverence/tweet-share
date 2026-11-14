@@ -122,3 +122,34 @@ test("the recorder keeps every field the capture code reads", async () => {
   assert.equal(post.legacy.extended_entities.media[0].id, 7, "a media id is kept");
   assert.equal(post.core.user_results.result.legacy.profile_image_url, "http://pbs.twimg.com/a_normal.jpg", "profile_image_url is kept");
 });
+
+test("a post is skipped when any of its timestamps opens another post, wherever it sits", async () => {
+  const outer = `<article data-testid="tweet"><div role="link"><a href="/other/status/1"><time>Jan 1</time></a></div>` +
+    `<div data-testid="tweetText">private outer text</div><a href="/someone/status/100"><time>Jan 1</time></a></article>`;
+  assert.equal(await recordPage(outer, {}).record("https://x.com/someone/status/100"), null, "the outer post is skipped");
+});
+
+test("the recorded markup leaves out nested posts, the repost line, and the action row's labels", async () => {
+  const body = `<article data-testid="tweet"><div data-testid="socialContext">You reposted</div>` +
+    `<a href="/someone/status/100"><time>Jan 1</time></a><div data-testid="tweetText">post 100</div>` +
+    `<article data-testid="tweet"><a href="/x/status/200"><time>Jan 1</time></a><div>nested post 200</div></article>` +
+    `<div role="group" aria-label="5 likes, Liked, Bookmarked"><button aria-label="Like, Liked">1</button>` +
+    `<button aria-label="Share post, viewer extra">S</button></div></article>`;
+  const fixture = await recordPage(body, {}).record("https://x.com/someone/status/100");
+  for (const leaked of ["You reposted", "nested post 200", "Liked", "Bookmarked", "viewer extra"]) {
+    assert.ok(!fixture.markup.includes(leaked), `${leaked} is not recorded`);
+  }
+  assert.match(fixture.markup, /data-testid="share"/, "the share button stays for the script to find");
+  assert.ok(fixture.markup.includes("post 100"), "the post itself is recorded");
+});
+
+test("an allow-listed field holding an object is dropped, not copied", async () => {
+  const response = {
+    tweet: {
+      rest_id: "100",
+      legacy: { created_at: "Thu Jan 01 00:00:00 +0000 2026", full_text: { viewer_sentinel: { bookmarked: true } } }
+    }
+  };
+  const fixture = await recordPage(article("100"), response).record("https://x.com/someone/status/100");
+  assert.ok(!JSON.stringify(fixture).includes("viewer_sentinel"), "the object is not recorded");
+});

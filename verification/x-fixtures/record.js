@@ -4,41 +4,31 @@
 (() => {
   if (window.tdsRecord) return;
   const nodes = new Map();
-  const pickUrls = (urls) => urls?.map(({ url, expanded_url, display_url }) => ({ url, expanded_url, display_url }));
-  const pickMedia = (media) => media?.map(({ id, id_str, media_key, type, url, media_url, media_url_https, ext_alt_text, video_info }) => ({
-    id, id_str, media_key, type, url, media_url, media_url_https, ext_alt_text,
-    video_info: video_info && { variants: video_info.variants?.map(({ bitrate, content_type, url }) => ({ bitrate, content_type, url })) }
-  }));
-  const pickEntities = (entities) => entities && { urls: pickUrls(entities.urls), media: pickMedia(entities.media) };
-  const pickLegacy = (legacy = {}) => ({
-    full_text: legacy.full_text,
-    text: legacy.text,
-    created_at: legacy.created_at,
-    user_id_str: legacy.user_id_str,
-    quoted_status_id_str: legacy.quoted_status_id_str,
-    in_reply_to_status_id_str: legacy.in_reply_to_status_id_str,
-    in_reply_to_screen_name: legacy.in_reply_to_screen_name,
-    entities: pickEntities(legacy.entities),
-    extended_entities: pickEntities(legacy.extended_entities)
-  });
-  const pickNote = (result) => result && { note_tweet_results: { result: {
-    text: result.note_tweet_results?.result?.text,
-    entity_set: { urls: pickUrls(result.note_tweet_results?.result?.entity_set?.urls) }
-  } } };
-  const pickUser = (result) => result?.legacy
-    ? { rest_id: result.rest_id, legacy: {
-      name: result.legacy.name,
-      screen_name: result.legacy.screen_name,
-      profile_image_url: result.legacy.profile_image_url,
-      profile_image_url_https: result.legacy.profile_image_url_https
-    } }
-    : undefined;
-  const pick = (node) => ({
-    rest_id: node.rest_id,
-    legacy: pickLegacy(node.legacy),
-    note_tweet: pickNote(node.note_tweet),
-    core: { user_results: { result: pickUser(node.core?.user_results?.result) } }
-  });
+  // The fields the script reads. `true` keeps a string, number or boolean; anything else is dropped.
+  const URLS = [{ url: true, expanded_url: true, display_url: true }];
+  const MEDIA = [{
+    id: true, id_str: true, media_key: true, type: true, url: true, media_url: true, media_url_https: true, ext_alt_text: true,
+    video_info: { variants: [{ bitrate: true, content_type: true, url: true }] }
+  }];
+  const ENTITIES = { urls: URLS, media: MEDIA };
+  const POST = {
+    rest_id: true,
+    legacy: {
+      full_text: true, text: true, created_at: true, user_id_str: true, quoted_status_id_str: true,
+      in_reply_to_status_id_str: true, in_reply_to_screen_name: true, entities: ENTITIES, extended_entities: ENTITIES
+    },
+    note_tweet: { note_tweet_results: { result: { text: true, entity_set: { urls: URLS } } } },
+    core: { user_results: { result: {
+      rest_id: true,
+      legacy: { name: true, screen_name: true, profile_image_url: true, profile_image_url_https: true }
+    } } }
+  };
+  const pick = (schema, value) => {
+    if (schema === true) return ["string", "number", "boolean"].includes(typeof value) ? value : undefined;
+    if (Array.isArray(schema)) return Array.isArray(value) ? value.map((item) => pick(schema[0], item)) : undefined;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    return Object.fromEntries(Object.keys(schema).map((key) => [key, pick(schema[key], value[key])]));
+  };
   const visit = (value) => {
     if (!value || typeof value !== "object") return;
     if (value.rest_id && value.legacy?.created_at) nodes.set(String(value.rest_id), value);
@@ -55,38 +45,42 @@
   const KEEP = new Set(["data-testid", "href", "src", "alt", "datetime", "role", "dir", "aria-label", "tabindex"]);
   const cleanMarkup = (article) => {
     const clone = article.cloneNode(true);
-    clone.querySelectorAll("script, style, svg *").forEach((node) => node.remove());
-    for (const node of [clone, ...clone.querySelectorAll("*")]) {
-      for (const { name } of [...node.attributes]) if (!KEEP.has(name)) node.removeAttribute(name);
-    }
-    // The action row shows the viewer's likes and bookmarks.
+    // Another post nested in this one, the "You reposted" line, and the action row's likes and bookmarks are not this
+    // post, or describe the viewer.
+    clone.querySelectorAll('script, style, svg *, article, [data-testid="socialContext"]').forEach((node) => node.remove());
     clone.querySelectorAll('[role="group"]').forEach((group) => {
       const share = group.querySelector('[aria-label*="hare"]');
       group.replaceChildren();
+      group.removeAttribute("aria-label");
       if (share) {
+        share.replaceChildren();
+        share.setAttribute("aria-label", "Share post");
         share.setAttribute("data-testid", "share");
         group.append(share);
       }
     });
+    for (const node of [clone, ...clone.querySelectorAll("*")]) {
+      for (const { name } of [...node.attributes]) if (!KEEP.has(name)) node.removeAttribute(name);
+    }
     return clone.outerHTML;
   };
   window.tdsRecord = (url, name) => {
     const id = url.match(/status\/(\d+)/)?.[1];
-    // Every timestamp outside a quote box must link to this post. A post that quotes it links elsewhere too, and is
-    // skipped even if that leaves nothing to record: recording the wrong post could save a protected one.
-    const statusIds = (item) => [...item.querySelectorAll("a[href] time")]
-      .map((time) => time.closest("a"))
-      .filter((link) => link.closest("article") === item && !link.closest('[role="link"]'))
-      .map((link) => new URL(link.href).pathname.match(/\/status\/(\d+)(?:\/|$)/)?.[1] || "");
+    // Every timestamp link in the post must open this post. X does not link a quote's timestamp, so a post that links
+    // another post's timestamp anywhere is skipped, even if that leaves nothing to record: the wrong post could be a
+    // protected one.
     const ownsPermalink = (item) => {
-      const ids = statusIds(item);
+      const ids = [...item.querySelectorAll("a[href] time")]
+        .map((time) => time.closest("a"))
+        .filter((link) => link.closest("article") === item)
+        .map((link) => new URL(link.href).pathname.match(/\/status\/(\d+)(?:\/|$)/)?.[1] || "");
       return ids.length > 0 && ids.every((value) => value === id);
     };
     const article = [...document.querySelectorAll('article[data-testid="tweet"]')].find(ownsPermalink);
-    if (!article) return console.log("TDS fixture: scroll until the post is on screen, then run this again.");
+    if (!article) return console.log("TDS fixture: no post on screen links only to this post. Scroll to it and run this again, or pick another post.");
     const node = nodes.get(id);
     const quoted = node?.legacy?.quoted_status_id_str && nodes.get(node.legacy.quoted_status_id_str);
-    const fixture = { name, url, recordedAt: new Date().toISOString(), markup: cleanMarkup(article), responses: [node, quoted].filter(Boolean).map(pick) };
+    const fixture = { name, url, recordedAt: new Date().toISOString(), markup: cleanMarkup(article), responses: [node, quoted].filter(Boolean).map((node) => pick(POST, node)) };
     const link = document.createElement("a");
     link.href = URL.createObjectURL(new Blob([JSON.stringify(fixture, null, 1)], { type: "application/json" }));
     link.download = `${name}.json`;
